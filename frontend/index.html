@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OBE Automate</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700;1,9..144,300&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:    #0D1B2A;
+      --navy2:   #162032;
+      --navy3:   #1E2D42;
+      --slate:   #2A3A52;
+      --amber:   #F5A623;
+      --amber2:  #FFB940;
+      --cyan:    #4FC3F7;
+      --green:   #4CAF50;
+      --red:     #EF5350;
+      --white:   #F0F4FA;
+      --muted:   #7A8FA6;
+      --border:  rgba(255,255,255,0.07);
+      --card:    rgba(255,255,255,0.04);
+      --radius:  12px;
+      --font-display: 'Fraunces', Georgia, serif;
+      --font-body:    'DM Sans', sans-serif;
+      --font-mono:    'DM Mono', monospace;
+    }
+
+    html, body, #root {
+      height: 100%;
+      background: var(--navy);
+      color: var(--white);
+      font-family: var(--font-body);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--navy2); }
+    ::-webkit-scrollbar-thumb { background: var(--slate); border-radius: 3px; }
+
+    /* ── Layout ── */
+    .app { display: flex; min-height: 100vh; }
+
+    .sidebar {
+      width: 240px;
+      min-height: 100vh;
+      background: var(--navy2);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 100;
+    }
+
+    .sidebar-logo {
+      padding: 28px 24px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-logo .wordmark {
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--white);
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+    }
+    .sidebar-logo .wordmark span { color: var(--amber); }
+    .sidebar-logo .tagline {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-top: 4px;
+      font-family: var(--font-mono);
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      padding: 16px 0;
+    }
+
+    .nav-section-label {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+      padding: 12px 24px 6px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 24px;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.15s;
+      border-left: 3px solid transparent;
+      text-decoration: none;
+    }
+    .nav-item:hover { color: var(--white); background: var(--card); }
+    .nav-item.active {
+      color: var(--amber);
+      background: rgba(245,166,35,0.08);
+      border-left-color: var(--amber);
+    }
+    .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+    .sidebar-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+    }
+    .api-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(79,195,247,0.1);
+      color: var(--cyan);
+      border: 1px solid rgba(79,195,247,0.2);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: all 0.15s;
+      text-decoration: none;
+    }
+    .api-badge:hover { background: rgba(79,195,247,0.2); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* ── Main content ── */
+    .main {
+      margin-left: 240px;
+      flex: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      height: 60px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 32px;
+      background: rgba(13,27,42,0.8);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      gap: 12px;
+    }
+    .topbar-title {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 300;
+      color: var(--white);
+    }
+    .topbar-title strong { font-weight: 700; }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    .course-pill {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    .page { padding: 32px; max-width: 1100px; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .card-title {
+      font-family: var(--font-display);
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 4px;
+    }
+    .card-sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    /* ── Hero (home page) ── */
+    .hero {
+      padding: 56px 32px 40px;
+      max-width: 1100px;
+      position: relative;
+    }
+    .hero-eyebrow {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--amber);
+      margin-bottom: 16px;
+    }
+    .hero-title {
+      font-family: var(--font-display);
+      font-size: clamp(36px, 5vw, 58px);
+      font-weight: 700;
+      line-height: 1.1;
+      color: var(--white);
+      margin-bottom: 16px;
+    }
+    .hero-title em { color: var(--amber); font-style: italic; }
+    .hero-sub {
+      font-size: 16px;
+      color: var(--muted);
+      max-width: 520px;
+      line-height: 1.7;
+      margin-bottom: 36px;
+    }
+
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .stat-card {
+      background: var(--navy3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--amber);
+    }
+    .stat-value {
+      font-family: var(--font-display);
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--white);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-family: var(--font-mono);
+    }
+
+    .flow-steps {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0;
+      margin-bottom: 32px;
+      background: var(--navy3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .flow-step {
+      padding: 20px 16px;
+      text-align: center;
+      border-right: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.15s;
+      position: relative;
+    }
+    .flow-step:last-child { border-right: none; }
+    .flow-step:hover { background: var(--card); }
+    .flow-step.done { background: rgba(76,175,80,0.06); }
+    .flow-step .step-num {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .flow-step .step-icon { font-size: 24px; margin-bottom: 8px; }
+    .flow-step .step-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--white);
+      margin-bottom: 4px;
+    }
+    .flow-step .step-desc { font-size: 11px; color: var(--muted); }
+    .flow-step .step-check {
+      position: absolute;
+      top: 10px; right: 10px;
+      font-size: 12px;
+      color: var(--green);
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.15s;
+      text-decoration: none;
+    }
+    .btn-primary {
+      background: var(--amber);
+      color: var(--navy);
+    }
+    .btn-primary:hover { background: var(--amber2); transform: translateY(-1px); }
+    .btn-secondary {
+      background: var(--card);
+      color: var(--white);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: var(--slate); }
+    .btn-danger {
+      background: rgba(239,83,80,0.15);
+      color: var(--red);
+      border: 1px solid rgba(239,83,80,0.3);
+    }
+    .btn-danger:hover { background: rgba(239,83,80,0.25); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+    .btn-sm { padding: 6px 14px; font-size: 13px; }
+
+    /* ── Forms ── */
+    .form-group { margin-bottom: 18px; }
+    .form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 8px;
+      font-family: var(--font-mono);
+    }
+    .form-input {
+      width: 100%;
+      background: var(--navy3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--white);
+      font-family: var(--font-body);
+      font-size: 14px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-input:focus { border-color: var(--amber); }
+    .form-input::placeholder { color: var(--muted); }
+    select.form-input { cursor: pointer; }
+    select.form-input option { background: var(--navy3); }
+
+    .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+    /* ── Upload zone ── */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+    .upload-zone:hover, .upload-zone.drag-over {
+      border-color: var(--amber);
+      background: rgba(245,166,35,0.04);
+    }
+    .upload-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+    .upload-icon { font-size: 40px; margin-bottom: 12px; }
+    .upload-label { font-size: 15px; color: var(--white); font-weight: 500; margin-bottom: 6px; }
+    .upload-hint { font-size: 12px; color: var(--muted); }
+
+    /* ── CO / PO dynamic rows ── */
+    .dynamic-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+      background: var(--navy3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .dynamic-row .row-num {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      padding-top: 12px;
+      min-width: 24px;
+      text-align: center;
+    }
+    .dynamic-row .row-fields { flex: 1; display: flex; gap: 10px; }
+    .dynamic-row .row-remove {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 8px;
+      transition: color 0.15s;
+    }
+    .dynamic-row .row-remove:hover { color: var(--red); }
+
+    /* ── Matrix table ── */
+    .matrix-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .matrix-table th, .matrix-table td {
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      text-align: center;
+    }
+    .matrix-table th {
+      background: var(--navy3);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .matrix-table td { background: var(--navy2); }
+    .matrix-table select {
+      background: transparent;
+      border: none;
+      color: var(--white);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      text-align: center;
+      cursor: pointer;
+      width: 48px;
+      outline: none;
+    }
+
+    /* ── Status / alerts ── */
+    .alert {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+    .alert-success { background: rgba(76,175,80,0.1); border: 1px solid rgba(76,175,80,0.25); color: #81C784; }
+    .alert-error   { background: rgba(239,83,80,0.1); border: 1px solid rgba(239,83,80,0.25); color: #EF9A9A; }
+    .alert-info    { background: rgba(79,195,247,0.1); border: 1px solid rgba(79,195,247,0.25); color: var(--cyan); }
+    .alert-warn    { background: rgba(245,166,35,0.1); border: 1px solid rgba(245,166,35,0.25); color: var(--amber); }
+
+    /* ── Loader spinner ── */
+    .spinner {
+      width: 20px; height: 20px;
+      border: 2px solid rgba(255,255,255,0.1);
+      border-top-color: var(--amber);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Download button ── */
+    .download-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--navy3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 10px;
+    }
+    .download-info .file-name { font-size: 14px; font-weight: 500; color: var(--white); }
+    .download-info .file-meta { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+
+    /* ── Attainment bar ── */
+    .attainment-bar-wrap { margin-bottom: 12px; }
+    .attainment-bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .attainment-bar-label .co-id { font-family: var(--font-mono); font-weight: 500; color: var(--white); }
+    .attainment-bar-label .pct { font-family: var(--font-mono); color: var(--muted); }
+    .attainment-bar-track {
+      height: 8px;
+      background: var(--navy3);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .attainment-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* ── Status badge ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-green { background: rgba(76,175,80,0.15); color: #81C784; border: 1px solid rgba(76,175,80,0.3); }
+    .badge-red   { background: rgba(239,83,80,0.15);  color: #EF9A9A; border: 1px solid rgba(239,83,80,0.3); }
+    .badge-amber { background: rgba(245,166,35,0.15); color: var(--amber); border: 1px solid rgba(245,166,35,0.3); }
+    .badge-cyan  { background: rgba(79,195,247,0.15); color: var(--cyan); border: 1px solid rgba(79,195,247,0.3); }
+
+    /* ── Section heading ── */
+    .section-heading {
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 6px;
+    }
+    .section-sub { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+
+    /* ── Divider ── */
+    .divider { height: 1px; background: var(--border); margin: 24px 0; }
+
+    /* ── Course list ── */
+    .course-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--navy3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .course-card:hover { border-color: var(--amber); background: rgba(245,166,35,0.04); }
+    .course-card.selected { border-color: var(--amber); background: rgba(245,166,35,0.06); }
+    .course-code { font-family: var(--font-mono); font-size: 12px; color: var(--amber); margin-bottom: 2px; }
+    .course-name { font-size: 15px; font-weight: 600; color: var(--white); }
+    .course-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+    .tab {
+      padding: 10px 20px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: all 0.15s;
+    }
+    .tab:hover { color: var(--white); }
+    .tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+    /* ── Marks upload table ── */
+    .marks-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .marks-table th, .marks-table td {
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+    }
+    .marks-table th {
+      background: var(--navy3);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .marks-table td { background: var(--navy2); }
+    .marks-table input {
+      background: transparent;
+      border: none;
+      color: var(--white);
+      width: 60px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      outline: none;
+      text-align: center;
+    }
+    .marks-table input:focus { border-bottom: 1px solid var(--amber); }
+
+    .add-student-btn {
+      background: none;
+      border: 1px dashed var(--border);
+      color: var(--muted);
+      border-radius: 6px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 13px;
+      width: 100%;
+      transition: all 0.15s;
+      margin-top: 8px;
+    }
+    .add-student-btn:hover { border-color: var(--amber); color: var(--amber); }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+const API = {
+  base: '',
+
+  async get(path) {
+    const r = await fetch(this.base + path);
+    if (!r.ok) throw new Error((await r.json()).detail || 'Request failed');
+    return r.json();
+  },
+
+  async post(path, body) {
+    const r = await fetch(this.base + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Request failed');
+    return r.json();
+  },
+
+  async postForm(path, formData) {
+    const r = await fetch(this.base + path, { method: 'POST', body: formData });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Upload failed');
+    return r.json();
+  },
+
+  download(path, filename) {
+    const a = document.createElement('a');
+    a.href = this.base + path;
+    a.download = filename;
+    a.click();
+  },
+};
+
+// ── Router (simple hash-based) ────────────────────────────────────────────────
+function useRoute() {
+  const [route, setRoute] = useState(window.location.hash || '#home');
+  useEffect(() => {
+    const handler = () => setRoute(window.location.hash || '#home');
+    window.addEventListener('hashchange', handler);
+    return () => window.removeEventListener('hashchange', handler);
+  }, []);
+  const navigate = (r) => { window.location.hash = r; };
+  return [route, navigate];
+}
+
+// ── Global state (course context) ─────────────────────────────────────────────
+function useCourseState() {
+  const [activeCourse, setActiveCourse] = useState(null); // {id, name, code}
+  return { activeCourse, setActiveCourse };
+}
+
+// ── Shared components ─────────────────────────────────────────────────────────
+
+function Alert({ type = 'info', children }) {
+  const icons = { success: '✓', error: '✕', info: 'ℹ', warn: '⚠' };
+  return (
+    <div className={`alert alert-${type}`}>
+      <span>{icons[type]}</span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function Spinner() {
+  return <span className="spinner" />;
+}
+
+function DownloadCard({ label, meta, url, filename }) {
+  return (
+    <div className="download-card">
+      <div className="download-info">
+        <div className="file-name">{label}</div>
+        <div className="file-meta">{meta}</div>
+      </div>
+      <button className="btn btn-primary btn-sm" onClick={() => API.download(url, filename)}>
+        ⬇ Download
+      </button>
+    </div>
+  );
+}
+
+function AttainmentBar({ id, pct, target = 60 }) {
+  const color = pct >= target ? 'var(--green)' : pct >= target * 0.8 ? 'var(--amber)' : 'var(--red)';
+  return (
+    <div className="attainment-bar-wrap">
+      <div className="attainment-bar-label">
+        <span className="co-id">{id}</span>
+        <span className="pct">{pct}%</span>
+      </div>
+      <div className="attainment-bar-track">
+        <div className="attainment-bar-fill" style={{ width: `${Math.min(pct, 100)}%`, background: color }} />
+      </div>
+    </div>
+  );
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+function Sidebar({ route, navigate, activeCourse }) {
+  const items = [
+    { hash: '#home',       icon: '⌂', label: 'Home' },
+    { hash: '#courses',    icon: '◈', label: 'Courses' },
+    { hash: '#syllabus',   icon: '⊞', label: 'Upload Syllabus', section: 'FACULTY FLOW' },
+    { hash: '#setup',      icon: '◎', label: 'Course Setup' },
+    { hash: '#sessions',   icon: '▦', label: 'Session Plan' },
+    { hash: '#evaluation', icon: '◐', label: 'Evaluation Plan' },
+    { hash: '#marks',      icon: '✎', label: 'Upload Marks', section: 'ATTAINMENT' },
+    { hash: '#attainment', icon: '◉', label: 'CO/PO Attainment' },
+    { hash: '#reports',    icon: '⊟', label: 'Reports' },
+  ];
+
+  return (
+    <div className="sidebar">
+      <div className="sidebar-logo">
+        <div className="wordmark">OBE<span>.</span>Auto</div>
+        <div className="tagline">Accreditation Engine</div>
+      </div>
+      <nav className="sidebar-nav">
+        {items.map((item, i) => (
+          <React.Fragment key={item.hash}>
+            {item.section && <div className="nav-section-label">{item.section}</div>}
+            <div
+              className={`nav-item ${route === item.hash ? 'active' : ''}`}
+              onClick={() => navigate(item.hash)}
+            >
+              <span className="icon">{item.icon}</span>
+              {item.label}
+            </div>
+          </React.Fragment>
+        ))}
+      </nav>
+      <div className="sidebar-footer">
+        <a href="/docs" target="_blank" className="api-badge">
+          <span className="dot" /> API Docs
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// ── Page: Home ────────────────────────────────────────────────────────────────
+function HomePage({ navigate, activeCourse, setActiveCourse }) {
+  const [courses, setCourses] = useState([]);
+  const [stats, setStats] = useState({ courses: 0 });
+
+  useEffect(() => {
+    API.get('/courses/').then(data => {
+      setCourses(data.data || data);
+      setStats(s => ({ ...s, courses: (data.data || data).length }));
+    }).catch(() => {});
+  }, []);
+
+  const steps = [
+    { icon: '⊞', name: 'Upload Syllabus', desc: 'PDF → AI extraction', hash: '#syllabus' },
+    { icon: '◎', name: 'Course Setup',    desc: 'CO, PO, matrix',      hash: '#setup' },
+    { icon: '▦', name: 'Session Plan',    desc: 'AI-generated',        hash: '#sessions' },
+    { icon: '◐', name: 'Eval Plan',       desc: 'CIE + SEE design',    hash: '#evaluation' },
+    { icon: '◉', name: 'Attainment',      desc: 'NBA/NAAC report',     hash: '#attainment' },
+  ];
+
+  return (
+    <div className="page">
+      <div className="hero">
+        <div className="hero-eyebrow">OBE Automate — v0.1.0</div>
+        <h1 className="hero-title">
+          Outcome-Based<br /><em>Education, Automated.</em>
+        </h1>
+        <p className="hero-sub">
+          From syllabus PDF to NBA/NAAC accreditation report — fully automated using AI.
+          Built for engineering colleges. Trusted by faculty.
+        </p>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button className="btn btn-primary" onClick={() => navigate('#syllabus')}>
+            ↗ Start New Course
+          </button>
+          <button className="btn btn-secondary" onClick={() => navigate('#courses')}>
+            View All Courses
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: '0 32px' }}>
+        <div className="stat-row">
+          <div className="stat-card">
+            <div className="stat-value">{stats.courses}</div>
+            <div className="stat-label">Courses</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: 'var(--amber)' }}>AI</div>
+            <div className="stat-label">Powered Plans</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: 'var(--cyan)' }}>NBA</div>
+            <div className="stat-label">Format Reports</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: 'var(--green)' }}>∞</div>
+            <div className="stat-label">LLM Fallbacks</div>
+          </div>
+        </div>
+
+        <div className="section-heading">Faculty Workflow</div>
+        <div className="section-sub">Click any step to jump directly to it</div>
+        <div className="flow-steps">
+          {steps.map((s, i) => (
+            <div className="flow-step" key={i} onClick={() => navigate(s.hash)}>
+              <div className="step-num">0{i + 1}</div>
+              <div className="step-icon">{s.icon}</div>
+              <div className="step-name">{s.name}</div>
+              <div className="step-desc">{s.desc}</div>
+            </div>
+          ))}
+        </div>
+
+        {activeCourse && (
+          <Alert type="info">
+            Active course: <strong>{activeCourse.name}</strong> ({activeCourse.code}) — ID {activeCourse.id}
+          </Alert>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Page: Courses ─────────────────────────────────────────────────────────────
+function CoursesPage({ activeCourse, setActiveCourse, navigate }) {
+  const [courses, setCourses] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    API.get('/courses/').then(data => {
+      setCourses(data.data || data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const select = (c) => {
+    setActiveCourse({ id: c.id, name: c.course_name, code: c.course_code });
+  };
+
+  return (
+    <div className="page">
+      <div className="section-heading">All Courses</div>
+      <div className="section-sub">Select a course to make it active, then use the sidebar to navigate to any feature.</div>
+
+      {loading && <Spinner />}
+
+      {!loading && courses.length === 0 && (
+        <Alert type="warn">
+          No courses found. <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => navigate('#setup')}>Set up your first course →</span>
+        </Alert>
+      )}
+
+      {courses.map(c => (
+        <div
+          key={c.id}
+          className={`course-card ${activeCourse?.id === c.id ? 'selected' : ''}`}
+          onClick={() => select(c)}
+        >
+          <div>
+            <div className="course-code">{c.course_code}</div>
+            <div className="course-name">{c.course_name}</div>
+            <div className="course-meta">{c.department} · {c.semester} · {c.academic_year} · {c.faculty_name}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {activeCourse?.id === c.id && <span className="badge badge-amber">Active</span>}
+            <span className="badge badge-cyan">ID: {c.id}</span>
+          </div>
+        </div>
+      ))}
+
+      <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={() => navigate('#setup')}>
+        + New Course
+      </button>
+    </div>
+  );
+}
+
+// ── Page: Syllabus Upload ─────────────────────────────────────────────────────
+function SyllabusPage() {
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [drag, setDrag] = useState(false);
+
+  const upload = async () => {
+    if (!file) return;
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const data = await API.postForm('/syllabus/upload', fd);
+      setResult(data);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="page">
+      <div className="section-heading">Upload Syllabus</div>
+      <div className="section-sub">Upload a PDF syllabus — Gemini AI will extract course outcomes, POs, and metadata automatically.</div>
+
+      <div className="card">
+        <div className="card-title">PDF Syllabus</div>
+        <div className="card-sub">Supported: PDF only, max 10MB</div>
+
+        <div
+          className={`upload-zone ${drag ? 'drag-over' : ''}`}
+          onDragOver={e => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) setFile(f); }}
+        >
+          <input
+            type="file" accept=".pdf"
+            onChange={e => setFile(e.target.files[0])}
+          />
+          <div className="upload-icon">⊞</div>
+          <div className="upload-label">
+            {file ? file.name : 'Drop your PDF here or click to browse'}
+          </div>
+          <div className="upload-hint">{file ? `${(file.size/1024).toFixed(1)} KB` : 'PDF files only'}</div>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <button className="btn btn-primary" onClick={upload} disabled={!file || loading}>
+            {loading ? <><Spinner /> Extracting…</> : '⊞ Extract with AI'}
+          </button>
+        </div>
+      </div>
+
+      {error && <Alert type="error">{error}</Alert>}
+
+      {result && (
+        <div className="card">
+          <div className="card-title">✓ Extraction Complete</div>
+          <div className="card-sub">Review the extracted data below, then proceed to Course Setup.</div>
+          <pre style={{ background: 'var(--navy3)', borderRadius: 8, padding: 16, fontSize: 12, color: 'var(--cyan)', overflow: 'auto', maxHeight: 300 }}>
+            {JSON.stringify(result.data || result, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page: Course Setup ────────────────────────────────────────────────────────
+function CourseSetupPage({ setActiveCourse, navigate }) {
+  const bloomLevels = ['Remember', 'Understand', 'Apply', 'Analyze', 'Evaluate', 'Create'];
+
+  const [form, setForm] = useState({
+    course_name: '', course_code: '', credits: 4,
+    total_hours: 60, faculty_name: '', department: '',
+    semester: '5th', academic_year: '2024-25',
+  });
+  const [cos, setCos] = useState([{ co_id: 'CO1', statement: '', bloom_level: 'Understand' }]);
+  const [pos, setPos] = useState([{ po_id: 'PO1', statement: 'Engineering Knowledge' }]);
+  const [matrix, setMatrix] = useState({ CO1: { PO1: 2 } });
+  const [evalCfg, setEvalCfg] = useState({
+    continuous_assessment_total: 30,
+    end_sem_total: 60,
+    components: { Quiz: 10, 'Unit Test': 20 },
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [tab, setTab] = useState('basic');
+
+  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const addCO = () => {
+    const id = `CO${cos.length + 1}`;
+    setCos(c => [...c, { co_id: id, statement: '', bloom_level: 'Understand' }]);
+    setMatrix(m => {
+      const nm = { ...m, [id]: {} };
+      pos.forEach(p => { nm[id][p.po_id] = 0; });
+      return nm;
+    });
+  };
+
+  const addPO = () => {
+    const id = `PO${pos.length + 1}`;
+    setPos(p => [...p, { po_id: id, statement: '' }]);
+    setMatrix(m => {
+      const nm = { ...m };
+      cos.forEach(c => { nm[c.co_id] = { ...(nm[c.co_id] || {}), [id]: 0 }; });
+      return nm;
+    });
+  };
+
+  const setMatrixVal = (coId, poId, v) => {
+    setMatrix(m => ({ ...m, [coId]: { ...(m[coId] || {}), [poId]: Number(v) } }));
+  };
+
+  const submit = async () => {
+    setLoading(true); setError(null); setSuccess(null);
+    try {
+      const payload = {
+        ...form,
+        credits: Number(form.credits),
+        total_hours: Number(form.total_hours),
+        cos, pos,
+        co_po_matrix: matrix,
+        evaluation_config: evalCfg,
+      };
+      const data = await API.post('/courses/setup', payload);
+      const c = data.data || data;
+      setSuccess(`Course "${c.course_name}" created with ID ${c.id}`);
+      setActiveCourse({ id: c.id, name: c.course_name, code: c.course_code });
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="page">
+      <div className="section-heading">Course Setup</div>
+      <div className="section-sub">Define course metadata, outcomes, and the CO-PO correlation matrix.</div>
+
+      <div className="tabs">
+        {['basic', 'outcomes', 'matrix', 'evaluation'].map(t => (
+          <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
+            {{ basic: 'Basic Info', outcomes: 'COs & POs', matrix: 'CO-PO Matrix', evaluation: 'Evaluation' }[t]}
+          </div>
+        ))}
+      </div>
+
+      {tab === 'basic' && (
+        <div className="card">
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Course Name</label>
+              <input className="form-input" value={form.course_name} onChange={e => setField('course_name', e.target.value)} placeholder="Operating Systems" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Course Code</label>
+              <input className="form-input" value={form.course_code} onChange={e => setField('course_code', e.target.value)} placeholder="CS308" />
+            </div>
+          </div>
+          <div className="form-grid-3">
+            <div className="form-group">
+              <label className="form-label">Credits</label>
+              <input className="form-input" type="number" value={form.credits} onChange={e => setField('credits', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Total Hours</label>
+              <input className="form-input" type="number" value={form.total_hours} onChange={e => setField('total_hours', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Semester</label>
+              <input className="form-input" value={form.semester} onChange={e => setField('semester', e.target.value)} placeholder="5th" />
+            </div>
+          </div>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Faculty Name</label>
+              <input className="form-input" value={form.faculty_name} onChange={e => setField('faculty_name', e.target.value)} placeholder="Dr. Sharma" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Department</label>
+              <input className="form-input" value={form.department} onChange={e => setField('department', e.target.value)} placeholder="Computer Science" />
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Academic Year</label>
+            <input className="form-input" style={{ maxWidth: 200 }} value={form.academic_year} onChange={e => setField('academic_year', e.target.value)} placeholder="2024-25" />
+          </div>
+          <button className="btn btn-primary" onClick={() => setTab('outcomes')}>Next: COs & POs →</button>
+        </div>
+      )}
+
+      {tab === 'outcomes' && (
+        <div className="card">
+          <div style={{ marginBottom: 24 }}>
+            <div className="card-title">Course Outcomes (COs)</div>
+            <div className="card-sub">Define what students will achieve</div>
+            {cos.map((co, i) => (
+              <div key={i} className="dynamic-row">
+                <div className="row-num">{co.co_id}</div>
+                <div className="row-fields">
+                  <input
+                    className="form-input" style={{ flex: 3 }}
+                    placeholder={`CO${i+1} statement`}
+                    value={co.statement}
+                    onChange={e => setCos(c => c.map((x, j) => j === i ? { ...x, statement: e.target.value } : x))}
+                  />
+                  <select
+                    className="form-input" style={{ flex: 1 }}
+                    value={co.bloom_level}
+                    onChange={e => setCos(c => c.map((x, j) => j === i ? { ...x, bloom_level: e.target.value } : x))}
+                  >
+                    {bloomLevels.map(b => <option key={b}>{b}</option>)}
+                  </select>
+                </div>
+                {cos.length > 1 && (
+                  <button className="row-remove" onClick={() => setCos(c => c.filter((_, j) => j !== i))}>✕</button>
+                )}
+              </div>
+            ))}
+            <button className="btn btn-secondary btn-sm" onClick={addCO}>+ Add CO</button>
+          </div>
+
+          <div className="divider" />
+
+          <div>
+            <div className="card-title">Program Outcomes (POs)</div>
+            <div className="card-sub">NBA standard POs your course contributes to</div>
+            {pos.map((po, i) => (
+              <div key={i} className="dynamic-row">
+                <div className="row-num">{po.po_id}</div>
+                <div className="row-fields">
+                  <input
+                    className="form-input"
+                    placeholder={`PO${i+1} statement`}
+                    value={po.statement}
+                    onChange={e => setPos(p => p.map((x, j) => j === i ? { ...x, statement: e.target.value } : x))}
+                  />
+                </div>
+                {pos.length > 1 && (
+                  <button className="row-remove" onClick={() => setPos(p => p.filter((_, j) => j !== i))}>✕</button>
+                )}
+              </div>
+            ))}
+            <button className="btn btn-secondary btn-sm" onClick={addPO}>+ Add PO</button>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <button className="btn btn-secondary" style={{ marginRight: 10 }} onClick={() => setTab('basic')}>← Back</button>
+            <button className="btn btn-primary" onClick={() => setTab('matrix')}>Next: CO-PO Matrix →</button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'matrix' && (
+        <div className="card">
+          <div className="card-title">CO-PO Correlation Matrix</div>
+          <div className="card-sub">Set correlation strength: 0 = None, 1 = Low, 2 = Medium, 3 = High</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="matrix-table">
+              <thead>
+                <tr>
+                  <th>CO \ PO</th>
+                  {pos.map(p => <th key={p.po_id}>{p.po_id}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {cos.map(co => (
+                  <tr key={co.co_id}>
+                    <th style={{ textAlign: 'left', fontFamily: 'var(--font-mono)' }}>{co.co_id}</th>
+                    {pos.map(po => (
+                      <td key={po.po_id}>
+                        <select
+                          value={matrix[co.co_id]?.[po.po_id] ?? 0}
+                          onChange={e => setMatrixVal(co.co_id, po.po_id, e.target.value)}
+                        >
+                          <option value={0}>—</option>
+                          <option value={1}>1</option>
+                          <option value={2}>2</option>
+                          <option value={3}>3</option>
+                        </select>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 20 }}>
+            <button className="btn btn-secondary" style={{ marginRight: 10 }} onClick={() => setTab('outcomes')}>← Back</button>
+            <button className="btn btn-primary" onClick={() => setTab('evaluation')}>Next: Evaluation →</button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'evaluation' && (
+        <div className="card">
+          <div className="card-title">Evaluation Configuration</div>
+          <div className="card-sub">Define CIE and SEE marks structure</div>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">CIE Total Marks</label>
+              <input className="form-input" type="number" value={evalCfg.continuous_assessment_total}
+                onChange={e => setEvalCfg(c => ({ ...c, continuous_assessment_total: Number(e.target.value) }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">SEE Total Marks</label>
+              <input className="form-input" type="number" value={evalCfg.end_sem_total}
+                onChange={e => setEvalCfg(c => ({ ...c, end_sem_total: Number(e.target.value) }))} />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">CIE Components (name: max marks)</label>
+            {Object.entries(evalCfg.components).map(([name, marks], i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+                <input className="form-input" style={{ flex: 2 }} value={name}
+                  onChange={e => {
+                    const newComps = {};
+                    Object.entries(evalCfg.components).forEach(([k, v], j) => {
+                      newComps[j === i ? e.target.value : k] = v;
+                    });
+                    setEvalCfg(c => ({ ...c, components: newComps }));
+                  }} />
+                <input className="form-input" style={{ flex: 1 }} type="number" value={marks}
+                  onChange={e => setEvalCfg(c => ({ ...c, components: { ...c.components, [name]: Number(e.target.value) } }))} />
+                <button className="btn btn-danger btn-sm"
+                  onClick={() => {
+                    const comps = { ...evalCfg.components };
+                    delete comps[name];
+                    setEvalCfg(c => ({ ...c, components: comps }));
+                  }}>✕</button>
+              </div>
+            ))}
+            <button className="btn btn-secondary btn-sm"
+              onClick={() => setEvalCfg(c => ({ ...c, components: { ...c.components, 'New Component': 10 } }))}>
+              + Add Component
+            </button>
+          </div>
+
+          {error && <Alert type="error">{error}</Alert>}
+          {success && <Alert type="success">{success}</Alert>}
+
+          <div style={{ marginTop: 20 }}>
+            <button className="btn btn-secondary" style={{ marginRight: 10 }} onClick={() => setTab('matrix')}>← Back</button>
+            <button className="btn btn-primary" onClick={submit} disabled={loading}>
+              {loading ? <><Spinner /> Creating…</> : '✓ Create Course'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page: Session Plan ────────────────────────────────────────────────────────
+function SessionPlanPage({ activeCourse }) {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const generate = async () => {
+    if (!activeCourse) return;
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const data = await API.post(`/session-plan/generate/${activeCourse.id}`, {});
+      setResult(data.data || data);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="page">
+      <div className="section-heading">Session Plan</div>
+      <div className="section-sub">Generate a unit-wise session plan mapped to COs and Bloom's taxonomy levels.</div>
+
+      {!activeCourse && (
+        <Alert type="warn">No active course selected. Go to Courses and select one first.</Alert>
+      )}
+
+      {activeCourse && (
+        <div className="card">
+          <div className="card-title">Generate Session Plan</div>
+          <div className="card-sub">
+            Course: <strong>{activeCourse.name}</strong> ({activeCourse.code}) · ID: {activeCourse.id}
+          </div>
+          <Alert type="info">This calls the LLM (Gemini → Groq fallback) and may take 10–20 seconds.</Alert>
+          <button className="btn btn-primary" onClick={generate} disabled={loading} style={{ marginTop: 8 }}>
+            {loading ? <><Spinner /> Generating…</> : '▦ Generate Session Plan'}
+          </button>
+        </div>
+      )}
+
+      {error && <Alert type="error">{error}</Alert>}
+
+      {result && (
+        <div className="card">
+          <div className="card-title">✓ Session Plan Ready</div>
+          <div className="card-sub">{result.total_sessions} sessions generated across units</div>
+          <DownloadCard
+            label={result.filename}
+            meta={`${result.total_sessions} sessions · ${activeCourse.code}`}
+            url={result.download_url}
+            filename={result.filename}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page: Evaluation Plan ─────────────────────────────────────────────────────
+function EvaluationPlanPage({ activeCourse }) {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const generate = async () => {
+    if (!activeCourse) return;
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const data = await API.post(`/evaluation-plan/generate/${activeCourse.id}`, {});
+      setResult(data.data || data);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="page">
+      <div className="section-heading">Evaluation Plan</div>
+      <div className="section-sub">Generate a full CIE + SEE evaluation plan with CO attainment targets.</div>
+
+      {!activeCourse && (
+        <Alert type="warn">No active course selected. Go to Courses and select one first.</Alert>
+      )}
+
+      {activeCourse && (
+        <div className="card">
+          <div className="card-title">Generate Evaluation Plan</div>
+          <div className="card-sub">Course: <strong>{activeCourse.name}</strong> ({activeCourse.code})</div>
+          <Alert type="info">Generates CIE components, SEE pattern, CO attainment targets, and Bloom's distribution.</Alert>
+          <button className="btn btn-primary" onClick={generate} disabled={loading} style={{ marginTop: 8 }}>
+            {loading ? <><Spinner /> Generating…</> : '◐ Generate Evaluation Plan'}
+          </button>
+        </div>
+      )}
+
+      {error && <Alert type="error">{error}</Alert>}
+
+      {result && (
+        <div className="card">
+          <div className="card-title">✓ Evaluation Plan Ready</div>
+          <div className="card-sub">CIE: {result.cie_total} marks · SEE: {result.see_total} marks</div>
+          <DownloadCard
+            label={result.filename}
+            meta={`CIE ${result.cie_total}M + SEE ${result.see_total}M · ${activeCourse.code}`}
+            url={result.download_url}
+            filename={result.filename}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page: Marks Upload ────────────────────────────────────────────────────────
+function MarksPage({ activeCourse }) {
+  const [students, setStudents] = useState([
+    { student_id: '', student_name: '', marks: {} }
+  ]);
+  const [coIds, setCoIds] = useState(['CO1']);
+  const [components, setComponents] = useState(['Quiz', 'Unit Test']);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+
+  useEffect(() => {
+    if (!activeCourse) return;
+    API.get(`/courses/${activeCourse.id}`).then(data => {
+      const c = data.data || data;
+      const ids = (c.cos || []).map(co => co.co_id);
+      const comps = Object.keys((c.evaluation_config || {}).components || {});
+      if (ids.length) setCoIds(ids);
+      if (comps.length) setComponents(comps);
+      const initMarks = {};
+      ids.forEach(id => { initMarks[id] = {}; comps.forEach(comp => { initMarks[id][comp] = ''; }); });
+      setStudents([{ student_id: '', student_name: '', marks: initMarks }]);
+    }).catch(() => {});
+  }, [activeCourse?.id]);
+
+  const addStudent = () => {
+    const initMarks = {};
+    coIds.forEach(id => { initMarks[id] = {}; components.forEach(c => { initMarks[id][c] = ''; }); });
+    setStudents(s => [...s, { student_id: '', student_name: '', marks: initMarks }]);
+  };
+
+  const setMark = (si, coId, comp, val) => {
+    setStudents(s => s.map((st, i) => i !== si ? st : {
+      ...st,
+      marks: { ...st.marks, [coId]: { ...(st.marks[coId] || {}), [comp]: val } }
+    }));
+  };
+
+  const submit = async () => {
+    if (!activeCourse) return;
+    setLoading(true); setError(null); setSuccess(null);
+    try {
+      const payload = {
+        students: students.map(s => ({
+          ...s,
+          marks: Object.fromEntries(
+            Object.entries(s.marks).map(([co, comps]) => [
+              co,
+              Object.fromEntries(Object.entries(comps).map(([c, v]) => [c, parseFloat(v) || 0]))
+            ])
+          )
+        }))
+      };
+      const data = await API.post(`/attainment/marks/${activeCourse.id}`, payload);
+      setSuccess(`Marks saved for ${(data.data || data).students_saved} students successfully.`);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="page">
+      <div className="section-heading">Upload Student Marks</div>
+      <div className="section-sub">Enter marks per CO per evaluation component for all students.</div>
+
+      {!activeCourse && (
+        <Alert type="warn">No active course selected. Go to Courses and select one first.</Alert>
+      )}
+
+      {activeCourse && (
+        <div className="card">
+          <div className="card-title">Marks Entry</div>
+          <div className="card-sub">Course: <strong>{activeCourse.name}</strong> · COs: {coIds.join(', ')}</div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table className="marks-table">
+              <thead>
+                <tr>
+                  <th>USN</th>
+                  <th>Name</th>
+                  {coIds.map(co => components.map(comp => (
+                    <th key={`${co}-${comp}`}>{co} / {comp}</th>
+                  )))}
+                </tr>
+              </thead>
+              <tbody>
+                {students.map((st, si) => (
+                  <tr key={si}>
+                    <td>
+                      <input placeholder="USN001" value={st.student_id}
+                        onChange={e => setStudents(s => s.map((x, i) => i === si ? { ...x, student_id: e.target.value } : x))} />
+                    </td>
+                    <td>
+                      <input placeholder="Student Name" value={st.student_name}
+                        style={{ width: 120 }}
+                        onChange={e => setStudents(s => s.map((x, i) => i === si ? { ...x, student_name: e.target.value } : x))} />
+                    </td>
+                    {coIds.map(co => components.map(comp => (
+                      <td key={`${co}-${comp}`}>
+                        <input
+                          type="number" placeholder="0"
+                          value={st.marks[co]?.[comp] ?? ''}
+                          onChange={e => setMark(si, co, comp, e.target.value)}
+                        />
+                      </td>
+                    )))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <button className="add-student-btn" onClick={addStudent}>+ Add Student Row</button>
+
+          {error && <Alert type="error">{error}</Alert>}
+          {success && <Alert type="success">{success}</Alert>}
+
+          <div style={{ marginTop: 16 }}>
+            <button className="btn btn-primary" onClick={submit} disabled={loading}>
+              {loading ? <><Spinner /> Saving…</> : '✓ Save All Marks'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page: Attainment & Reports ────────────────────────────────────────────────
+function AttainmentPage({ activeCourse }) {
+  const [attData, setAttData] = useState(null);
+  const [loadingCalc, setLoadingCalc] = useState(false);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [loadingNBA, setLoadingNBA] = useState(false);
+  const [error, setError] = useState(null);
+  const [reportDone, setReportDone] = useState(false);
+  const [nbaDone, setNbaDone] = useState(false);
+
+  const calculate = async () => {
+    if (!activeCourse) return;
+    setLoadingCalc(true); setError(null);
+    try {
+      const data = await API.get(`/attainment/calculate/${activeCourse.id}`);
+      setAttData(data.data || data);
+    } catch (e) { setError(e.message); }
+    finally { setLoadingCalc(false); }
+  };
+
+  const generateReport = async () => {
+    setLoadingReport(true); setError(null);
+    try {
+      await API.post(`/attainment/report/${activeCourse.id}`, {});
+      setReportDone(true);
+    } catch (e) { setError(e.message); }
+    finally { setLoadingReport(false); }
+  };
+
+  const generateNBA = async () => {
+    setLoadingNBA(true); setError(null);
+    try {
+      await API.post(`/attainment/nba-report/${activeCourse.id}`, {});
+      setNbaDone(true);
+    } catch (e) { setError(e.message); }
+    finally { setLoadingNBA(false); }
+  };
+
+  return (
+    <div className="page">
+      <div className="section-heading">CO/PO Attainment</div>
+      <div className="section-sub">Calculate attainment from uploaded marks and generate NBA/NAAC reports.</div>
+
+      {!activeCourse && (
+        <Alert type="warn">No active course selected. Go to Courses and select one first.</Alert>
+      )}
+
+      {activeCourse && (
+        <>
+          <div className="card">
+            <div className="card-title">Calculate Attainment</div>
+            <div className="card-sub">Computes CO and PO attainment from the uploaded marks.</div>
+            <button className="btn btn-primary" onClick={calculate} disabled={loadingCalc}>
+              {loadingCalc ? <><Spinner /> Calculating…</> : '◉ Calculate Attainment'}
+            </button>
+          </div>
+
+          {error && <Alert type="error">{error}</Alert>}
+
+          {attData && (
+            <>
+              <div className="card">
+                <div className="card-title">CO Attainment Results</div>
+                <div className="card-sub">
+                  Overall: <strong>{attData.overall_co_attainment}%</strong> · 
+                  Students: {attData.total_students} · 
+                  Threshold: {attData.threshold_percentage}%
+                </div>
+                {Object.entries(attData.co_attainment).map(([id, co]) => (
+                  <div key={id} style={{ marginBottom: 16 }}>
+                    <AttainmentBar id={id} pct={co.attainment_percentage} />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                      <span className={`badge ${co.target_met ? 'badge-green' : 'badge-red'}`}>
+                        {co.target_met ? 'ACHIEVED' : 'AT RISK'}
+                      </span>
+                      <span className="badge badge-cyan">{co.bloom_level}</span>
+                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                        {co.students_passed_threshold}/{co.total_students} students passed · avg {co.avg_marks_scored}/{co.max_marks}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="card">
+                <div className="card-title">PO Attainment (via CO-PO Matrix)</div>
+                {Object.entries(attData.po_attainment).map(([id, po]) => (
+                  <div key={id} style={{ marginBottom: 16 }}>
+                    <AttainmentBar id={id} pct={po.attainment_percentage} />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                      <span className={`badge ${po.attainment_percentage >= 60 ? 'badge-green' : 'badge-red'}`}>
+                        {po.attainment_level}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>{po.statement}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="card">
+                <div className="card-title">Generate Reports</div>
+                <div className="card-sub">Generate and download formatted documents for accreditation.</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <button className="btn btn-secondary" onClick={generateReport} disabled={loadingReport}>
+                      {loadingReport ? <><Spinner /> Generating…</> : '⊟ Generate Word Report'}
+                    </button>
+                    {reportDone && (
+                      <button className="btn btn-primary btn-sm"
+                        onClick={() => API.download(`/attainment/download/${activeCourse.id}`, `attainment_report_${activeCourse.id}.docx`)}>
+                        ⬇ Download .docx
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <button className="btn btn-secondary" onClick={generateNBA} disabled={loadingNBA}>
+                      {loadingNBA ? <><Spinner /> Generating NBA PDF…</> : '◈ Generate NBA/NAAC PDF'}
+                    </button>
+                    {nbaDone && (
+                      <button className="btn btn-primary btn-sm"
+                        onClick={() => API.download(`/attainment/nba-report/download/${activeCourse.id}`, `nba_report_${activeCourse.id}.pdf`)}>
+                        ⬇ Download PDF
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {nbaDone && <Alert type="success" style={{ marginTop: 12 }}>NBA/NAAC PDF generated with AI recommendations!</Alert>}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Root App ──────────────────────────────────────────────────────────────────
+function App() {
+  const [route, navigate] = useRoute();
+  const [activeCourse, setActiveCourse] = useState(null);
+
+  const pageTitles = {
+    '#home':       { label: 'Dashboard', sub: 'Overview' },
+    '#courses':    { label: 'Courses', sub: 'All Courses' },
+    '#syllabus':   { label: 'Syllabus', sub: 'Upload & Extract' },
+    '#setup':      { label: 'Course Setup', sub: 'New Course' },
+    '#sessions':   { label: 'Session Plan', sub: 'AI Generate' },
+    '#evaluation': { label: 'Evaluation Plan', sub: 'AI Generate' },
+    '#marks':      { label: 'Student Marks', sub: 'Data Entry' },
+    '#attainment': { label: 'Attainment', sub: 'CO / PO Analysis' },
+    '#reports':    { label: 'Reports', sub: 'Download' },
+  };
+  const pt = pageTitles[route] || pageTitles['#home'];
+
+  return (
+    <div className="app">
+      <Sidebar route={route} navigate={navigate} activeCourse={activeCourse} />
+      <div className="main">
+        <div className="topbar">
+          <div className="topbar-title"><strong>{pt.label}</strong> — {pt.sub}</div>
+          <div className="topbar-right">
+            {activeCourse && (
+              <div className="course-pill">{activeCourse.code} · ID {activeCourse.id}</div>
+            )}
+          </div>
+        </div>
+
+        {route === '#home'       && <HomePage navigate={navigate} activeCourse={activeCourse} setActiveCourse={setActiveCourse} />}
+        {route === '#courses'    && <CoursesPage activeCourse={activeCourse} setActiveCourse={setActiveCourse} navigate={navigate} />}
+        {route === '#syllabus'   && <SyllabusPage />}
+        {route === '#setup'      && <CourseSetupPage setActiveCourse={setActiveCourse} navigate={navigate} />}
+        {route === '#sessions'   && <SessionPlanPage activeCourse={activeCourse} />}
+        {route === '#evaluation' && <EvaluationPlanPage activeCourse={activeCourse} />}
+        {route === '#marks'      && <MarksPage activeCourse={activeCourse} />}
+        {route === '#attainment' && <AttainmentPage activeCourse={activeCourse} />}
+        {(route === '#reports' || !pageTitles[route]) && <AttainmentPage activeCourse={activeCourse} />}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
