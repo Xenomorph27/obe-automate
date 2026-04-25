@@ -10,6 +10,7 @@ from backend.routes.courses import router as courses_router
 from backend.routes.session_plan import router as session_plan_router
 from backend.routes.evaluation_plan import router as evaluation_plan_router
 from backend.routes.attainment import router as attainment_router
+from backend.routes.dashboard import router as dashboard_router
 from backend.database.connection import init_db
 from backend.core.config import APP_NAME, APP_VERSION
 from backend.core.logger import get_logger
@@ -43,6 +44,7 @@ app.include_router(courses_router)
 app.include_router(session_plan_router)
 app.include_router(evaluation_plan_router)
 app.include_router(attainment_router)
+app.include_router(dashboard_router)
 
 
 # ── Health check ────────────────────────────────────────────────────────
@@ -52,7 +54,6 @@ def health_check():
 
 
 # ── Frontend — serve React SPA ──────────────────────────────────────────
-# Static assets (JS, CSS, images) from frontend/assets/
 assets_dir = FRONTEND_DIR / "assets"
 assets_dir.mkdir(exist_ok=True)
 app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
