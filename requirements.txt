@@ -1,0 +1,30 @@
+# OBE Automate — Python dependencies
+# Pin major versions, allow patch updates
+
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+aiofiles==23.2.1
+
+# Database
+sqlalchemy==2.0.35
+aiosqlite==0.20.0          # SQLite async driver (local dev)
+asyncpg==0.29.0            # PostgreSQL async driver (production)
+psycopg2-binary==2.9.9     # PostgreSQL sync driver (migrations)
+
+# AI / LLM
+google-genai==0.8.0
+groq==0.11.0
+openai==1.51.0             # Optional fallback
+
+# Document generation
+PyMuPDF==1.24.10           # fitz — PDF parsing
+python-docx==1.1.2         # Word documents
+reportlab==4.2.2           # PDF generation
+
+# Config
+python-dotenv==1.0.1
+
+# Utils
+httpx==0.27.2              # Async HTTP (used by some AI SDKs)

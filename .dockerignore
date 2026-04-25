@@ -1,0 +1,22 @@
+# .dockerignore — keep image lean
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+*.env
+.git/
+.gitignore
+.DS_Store
+*.db
+*.sqlite
+generated_docs/
+*.log
+.pytest_cache/
+.mypy_cache/
+node_modules/
+*.md
+Dockerfile
+.dockerignore
