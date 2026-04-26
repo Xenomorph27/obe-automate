@@ -70,12 +70,17 @@ def storage_info():
             "file_counts": counts, "is_volume_mounted": bool(STORAGE_PATH)}
 
 # Mount generated files for direct URL access
+# CRITICAL: mkdir BEFORE StaticFiles — it crashes if the directory doesn't exist on fresh containers
 from backend.core.storage import get_storage as _gs
 _storage_base = _gs().base
+_storage_base.mkdir(parents=True, exist_ok=True)
+# Pre-create all category subdirs so StaticFiles doesn't fail on first request
+for _cat in ["session_plans", "evaluation_plans", "attainment_reports", "nba_reports", "question_papers"]:
+    (_storage_base / _cat).mkdir(parents=True, exist_ok=True)
 app.mount("/files", StaticFiles(directory=str(_storage_base)), name="files")
 
 assets_dir = FRONTEND_DIR / "assets"
-assets_dir.mkdir(exist_ok=True)
+assets_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
 @app.get("/", include_in_schema=False)
