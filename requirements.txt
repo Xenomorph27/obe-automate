@@ -28,3 +28,7 @@ python-dotenv==1.0.1
 
 # Utils
 httpx==0.27.2              # Async HTTP (used by some AI SDKs)
+
+# Auth — Day 13
+python-jose[cryptography]==3.3.0   # JWT encode/decode (HS256)
+passlib[bcrypt]==1.7.4             # bcrypt password hashing
