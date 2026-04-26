@@ -440,15 +440,28 @@ function Sidebar({page,go,course,user,logout,open,close}){
 function HomePage({go,setCourse}){
   const [courses,setCourses]=useState([]);
   const [loading,setLoading]=useState(true);
-  useEffect(()=>{api('/courses/').then(d=>{setCourses(d);setLoading(false)}).catch(()=>setLoading(false));},[]);
+  const [tt,setTt]=useState(null);
+  const [ttLoading,setTtLoading]=useState(true);
+  const [ttFile,setTtFile]=useState(null);
+  const [ttUploading,setTtUploading]=useState(false);
+  const [ttErr,setTtErr]=useState('');
 
-  const schedule=[
-    {time:'09:00',title:'OS Lecture — Unit 3',sub:'Semaphores & Deadlock',color:'#3b82f6',done:true},
-    {time:'11:00',title:'CO Attainment Review',sub:'Check course 5 results',color:'#8b5cf6',done:true},
-    {time:'14:00',title:'Question Paper Setup',sub:'Generate mid-sem paper',color:'#10b981',done:false},
-    {time:'16:00',title:'NBA Report Submission',sub:'Upload to accreditation portal',color:'#f59e0b',done:false},
-    {time:'17:30',title:'HOD Meeting',sub:'Department PO review',color:'#ef4444',done:false},
-  ];
+  useEffect(()=>{
+    api('/courses/').then(d=>{setCourses(d);setLoading(false)}).catch(()=>setLoading(false));
+    api('/dashboard/timetable').then(d=>{setTt(d.data);setTtLoading(false)}).catch(()=>setTtLoading(false));
+  },[]);
+
+  const uploadTimetable=async()=>{
+    if(!ttFile)return;setTtUploading(true);setTtErr('');
+    try{const fd=new FormData();fd.append('file',ttFile);
+      const r=await fetch(API+'/dashboard/timetable/upload',{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+      if(!r.ok){const e=await r.json();throw new Error(e.detail||'Upload failed');}
+      const d=await r.json();setTt(d.data);setTtFile(null);
+    }catch(e){setTtErr(e.message);}setTtUploading(false);};
+
+  const TODAY=new Date().toLocaleDateString('en-US',{weekday:'long'});
+  const todaySchedule=tt?.schedule?.[TODAY]||[];
+
   const events=[
     {day:'28',mon:'Apr',title:'Mid-Semester Exam',sub:'All courses — Hall A',c:'b-red'},
     {day:'05',mon:'May',title:'NBA Documentation',sub:'Submission deadline',c:'b-amber'},
@@ -468,13 +481,13 @@ function HomePage({go,setCourse}){
       <div className="welcome-card">
         <div style={{position:'relative',zIndex:1}}>
           <div style={{fontSize:'.8rem',opacity:.65,marginBottom:'.25rem'}}>{getDay()}</div>
-          <div className="welcome-name">{getGreeting()}, Professor! 👋</div>
-          <div className="welcome-sub">You have 3 pending tasks today. NBA submission is in 7 days.</div>
+          <div className="welcome-name">{getGreeting()}, {tt?.faculty_name?tt.faculty_name.split(' ').slice(-1)[0]:'Professor'}! 👋</div>
+          <div className="welcome-sub">{tt?`${tt.department} · ${tt.academic_year}`:'Upload your timetable to personalise your dashboard.'}</div>
           <div className="welcome-chips">
             <span className="wchip">📚 {loading?'…':courses.length} Courses</span>
-            <span className="wchip">⏰ 3 Tasks Today</span>
+            <span className="wchip">⏰ {todaySchedule.length} Classes Today</span>
             <span className="wchip">🎯 NBA Due: May 5</span>
-            <span className="wchip">✅ 2 Completed</span>
+            {tt&&<span className="wchip">✅ Timetable Loaded</span>}
           </div>
         </div>
       </div>
@@ -511,23 +524,58 @@ function HomePage({go,setCourse}){
       <div className="dash-grid">
         {/* Left column */}
         <div>
-          {/* Today's Schedule */}
+          {/* Today's Schedule from timetable */}
           <div className="card card-p" style={{marginBottom:'1.25rem'}}>
-            <div className="section-head"><div className="section-title">📅 Today's Schedule</div><span className="badge b-blue">5 events</span></div>
-            {schedule.map((s,i)=>(
-              <div key={i} className="schedule-item" style={{opacity:s.done?.8:1}}>
-                <div className="sched-time">{s.time}</div>
-                <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
-                  <div className="sched-dot" style={{background:s.color,opacity:s.done?.5:1}}/>
-                  {i<schedule.length-1&&<div className="sched-line" style={{flex:1,minHeight:24}}/>}
-                </div>
-                <div className="sched-content">
-                  <div className="sched-title" style={{textDecoration:s.done?'line-through':'none',opacity:s.done?.6:1}}>{s.title}</div>
-                  <div className="sched-sub">{s.sub}</div>
-                  {s.done&&<span className="badge b-green" style={{marginTop:'.35rem',fontSize:'.68rem'}}>✓ Done</span>}
-                </div>
-              </div>))}
+            <div className="section-head">
+              <div className="section-title">📅 Today's Schedule <span style={{fontSize:'.75rem',fontWeight:400,color:'var(--text2)'}}>({TODAY})</span></div>
+              <label style={{cursor:'pointer',fontSize:'.78rem',color:'var(--blue2)',fontWeight:500}}>
+                {ttUploading?<Spin/>:'⬆ Update'}
+                <input type="file" accept=".docx" style={{display:'none'}} onChange={e=>{setTtFile(e.target.files[0]);}}/>
+              </label>
+            </div>
+            {ttErr&&<Alrt t="error" msg={ttErr}/>}
+            {ttFile&&<div style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'.75rem',padding:'.5rem .75rem',background:'#eff6ff',borderRadius:8,fontSize:'.8rem'}}>
+              <span>📎 {ttFile.name}</span>
+              <button className="btn btn-primary btn-sm" onClick={uploadTimetable} disabled={ttUploading}>{ttUploading?'Uploading…':'Upload'}</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setTtFile(null)}>✕</button>
+            </div>}
+            {ttLoading?<Skel n={3}/>:
+             todaySchedule.length===0?(
+              <div style={{textAlign:'center',padding:'1.5rem',color:'var(--text2)'}}>
+                <div style={{fontSize:'1.5rem',marginBottom:'.5rem'}}>📅</div>
+                {tt?<div style={{fontSize:'.85rem'}}>No classes scheduled for {TODAY}</div>
+                   :<div style={{fontSize:'.85rem'}}>Upload your timetable .docx to see today's schedule</div>}
+              </div>
+            ):(
+              todaySchedule.map((s,i)=>(
+                <div key={i} className="schedule-item">
+                  <div className="sched-time" style={{fontSize:'.72rem',minWidth:90}}>{s.time}</div>
+                  <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                    <div className="sched-dot" style={{background:'#3b82f6'}}/>
+                    {i<todaySchedule.length-1&&<div className="sched-line" style={{flex:1,minHeight:24}}/>}
+                  </div>
+                  <div className="sched-content">
+                    <div className="sched-title">{s.course}</div>
+                    <div className="sched-sub">{[s.section,s.room].filter(Boolean).join(' · ')}</div>
+                  </div>
+                </div>))
+            )}
           </div>
+
+          {/* Full Week if timetable loaded */}
+          {tt&&<div className="card card-p" style={{marginBottom:'1.25rem'}}>
+            <div className="section-head"><div className="section-title">🗓 Weekly Schedule</div>
+              <span style={{fontSize:'.75rem',color:'var(--text2)'}}>{tt.faculty_name}</span></div>
+            {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day=>{
+              const slots=tt.schedule[day]||[];
+              return(<div key={day} style={{marginBottom:'.75rem'}}>
+                <div style={{fontSize:'.75rem',fontWeight:600,color:'var(--text2)',marginBottom:'.3rem',textTransform:'uppercase',letterSpacing:'.05em'}}>{day}</div>
+                {slots.length===0?<span style={{fontSize:'.78rem',color:'var(--border)'}}>—</span>:
+                slots.map((s,i)=><span key={i} style={{display:'inline-block',marginRight:'.4rem',marginBottom:'.3rem',padding:'.2rem .6rem',background:'#eff6ff',borderRadius:20,fontSize:'.75rem',color:'var(--blue2)',fontWeight:500}}>
+                  {s.time.split('-')[0].trim()} {s.course}{s.section?` (${s.section})`:''}</span>)}
+              </div>);
+            })}
+          </div>}
 
           {/* Recent Activity */}
           <div className="card card-p">
@@ -582,7 +630,6 @@ function HomePage({go,setCourse}){
     </div>
   );
 }
-
 // ── COURSES ────────────────────────────────────────────────────────────────
 function CoursesPage({setCourse,go}){
   const [courses,setCourses]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
@@ -691,22 +738,47 @@ function EvalPlanPage({course}){
 
 // ── MARKS ─────────────────────────────────────────────────────────────────
 function MarksPage({course}){
-  const [json,setJson]=useState('');const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
-  const sample=JSON.stringify([{student_id:'USN001',student_name:'Alice',marks:{CO1:{Quiz:8,'Unit Test':18},CO2:{Quiz:7,'Unit Test':15}}}],null,2);
-  const upload=async()=>{if(!course){setErr('Select a course.');return;}setLoading(true);setErr('');setOk('');
-    try{const d=await api(`/attainment/marks/${course.id}`,{method:'POST',body:json});setOk(`Saved ${d.students_saved} students.`);}
-    catch(e){setErr(e.message);}setLoading(false);};
+  const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');const [preview,setPreview]=useState(null);
+  const upload=async()=>{if(!course){setErr('Select a course.');return;}if(!file){setErr('Select an xlsx file.');return;}
+    setLoading(true);setErr('');setOk('');setPreview(null);
+    try{const fd=new FormData();fd.append('file',file);
+      const r=await fetch(API+`/attainment/marks/${course.id}/xlsx`,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+      if(!r.ok){const e=await r.json();throw new Error(e.detail||'Upload failed');}
+      const d=await r.json();
+      setOk(`✓ Uploaded successfully — ${d.parsed_students} students saved.`);
+      setPreview(d.data);
+    }catch(e){setErr(e.message);}setLoading(false);};
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Upload Student Marks</div>
-    {!course&&<Alrt t="warning" msg="Select a course first."/>}
-    <div className="card card-p" style={{maxWidth:720}}>
-      <div className="fg"><label className="fl">Marks JSON</label>
-        <textarea className="fi" rows={10} style={{fontFamily:'monospace',fontSize:'.8rem',resize:'vertical'}} value={json} onChange={e=>setJson(e.target.value)} placeholder={sample}/></div>
-      <button className="btn btn-ghost btn-sm" style={{marginBottom:'.875rem'}} onClick={()=>setJson(sample)}>Load Sample Data</button>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+    <div className="card card-p" style={{maxWidth:600}}>
+      <div style={{marginBottom:'1rem'}}>
+        <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem',lineHeight:1.6}}>
+          Upload the student marks Excel file as provided by the institute.<br/>
+          <strong>Format:</strong> Column B = PRN, Column C = Student Name, Column D+ = CO marks.<br/>
+          Header rows, section separators (Section A/B/C), and formula cells are handled automatically.
+        </div>
+        <label style={{display:'block',border:'2px dashed var(--border)',borderRadius:10,padding:'2rem',textAlign:'center',cursor:'pointer',background:file?'#f0fdf4':'var(--bg)',transition:'all .2s'}}>
+          <input type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>setFile(e.target.files[0])}/>
+          <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>📊</div>
+          <div style={{fontWeight:600,color:'var(--text)'}}>{file?file.name:'Click to select Excel file'}</div>
+          <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.25rem'}}>{file?`${(file.size/1024).toFixed(1)} KB · Ready to upload`:'.xlsx files only'}</div>
+        </label>
+      </div>
       <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
-      <button className="btn btn-primary" onClick={upload} disabled={loading||!course}>{loading?<><Spin/>Uploading…</>:'↑ Upload Marks'}</button>
+      <button className="btn btn-primary" onClick={upload} disabled={loading||!course||!file} style={{width:'100%'}}>
+        {loading?<><Spin/>Parsing & uploading…</>:'↑ Upload Marks'}
+      </button>
     </div>
-  </div>);
-}
+    {preview&&<div className="card card-p" style={{marginTop:'1.25rem'}}>
+      <div className="section-head"><div className="section-title">Preview — First 10 Students</div></div>
+      <div className="tbl-wrap"><table><thead><tr><th>PRN</th><th>Name</th><th>Marks</th></tr></thead>
+      <tbody>{Object.entries(preview).slice(0,10).map(([_,s],i)=><tr key={i}>
+        <td><span className="badge b-blue">{s.student_id}</span></td>
+        <td>{s.student_name}</td>
+        <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{Object.entries(s.marks).map(([co,m])=>`${co}: ${Object.values(m)[0]}`).join(' | ')}</td>
+      </tr>)}</tbody></table></div>
+    </div>}
+  </div>);\n}
 
 // ── ATTAINMENT ────────────────────────────────────────────────────────────
 function AttainmentPage({course}){
