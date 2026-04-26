@@ -21,3 +21,9 @@ ALLOWED_FILE_TYPES = ["application/pdf"]
 
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./obe_automate.db")
+
+# File Storage — Day 12
+# STORAGE_PATH: set to Railway Volume mount path (e.g. /mnt/storage) for persistence
+# Leave empty to use default generated_docs/ (ephemeral on Railway)
+STORAGE_PATH = os.getenv("STORAGE_PATH", "")
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local")  # reserved for future S3 backend

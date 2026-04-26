@@ -12,8 +12,9 @@ from backend.routes.evaluation_plan import router as evaluation_plan_router
 from backend.routes.attainment import router as attainment_router
 from backend.routes.dashboard import router as dashboard_router
 from backend.routes.questions import router as questions_router
+from backend.routes.auth import router as auth_router
 from backend.database.connection import init_db
-from backend.core.config import APP_NAME, APP_VERSION
+from backend.core.config import APP_NAME, APP_VERSION, STORAGE_PATH
 from backend.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -24,6 +25,11 @@ FRONTEND_DIR.mkdir(exist_ok=True)
 async def lifespan(app: FastAPI):
     logger.info("Starting up — initialising database...")
     await init_db()
+    # Seed default users (Day 13)
+    from backend.core.auth import seed_default_users
+    from backend.database.connection import AsyncSessionLocal
+    async with AsyncSessionLocal() as _db:
+        await seed_default_users(_db)
     yield
     logger.info("Shutting down")
 
@@ -38,10 +44,35 @@ app.include_router(evaluation_plan_router)
 app.include_router(attainment_router)
 app.include_router(dashboard_router)
 app.include_router(questions_router)
+app.include_router(auth_router)
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "app": APP_NAME, "version": APP_VERSION}
+    from backend.core.storage import get_storage
+    storage = get_storage()
+    return {"status": "ok", "app": APP_NAME, "version": APP_VERSION,
+            "storage_path": str(storage.base), "storage_configured": bool(STORAGE_PATH)}
+
+
+@app.get("/storage/info", tags=["System"])
+def storage_info():
+    """Returns current storage configuration — useful for verifying Volume is mounted."""
+    from backend.core.storage import get_storage
+    s = get_storage()
+    cats = ["session_plans", "evaluation_plans", "attainment_reports", "nba_reports", "question_papers"]
+    counts = {}
+    for c in cats:
+        try:
+            counts[c] = len(list((s.base / c).glob("*"))) if (s.base / c).exists() else 0
+        except Exception:
+            counts[c] = -1
+    return {"base_path": str(s.base.resolve()), "storage_backend": STORAGE_PATH or "local (generated_docs/)",
+            "file_counts": counts, "is_volume_mounted": bool(STORAGE_PATH)}
+
+# Mount generated files for direct URL access
+from backend.core.storage import get_storage as _gs
+_storage_base = _gs().base
+app.mount("/files", StaticFiles(directory=str(_storage_base)), name="files")
 
 assets_dir = FRONTEND_DIR / "assets"
 assets_dir.mkdir(exist_ok=True)

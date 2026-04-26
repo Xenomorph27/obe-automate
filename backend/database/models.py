@@ -107,3 +107,7 @@ class Question(Base):
                 "marks":self.marks,"source":self.source,"options":self.options,
                 "parent_question_id":self.parent_question_id,
                 "created_at":self.created_at.isoformat() if self.created_at else None}
+
+
+# Import user models so they're registered in Base metadata
+from backend.database.user_models import User  # noqa

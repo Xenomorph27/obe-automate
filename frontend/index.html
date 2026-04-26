@@ -284,7 +284,11 @@ tbody tr:hover{background:var(--bg)}
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
 const API='';
-const USERS={faculty:{pw:'faculty123',role:'faculty',label:'Faculty',icon:'👨‍🏫'},hod:{pw:'hod123',role:'hod',label:'HOD / Principal',icon:'🎓'}};
+
+// ── JWT token storage (session only — lost on tab close by design) ──────────
+let _token = sessionStorage.getItem('obe_token') || '';
+function setToken(t){ _token=t; if(t) sessionStorage.setItem('obe_token',t); else sessionStorage.removeItem('obe_token'); }
+function getToken(){ return _token; }
 const BLOOM=[{l:1,n:'Remember',c:'bl1'},{l:2,n:'Understand',c:'bl2'},{l:3,n:'Apply',c:'bl3'},{l:4,n:'Analyse',c:'bl4'},{l:5,n:'Evaluate',c:'bl5'},{l:6,n:'Create',c:'bl6'}];
 const QTYPES=['Short Answer','Long Answer','MCQ','Case Study'];
 
@@ -295,7 +299,10 @@ class EB extends React.Component{
 }
 
 async function api(path,opts={}){
-  const r=await fetch(API+path,{headers:{'Content-Type':'application/json'},...opts});
+  const tok=getToken();
+  const hdrs={'Content-Type':'application/json',...(tok?{Authorization:`Bearer ${tok}`}:{}), ...(opts.headers||{})};
+  const r=await fetch(API+path,{...opts,headers:hdrs});
+  if(r.status===401){setToken('');window.location.hash='';window.location.reload();return;}
   if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||`HTTP ${r.status}`)}
   return r.json();
 }
@@ -318,22 +325,31 @@ function getDay(){
 
 // ── LOGIN ──────────────────────────────────────────────────────────────────
 function Login({onLogin}){
-  const [role,setRole]=useState('faculty');
-  const [user,setUser]=useState('faculty');
+  const [username,setUsername]=useState('');
   const [pw,setPw]=useState('');
   const [err,setErr]=useState('');
   const [loading,setLoading]=useState(false);
-  const go=()=>{
+
+  const go=async()=>{
     setErr('');
-    if(!user||!pw){setErr('Please fill in all fields.');return;}
+    if(!username||!pw){setErr('Please enter username and password.');return;}
     setLoading(true);
-    setTimeout(()=>{
-      const u=USERS[role];
-      if(user===role&&pw===u.pw){onLogin({user,role,label:u.label,icon:u.icon});}
-      else{setErr('Invalid credentials. Check the hint below.');}
-      setLoading(false);
-    },600);
+    try{
+      const r=await fetch(API+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password:pw})});
+      if(!r.ok){const e=await r.json().catch(()=>({}));setErr(e.detail||'Login failed.');setLoading(false);return;}
+      const d=await r.json();
+      setToken(d.access_token);
+      onLogin(d.user);
+    }catch(e){setErr(e.message||'Network error.');}
+    setLoading(false);
   };
+
+  const roleHints=[
+    {icon:'👨‍🏫',label:'Faculty',hint:'faculty / faculty123'},
+    {icon:'🎓',label:'HOD',hint:'hod / hod123'},
+    {icon:'🔧',label:'Admin',hint:'admin / admin@OBE2024'},
+  ];
+
   return(
     <div className="auth-wrap">
       <div className="auth-left">
@@ -349,28 +365,28 @@ function Login({onLogin}){
                 <div style={{fontSize:'.72rem',color:'#6b7280',marginTop:'.15rem'}}>{s}</div>
               </div>))}
           </div>
+          <div style={{marginTop:'2rem',padding:'1rem',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,maxWidth:360}}>
+            <div style={{fontSize:'.7rem',color:'#6b7280',marginBottom:'.5rem',textTransform:'uppercase',letterSpacing:'.08em'}}>Default Accounts</div>
+            {roleHints.map((r,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'.35rem',cursor:'pointer'}} onClick={()=>{setUsername(r.hint.split(' / ')[0]);setPw(r.hint.split(' / ')[1]);}}>
+                <span style={{fontSize:'.9rem'}}>{r.icon}</span>
+                <span style={{fontSize:'.78rem',color:'#9ca3af'}}>{r.label}:</span>
+                <code style={{fontSize:'.72rem',color:'#e5e7eb',background:'rgba(255,255,255,.06)',padding:'.1rem .4rem',borderRadius:4}}>{r.hint}</code>
+              </div>
+            ))}
+            <div style={{fontSize:'.68rem',color:'#4b5563',marginTop:'.5rem'}}>Click a row to auto-fill</div>
+          </div>
         </div>
       </div>
       <div className="auth-right">
         <div style={{width:'100%'}}>
           <div className="auth-card-title">Welcome back</div>
           <div className="auth-card-sub">Sign in to your OBE Automate account</div>
-          <div style={{marginBottom:'1.25rem'}}>
-            {Object.entries(USERS).map(([k,u])=>(
-              <button key={k} className={`role-btn ${role===k?'active':''}`} onClick={()=>{setRole(k);setUser(k);}}>
-                <div className="role-icon" style={{background:role===k?'#eff6ff':'var(--bg2)'}}>{u.icon}</div>
-                <div style={{textAlign:'left'}}>
-                  <div style={{fontWeight:600,fontSize:'.875rem'}}>{u.label}</div>
-                  <div style={{fontSize:'.75rem',color:'var(--text3)'}}>{k} / {u.pw}</div>
-                </div>
-                {role===k&&<span style={{marginLeft:'auto',color:'var(--blue2)',fontSize:'1rem'}}>✓</span>}
-              </button>))}
-          </div>
-          <div className="auth-hint">🔑 Credentials auto-filled — just enter the password shown above</div>
           {err&&<div className="auth-err">⚠ {err}</div>}
-          <div className="form-group"><label className="form-label">Username</label><input className="inp" value={user} onChange={e=>setUser(e.target.value)} placeholder="username"/></div>
+          <div className="form-group" style={{marginTop:'1rem'}}><label className="form-label">Username</label><input className="inp" value={username} onChange={e=>setUsername(e.target.value)} placeholder="username" autoFocus/></div>
           <div className="form-group"><label className="form-label">Password</label><input className="inp" type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&go()} placeholder="Enter password"/></div>
           <button className="btn-blue" onClick={go} disabled={loading}>{loading?'Signing in…':'Sign In →'}</button>
+          <div style={{marginTop:'1rem',fontSize:'.78rem',color:'var(--text3)',textAlign:'center'}}>Secured by JWT · Sessions expire after 8 hours</div>
         </div>
       </div>
     </div>
@@ -390,7 +406,11 @@ function Sidebar({page,go,course,user,logout,open,close}){
     {p:'qgenerate',i:'✨',n:'Generate Question'},{p:'qpaper',i:'📋',n:'Question Paper'},
     {p:'qbank',i:'🗄',n:'Question Bank'},{p:'qclassify',i:'🔍',n:'Classify Question'},{p:'qmanipulate',i:'🔄',n:'Manipulate Level'},
   ];
-  const items=user?.role==='hod'?[{s:'HOD VIEW'},{p:'hod',i:'🏛',n:'Dept Dashboard'},...base]:base;
+  const hodItems=[{s:'HOD VIEW'},{p:'hod',i:'🏛',n:'Dept Dashboard'}];
+  const adminItems=[{s:'ADMIN'},{p:'usermgmt',i:'👥',n:'User Management'}];
+  let items=[...base];
+  if(user?.role==='hod'||user?.role==='admin') items=[...hodItems,...items];
+  if(user?.role==='admin') items=[...items,...adminItems];
   return(
     <div className={`sidebar ${open?'open':''}`}>
       <div className="sb-top">
@@ -407,7 +427,7 @@ function Sidebar({page,go,course,user,logout,open,close}){
       <div className="sb-bottom">
         <div className="sb-user">
           <div className="sb-avatar">{user?.user?.[0]?.toUpperCase()}</div>
-          <div><div className="sb-user-name">{user?.user}</div><div className="sb-user-role">{user?.label}</div></div>
+          <div><div className="sb-user-name">{user?.full_name||user?.username||'User'}</div><div className="sb-user-role">{user?.role==='hod'?'Head of Dept':user?.role==='admin'?'Administrator':'Faculty'}</div></div>
         </div>
         <a href="/docs" target="_blank" style={{display:'flex',alignItems:'center',gap:'.5rem',color:'#60a5fa',fontSize:'.8rem',textDecoration:'none',marginBottom:'.5rem',padding:'.35rem 0'}}>⚡ API Docs</a>
         <button className="sb-logout" onClick={logout}>Sign Out</button>
@@ -1083,15 +1103,213 @@ function ManipulatePage({course}){
 }
 
 // ── APP ───────────────────────────────────────────────────────────────────
+
+
+// ── PROFILE / CHANGE PASSWORD ─────────────────────────────────────────────────
+function ProfilePage({user,logout}){
+  const [cpw,setCpw]=useState({cur:'',nw:'',confirm:''});
+  const [err,setErr]=useState('');
+  const [ok,setOk]=useState('');
+  const [loading,setLoading]=useState(false);
+
+  const changePw=async()=>{
+    setErr('');setOk('');
+    if(!cpw.cur||!cpw.nw){setErr('All fields required.');return;}
+    if(cpw.nw!==cpw.confirm){setErr('New passwords do not match.');return;}
+    if(cpw.nw.length<6){setErr('Password must be at least 6 characters.');return;}
+    setLoading(true);
+    try{
+      await api('/auth/me/password',{method:'PUT',body:JSON.stringify({current_password:cpw.cur,new_password:cpw.nw})});
+      setOk('Password changed. Please log in again.');
+      setTimeout(()=>{logout();},2000);
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const roleColors={faculty:'b-blue',hod:'b-green',admin:'b-purple'};
+
+  return(
+    <div className="page-body">
+      <Alrt t="error" msg={err}/>
+      <Alrt t="success" msg={ok}/>
+      <div className="card" style={{maxWidth:520,marginBottom:'1.25rem'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1.5rem'}}>
+          <div style={{width:56,height:56,borderRadius:'50%',background:'linear-gradient(135deg,var(--blue),var(--indigo))',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'1.4rem',fontWeight:700}}>
+            {user?.full_name?.[0]||user?.username?.[0]||'U'}
+          </div>
+          <div>
+            <div style={{fontWeight:700,fontSize:'1.1rem'}}>{user?.full_name||user?.username}</div>
+            <div style={{fontSize:'.85rem',color:'var(--text2)'}}>@{user?.username}</div>
+            <span className={`badge ${roleColors[user?.role]||'b-blue'}`} style={{marginTop:'.25rem'}}>{user?.role}</span>
+          </div>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:'.5rem',padding:'1rem',background:'var(--bg)',borderRadius:10}}>
+          {user?.email&&<div style={{fontSize:'.85rem'}}><span style={{color:'var(--text2)'}}>Email: </span>{user.email}</div>}
+          {user?.department&&<div style={{fontSize:'.85rem'}}><span style={{color:'var(--text2)'}}>Department: </span>{user.department}</div>}
+        </div>
+      </div>
+      <div className="card" style={{maxWidth:520}}>
+        <div style={{fontWeight:700,marginBottom:'1rem'}}>Change Password</div>
+        <div className="form-group"><label className="form-label">Current Password</label><input className="inp" type="password" value={cpw.cur} onChange={e=>setCpw(x=>({...x,cur:e.target.value}))} placeholder="Current password"/></div>
+        <div className="form-group"><label className="form-label">New Password</label><input className="inp" type="password" value={cpw.nw} onChange={e=>setCpw(x=>({...x,nw:e.target.value}))} placeholder="New password (min 6 chars)"/></div>
+        <div className="form-group"><label className="form-label">Confirm New Password</label><input className="inp" type="password" value={cpw.confirm} onChange={e=>setCpw(x=>({...x,confirm:e.target.value}))} placeholder="Repeat new password"/></div>
+        <button className="btn btn-primary" onClick={changePw} disabled={loading}>{loading?'Saving…':'Update Password'}</button>
+        <div style={{marginTop:'.75rem',fontSize:'.78rem',color:'var(--text3)'}}>You will be logged out after a successful password change.</div>
+      </div>
+    </div>
+  );
+}
+
+// ── USER MANAGEMENT (Admin only) ─────────────────────────────────────────────
+function UserMgmtPage({currentUser}){
+  const [users,setUsers]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState('');
+  const [ok,setOk]=useState('');
+  const [showCreate,setShowCreate]=useState(false);
+  const [form,setForm]=useState({username:'',password:'',full_name:'',role:'faculty',email:'',department:''});
+  const [resetTarget,setResetTarget]=useState(null);
+  const [newPw,setNewPw]=useState('');
+  const sf=(k,v)=>setForm(x=>({...x,[k]:v}));
+
+  const load=async()=>{
+    setLoading(true);setErr('');
+    try{const d=await api('/auth/users');setUsers(d);}
+    catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+  React.useEffect(()=>{load();},[]);
+
+  const create=async()=>{
+    setErr('');setOk('');
+    try{
+      await api('/auth/users',{method:'POST',body:JSON.stringify(form)});
+      setOk('User created.');setShowCreate(false);
+      setForm({username:'',password:'',full_name:'',role:'faculty',email:'',department:''});
+      load();
+    }catch(e){setErr(e.message);}
+  };
+
+  const toggle=async(u)=>{
+    setErr('');
+    try{
+      await api(`/auth/users/${u.id}`,{method:'PUT',body:JSON.stringify({is_active:!u.is_active})});
+      setOk(`${u.username} ${u.is_active?'deactivated':'activated'}.`);
+      load();
+    }catch(e){setErr(e.message);}
+  };
+
+  const doReset=async()=>{
+    if(!newPw||newPw.length<6){setErr('Password must be ≥6 chars.');return;}
+    try{
+      await api(`/auth/users/${resetTarget.id}/reset-password`,{method:'POST',body:JSON.stringify({new_password:newPw})});
+      setOk(`Password reset for ${resetTarget.username}.`);setResetTarget(null);setNewPw('');
+    }catch(e){setErr(e.message);}
+  };
+
+  const roleColors={faculty:'b-blue',hod:'b-green',admin:'b-purple'};
+
+  if(currentUser?.role!=='admin') return(
+    <div className="page-body"><Alrt t="error" msg="Admin role required to manage users."/></div>
+  );
+
+  return(
+    <div className="page-body">
+      <Alrt t="error" msg={err}/>
+      <Alrt t="success" msg={ok}/>
+
+      <div className="card" style={{marginBottom:'1.25rem'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:'1rem'}}>All Users</div>
+            <div style={{fontSize:'.8rem',color:'var(--text2)'}}>{users.length} accounts registered</div>
+          </div>
+          <button className="btn btn-primary" onClick={()=>setShowCreate(s=>!s)}>+ Add User</button>
+        </div>
+
+        {showCreate&&(
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1.25rem',marginBottom:'1.25rem'}}>
+            <div style={{fontWeight:600,marginBottom:.75+'rem'}}>Create New User</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.75rem'}}>
+              <div><label className="form-label">Username *</label><input className="inp" value={form.username} onChange={e=>sf('username',e.target.value)} placeholder="username"/></div>
+              <div><label className="form-label">Password *</label><input className="inp" type="password" value={form.password} onChange={e=>sf('password',e.target.value)} placeholder="min 6 chars"/></div>
+              <div><label className="form-label">Full Name *</label><input className="inp" value={form.full_name} onChange={e=>sf('full_name',e.target.value)} placeholder="Dr. John Smith"/></div>
+              <div><label className="form-label">Role *</label>
+                <select className="inp" value={form.role} onChange={e=>sf('role',e.target.value)}>
+                  <option value="faculty">Faculty</option>
+                  <option value="hod">HOD</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div><label className="form-label">Email</label><input className="inp" value={form.email} onChange={e=>sf('email',e.target.value)} placeholder="email@college.edu"/></div>
+              <div><label className="form-label">Department</label><input className="inp" value={form.department} onChange={e=>sf('department',e.target.value)} placeholder="CSE"/></div>
+            </div>
+            <div style={{display:'flex',gap:'.75rem',marginTop:'1rem'}}>
+              <button className="btn btn-primary" onClick={create}>Create User</button>
+              <button className="btn btn-outline" onClick={()=>setShowCreate(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {loading?<Skel/>:<div style={{display:'flex',flexDirection:'column',gap:'.75rem'}}>
+          {users.map(u=>(
+            <div key={u.id} style={{display:'flex',alignItems:'center',gap:'1rem',padding:'.875rem 1rem',background:'var(--bg)',borderRadius:10,border:'1px solid var(--border)',opacity:u.is_active?1:.55}}>
+              <div style={{width:38,height:38,borderRadius:'50%',background:'linear-gradient(135deg,var(--blue),var(--indigo))',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:700,flexShrink:0}}>
+                {u.full_name?.[0]||u.username?.[0]||'U'}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:600,fontSize:'.9rem'}}>{u.full_name||u.username} <span style={{color:'var(--text3)',fontWeight:400}}>@{u.username}</span></div>
+                <div style={{fontSize:'.78rem',color:'var(--text2)'}}>{u.email||'—'} · {u.department||'All Departments'}</div>
+              </div>
+              <span className={`badge ${roleColors[u.role]||'b-blue'}`}>{u.role}</span>
+              {!u.is_active&&<span className="badge b-red">Inactive</span>}
+              <div style={{display:'flex',gap:'.5rem'}}>
+                <button className="btn btn-outline" style={{padding:'.35rem .7rem',fontSize:'.78rem'}} onClick={()=>{setResetTarget(u);setNewPw('');}}>Reset PW</button>
+                {u.id!==currentUser?.id&&(
+                  <button className={`btn ${u.is_active?'btn-outline':'btn-primary'}`} style={{padding:'.35rem .7rem',fontSize:'.78rem'}} onClick={()=>toggle(u)}>
+                    {u.is_active?'Deactivate':'Activate'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>}
+      </div>
+
+      {resetTarget&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200}}>
+          <div className="card" style={{width:380}}>
+            <div style={{fontWeight:700,marginBottom:'.75rem'}}>Reset Password — @{resetTarget.username}</div>
+            <input className="inp" type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} placeholder="New password (min 6 chars)" style={{marginBottom:'.75rem'}}/>
+            <div style={{display:'flex',gap:'.75rem'}}>
+              <button className="btn btn-primary" onClick={doReset}>Reset</button>
+              <button className="btn btn-outline" onClick={()=>setResetTarget(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App(){
-  const [user,setUser]=useState(null);
+  // Restore session from sessionStorage on page load
+  const [user,setUser]=useState(()=>{
+    const tok=sessionStorage.getItem('obe_token');
+    if(!tok)return null;
+    try{
+      const payload=JSON.parse(atob(tok.split('.')[1]));
+      if(payload.exp*1000<Date.now()){sessionStorage.removeItem('obe_token');return null;}
+      return {id:Number(payload.sub),username:payload.username,role:payload.role,full_name:payload.username};
+    }catch{sessionStorage.removeItem('obe_token');return null;}
+  });
   const [page,setPage]=useState('home');
   const [course,setCourse]=useState(null);
   const [open,setOpen]=useState(false);
 
   if(!user)return<Login onLogin={setUser}/>;
 
-  const titles={home:'Dashboard',courses:'Courses',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Level'};
+  const titles={home:'Dashboard',courses:'Courses',usermgmt:'User Management',profile:'My Profile',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Level'};
 
   const pages={
     home:<HomePage go={setPage} setCourse={setCourse}/>,
@@ -1109,11 +1327,13 @@ function App(){
     qbank:<QBankPage course={course} go={setPage}/>,
     qclassify:<ClassifyPage course={course}/>,
     qmanipulate:<ManipulatePage course={course}/>,
+    usermgmt:<UserMgmtPage currentUser={user}/>,
+    profile:<ProfilePage user={user} logout={()=>{setToken('');setUser(null);setPage('home');setCourse(null);}}/>,
   };
 
   return(<div className="shell">
     <div className={`overlay ${open?'show':''}`} onClick={()=>setOpen(false)}/>
-    <Sidebar page={page} go={setPage} course={course} user={user} logout={()=>{setUser(null);setPage('home');setCourse(null);}} open={open} close={()=>setOpen(false)}/>
+    <Sidebar page={page} go={setPage} course={course} user={user} logout={()=>{setToken('');setUser(null);setPage('home');setCourse(null);}} open={open} close={()=>setOpen(false)}/>
     <div className="main">
       <div className="topbar">
         <button className="hamburger" onClick={()=>setOpen(o=>!o)}>☰</button>
@@ -1127,7 +1347,7 @@ function App(){
         </div>
         <div style={{display:'flex',alignItems:'center',gap:'.875rem'}}>
           {course&&<span className="badge b-blue" style={{fontSize:'.8rem'}}>📚 {course.course_code}</span>}
-          <div style={{width:34,height:34,borderRadius:'50%',background:'linear-gradient(135deg,var(--blue),var(--indigo))',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'.8rem',fontWeight:700}}>{user.user?.[0]?.toUpperCase()}</div>
+          <div style={{width:34,height:34,borderRadius:'50%',background:'linear-gradient(135deg,var(--blue),var(--indigo))',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'.8rem',fontWeight:700}}>{user?.full_name?.[0]?.toUpperCase()||user?.username?.[0]?.toUpperCase()||'U'}</div>
         </div>
       </div>
       <EB key={page}>{pages[page]||<div className="page-body"><Alrt t="error" msg="Page not found."/></div>}</EB>

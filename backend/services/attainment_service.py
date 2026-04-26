@@ -34,8 +34,8 @@ from backend.services.course_service import CourseService
 
 logger = get_logger(__name__)
 
-OUTPUT_DIR = Path("generated_docs/attainment_reports")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+from backend.core.storage import get_storage
+_CATEGORY = "attainment_reports"
 
 ATTAINMENT_THRESHOLD_PCT = 60   # students must score >= 60% of max CO marks
 
@@ -51,7 +51,9 @@ class AttainmentService:
 
     @staticmethod
     def get_filepath(course_id: int) -> str:
-        return str(OUTPUT_DIR / f"attainment_report_{course_id}.docx")
+        storage = get_storage()
+        p = storage.get_path(_CATEGORY, f"attainment_report_{course_id}.docx")
+        return str(p) if p else str(get_storage()._dir(_CATEGORY) / f"attainment_report_{course_id}.docx")
 
     # ------------------------------------------------------------------
     # 1. Save / replace student marks
@@ -224,8 +226,15 @@ class AttainmentService:
         course_svc = CourseService(self.db)
         course = await course_svc.get_course(course_id)
 
-        filepath = self.get_filepath(course_id)
-        self._build_docx(course, data, filepath)
+        _storage = get_storage()
+        _filename = f"attainment_report_{course_id}.docx"
+        import tempfile as _tmp
+        from pathlib import Path as _Path
+        with _tmp.TemporaryDirectory() as _t:
+            filepath = str(_Path(_t) / _filename)
+            self._build_docx(course, data, filepath)
+            _storage.save_from_path(_CATEGORY, _filename, _Path(filepath))
+        filepath = str(_storage.get_path(_CATEGORY, _filename))
 
         return {
             "course_id": course_id,

@@ -27,8 +27,8 @@ from backend.services.course_service import CourseService
 
 logger = get_logger(__name__)
 
-OUTPUT_DIR = Path("generated_docs/evaluation_plans")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+from backend.core.storage import get_storage
+_CATEGORY = "evaluation_plans"
 
 
 class EvaluationPlanService:
@@ -42,7 +42,9 @@ class EvaluationPlanService:
 
     @staticmethod
     def get_filepath(course_id: int) -> str:
-        return str(OUTPUT_DIR / f"evaluation_plan_{course_id}.docx")
+        storage = get_storage()
+        p = storage.get_path(_CATEGORY, f"evaluation_plan_{course_id}.docx")
+        return str(p) if p else str(get_storage()._dir(_CATEGORY) / f"evaluation_plan_{course_id}.docx")
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -67,7 +69,8 @@ class EvaluationPlanService:
         plan = await self._call_llm(prompt)
 
         # 3. Write Word doc
-        filepath = self.get_filepath(course_id)
+        _storage = get_storage()
+        _filename = f"evaluation_plan_{course_id}.docx"
         self._build_docx(course_name, course_code, cos, eval_cfg, plan, filepath)
 
         return {
@@ -328,7 +331,13 @@ Schema:
             for c in row:
                 c.paragraphs[0].runs[0].font.size = Pt(9)
 
-        doc.save(filepath)
+        import tempfile as _tmp
+        from pathlib import Path as _Path
+        with _tmp.TemporaryDirectory() as _t:
+            _p = _Path(_t) / _filename
+            doc.save(str(_p))
+            _storage.save_from_path(_CATEGORY, _filename, _p)
+        filepath = str(_storage.get_path(_CATEGORY, _filename))
         logger.info(f"Evaluation plan saved → {filepath}")
 
     # ------------------------------------------------------------------
