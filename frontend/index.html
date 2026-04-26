@@ -4,810 +4,1133 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>OBE Automate</title>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,700;0,900;1,400;1,700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet"/>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--navy:#0f1b2d;--navy2:#162032;--navy3:#1e2d42;--navy4:#243452;--slate:#2d3f56;--amber:#f59e0b;--amber2:#fbbf24;--teal:#14b8a6;--red:#ef4444;--green:#22c55e;--purple:#8b5cf6;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--border:#1e3a5f;--card:#162032;--sidebar-w:240px}
-html,body,#root{height:100%;font-family:'Inter',sans-serif;background:var(--navy);color:var(--text)}
-::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:var(--navy2)}::-webkit-scrollbar-thumb{background:var(--slate);border-radius:3px}
-.auth-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--navy);padding:1rem}
-.auth-card{background:var(--navy2);border:1px solid var(--border);border-radius:16px;padding:2.5rem;width:100%;max-width:420px}
-.auth-logo{font-family:'Fraunces',serif;font-size:1.8rem;color:var(--amber);margin-bottom:.25rem}
-.auth-sub{color:var(--text2);font-size:.8rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:2rem}
-.auth-role-btn{width:100%;padding:.9rem;border-radius:10px;border:1px solid var(--border);background:var(--navy3);color:var(--text);cursor:pointer;font-size:.95rem;margin-bottom:.75rem;transition:all .2s;display:flex;align-items:center;gap:.75rem}
-.auth-role-btn:hover,.auth-role-btn.active{border-color:var(--amber);background:var(--navy4)}
-.auth-input{width:100%;padding:.75rem 1rem;background:var(--navy3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.95rem;margin-bottom:.75rem;outline:none}
-.auth-input:focus{border-color:var(--amber)}
-.btn-amber{background:var(--amber);color:#000;border:none;padding:.75rem 1.5rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.95rem;transition:background .2s;width:100%}
-.btn-amber:hover{background:var(--amber2)}.btn-amber:disabled{opacity:.5;cursor:not-allowed}
-.auth-error{background:#3f1515;border:1px solid var(--red);border-radius:8px;padding:.75rem;color:#fca5a5;font-size:.85rem;margin-bottom:.75rem}
-.app-shell{display:flex;height:100vh;overflow:hidden}
-.sidebar{width:var(--sidebar-w);background:var(--navy2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;transition:transform .3s;z-index:50}
-.sidebar-logo{padding:1.25rem 1rem 1rem;border-bottom:1px solid var(--border)}
-.logo-name{font-family:'Fraunces',serif;font-size:1.4rem;color:var(--amber);line-height:1}
-.logo-sub{font-size:.65rem;color:var(--text3);letter-spacing:.12em;text-transform:uppercase;margin-top:.2rem}
-.sidebar-nav{flex:1;overflow-y:auto;padding:.75rem 0}
-.nav-section{padding:.5rem 1rem .25rem;font-size:.65rem;color:var(--text3);letter-spacing:.1em;text-transform:uppercase}
-.nav-item{display:flex;align-items:center;gap:.6rem;padding:.55rem 1rem;cursor:pointer;color:var(--text2);font-size:.875rem;transition:all .15s;border-left:3px solid transparent}
-.nav-item:hover{background:var(--navy3);color:var(--text)}.nav-item.active{background:var(--navy3);color:var(--amber);border-left-color:var(--amber)}
-.nav-icon{width:18px;text-align:center;font-size:.95rem}
-.course-pill{margin:.75rem 1rem;background:var(--navy4);border:1px solid var(--amber);border-radius:8px;padding:.5rem .75rem}
-.course-pill-label{font-size:.65rem;color:var(--amber);text-transform:uppercase;letter-spacing:.08em}
-.course-pill-name{font-size:.8rem;color:var(--text);margin-top:.1rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sidebar-footer{padding:.75rem 1rem;border-top:1px solid var(--border)}
-.role-badge{display:inline-flex;align-items:center;gap:.4rem;background:var(--navy3);border:1px solid var(--border);border-radius:20px;padding:.35rem .75rem;font-size:.75rem;color:var(--text2)}
-.logout-btn{margin-top:.5rem;width:100%;padding:.5rem;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text3);cursor:pointer;font-size:.8rem;transition:all .2s}
-.logout-btn:hover{border-color:var(--red);color:var(--red)}
-.topbar{display:none;align-items:center;gap:.75rem;padding:.75rem 1rem;background:var(--navy2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:40}
-.hamburger{background:none;border:none;color:var(--text);cursor:pointer;font-size:1.25rem;padding:.25rem}
-.topbar-logo{font-family:'Fraunces',serif;font-size:1.1rem;color:var(--amber)}
-.main-area{flex:1;overflow-y:auto;display:flex;flex-direction:column}
-.page-header{padding:1.5rem 1.75rem 1rem;border-bottom:1px solid var(--border)}
-.page-title{font-size:1.1rem;font-weight:600;color:var(--text2)}
-.page-body{padding:1.5rem 1.75rem;flex:1}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem}
-.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem}
-.stat-card{background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:1rem}
-.stat-val{font-size:1.8rem;font-family:'Fraunces',serif;font-weight:700;color:var(--amber)}
-.stat-label{font-size:.75rem;color:var(--text2);text-transform:uppercase;letter-spacing:.08em;margin-top:.25rem}
-.btn{padding:.6rem 1.2rem;border-radius:8px;font-size:.875rem;font-weight:500;cursor:pointer;transition:all .2s;border:none}
-.btn-primary{background:var(--amber);color:#000}.btn-primary:hover{background:var(--amber2)}.btn-primary:disabled{opacity:.5;cursor:not-allowed}
-.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text2)}.btn-outline:hover{border-color:var(--text2);color:var(--text)}
-.btn-ghost{background:transparent;border:none;color:var(--text2);padding:.4rem .75rem;cursor:pointer}.btn-ghost:hover{color:var(--text)}
-.btn-teal{background:var(--teal);color:#fff;border:none}.btn-teal:hover{opacity:.85}
-.btn-purple{background:var(--purple);color:#fff;border:none}.btn-purple:hover{opacity:.85}
-.btn-danger{background:#3f1515;border:1px solid var(--red);color:#fca5a5;cursor:pointer}.btn-danger:hover{background:#5a1d1d}
-.form-group{margin-bottom:1rem}
-.form-label{display:block;font-size:.8rem;color:var(--text2);margin-bottom:.35rem;font-weight:500}
-.form-input{width:100%;padding:.65rem .9rem;background:var(--navy3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;outline:none;transition:border-color .2s}
-.form-input:focus{border-color:var(--amber)}
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
-.tbl-wrap{overflow-x:auto;border-radius:10px;border:1px solid var(--border)}
-table{width:100%;border-collapse:collapse;font-size:.85rem}
-thead{background:var(--navy3)}
-th{padding:.65rem 1rem;text-align:left;color:var(--text2);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)}
-td{padding:.65rem 1rem;border-bottom:1px solid var(--border);color:var(--text)}
-tr:last-child td{border-bottom:none}tr:hover td{background:var(--navy3)}
-.badge{display:inline-flex;align-items:center;padding:.2rem .6rem;border-radius:20px;font-size:.7rem;font-weight:600}
-.badge-green{background:#14401a;color:#86efac}.badge-red{background:#3f1515;color:#fca5a5}
-.badge-amber{background:#3f2a00;color:#fcd34d}.badge-blue{background:#0c2340;color:#93c5fd}
-.badge-purple{background:#2e1065;color:#c4b5fd}.badge-teal{background:#042f2e;color:#5eead4}
-.alert{padding:.85rem 1rem;border-radius:8px;font-size:.875rem;margin-bottom:1rem;display:flex;align-items:flex-start;gap:.6rem}
-.alert-error{background:#3f1515;border:1px solid var(--red);color:#fca5a5}
-.alert-success{background:#14401a;border:1px solid var(--green);color:#86efac}
-.alert-info{background:#0c2340;border:1px solid #3b82f6;color:#93c5fd}
-.alert-warning{background:#3f2a00;border:1px solid var(--amber);color:#fcd34d}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--amber);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.4rem}
+:root{
+  --sidebar:#111827;
+  --sidebar2:#1f2937;
+  --sidebar3:#374151;
+  --white:#ffffff;
+  --bg:#f8fafc;
+  --bg2:#f1f5f9;
+  --card:#ffffff;
+  --border:#e2e8f0;
+  --border2:#cbd5e1;
+  --text:#0f172a;
+  --text2:#475569;
+  --text3:#94a3b8;
+  --blue:#3b82f6;
+  --blue2:#2563eb;
+  --blue3:#eff6ff;
+  --indigo:#6366f1;
+  --green:#10b981;
+  --green2:#d1fae5;
+  --amber:#f59e0b;
+  --amber2:#fef3c7;
+  --red:#ef4444;
+  --red2:#fee2e2;
+  --purple:#8b5cf6;
+  --purple2:#ede9fe;
+  --teal:#14b8a6;
+  --teal2:#ccfbf1;
+  --pink:#ec4899;
+  --pink2:#fce7f3;
+  --sidebar-w:250px;
+  --radius:12px;
+  --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05);
+  --shadow-md:0 4px 6px -1px rgba(0,0,0,.07),0 2px 4px -1px rgba(0,0,0,.05);
+  --shadow-lg:0 10px 15px -3px rgba(0,0,0,.08),0 4px 6px -2px rgba(0,0,0,.04);
+}
+html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text)}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:10px}
+
+/* ── AUTH ── */
+.auth-wrap{min-height:100vh;display:flex;background:var(--sidebar)}
+.auth-left{flex:1;display:flex;align-items:center;justify-content:center;padding:2rem}
+.auth-right{width:420px;background:var(--white);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3rem;box-shadow:-20px 0 60px rgba(0,0,0,.3)}
+.auth-brand{font-family:'DM Serif Display',serif;font-size:3rem;color:var(--white);line-height:1}
+.auth-brand-sub{color:#6b7280;font-size:.9rem;margin-top:.5rem;letter-spacing:.05em}
+.auth-tagline{color:#9ca3af;font-size:1.1rem;margin-top:2rem;max-width:360px;line-height:1.7}
+.auth-card-title{font-family:'DM Serif Display',serif;font-size:1.8rem;color:var(--text);margin-bottom:.5rem}
+.auth-card-sub{color:var(--text2);font-size:.875rem;margin-bottom:2rem}
+.role-btn{width:100%;padding:.85rem 1rem;border-radius:10px;border:1.5px solid var(--border);background:var(--white);color:var(--text);cursor:pointer;font-size:.9rem;margin-bottom:.75rem;transition:all .2s;display:flex;align-items:center;gap:.75rem;font-family:'DM Sans',sans-serif}
+.role-btn:hover{border-color:var(--blue);background:var(--blue3)}
+.role-btn.active{border-color:var(--blue2);background:var(--blue3);color:var(--blue2)}
+.role-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.1rem}
+.inp{width:100%;padding:.7rem 1rem;border:1.5px solid var(--border);border-radius:8px;font-size:.9rem;font-family:'DM Sans',sans-serif;color:var(--text);outline:none;transition:border-color .2s;background:var(--white)}
+.inp:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+.form-group{margin-bottom:.875rem}
+.form-label{display:block;font-size:.8rem;font-weight:600;color:var(--text2);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.05em}
+.btn-blue{background:var(--blue2);color:#fff;border:none;padding:.8rem 1.5rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.9rem;font-family:'DM Sans',sans-serif;transition:all .2s;width:100%}
+.btn-blue:hover{background:var(--blue);box-shadow:0 4px 12px rgba(37,99,235,.3)}
+.btn-blue:disabled{opacity:.5;cursor:not-allowed}
+.auth-err{background:var(--red2);border:1px solid #fca5a5;border-radius:8px;padding:.65rem .875rem;color:#dc2626;font-size:.85rem;margin-bottom:.875rem}
+.auth-hint{display:flex;align-items:center;gap:.5rem;background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:.65rem .875rem;color:var(--text2);font-size:.8rem;margin-bottom:1.5rem}
+
+/* ── APP SHELL ── */
+.shell{display:flex;height:100vh;overflow:hidden}
+
+/* ── SIDEBAR ── */
+.sidebar{width:var(--sidebar-w);background:var(--sidebar);display:flex;flex-direction:column;flex-shrink:0;z-index:50;transition:transform .3s}
+.sb-top{padding:1.25rem 1.25rem .875rem;border-bottom:1px solid #1f2937}
+.sb-brand{font-family:'DM Serif Display',serif;font-size:1.5rem;color:var(--white);line-height:1}
+.sb-brand-dot{color:var(--blue)}
+.sb-sub{font-size:.65rem;color:#6b7280;letter-spacing:.1em;text-transform:uppercase;margin-top:.2rem}
+.sb-course{margin:.875rem 1rem;background:#1f2937;border-radius:10px;padding:.75rem}
+.sb-course-label{font-size:.65rem;color:#6b7280;text-transform:uppercase;letter-spacing:.08em}
+.sb-course-name{font-size:.8rem;color:#e5e7eb;font-weight:500;margin-top:.25rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-nav{flex:1;overflow-y:auto;padding:.5rem 0}
+.sb-section{padding:.75rem 1.25rem .3rem;font-size:.65rem;color:#4b5563;letter-spacing:.1em;text-transform:uppercase;font-weight:600}
+.sb-item{display:flex;align-items:center;gap:.7rem;padding:.6rem 1.25rem;cursor:pointer;color:#9ca3af;font-size:.855rem;transition:all .15s;border-left:3px solid transparent;position:relative}
+.sb-item:hover{background:#1f2937;color:#e5e7eb}
+.sb-item.active{background:linear-gradient(90deg,#1d3a5f,#1f2937);color:#ffffff;border-left-color:var(--blue)}
+.sb-item.active .sb-icon{color:var(--blue)}
+.sb-icon{width:18px;text-align:center;font-size:1rem;flex-shrink:0}
+.sb-badge{margin-left:auto;background:var(--blue2);color:#fff;border-radius:20px;font-size:.65rem;padding:.1rem .45rem;font-weight:700}
+.sb-bottom{padding:.875rem 1.25rem;border-top:1px solid #1f2937}
+.sb-user{display:flex;align-items:center;gap:.65rem;margin-bottom:.75rem}
+.sb-avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--indigo));display:flex;align-items:center;justify-content:center;color:#fff;font-size:.8rem;font-weight:700;flex-shrink:0}
+.sb-user-name{font-size:.85rem;font-weight:600;color:#e5e7eb}
+.sb-user-role{font-size:.72rem;color:#6b7280}
+.sb-logout{width:100%;padding:.5rem;background:transparent;border:1px solid #374151;border-radius:8px;color:#6b7280;cursor:pointer;font-size:.8rem;font-family:'DM Sans',sans-serif;transition:all .2s}
+.sb-logout:hover{border-color:#ef4444;color:#ef4444}
+
+/* ── TOPBAR (mobile) ── */
+.topbar{display:none;align-items:center;gap:.75rem;padding:.75rem 1.25rem;background:var(--white);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:40;box-shadow:var(--shadow)}
+.hamburger{background:none;border:none;cursor:pointer;font-size:1.2rem;color:var(--text);padding:.25rem}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:45}
+.overlay.show{display:block}
+
+/* ── MAIN ── */
+.main{flex:1;overflow-y:auto;background:var(--bg);display:flex;flex-direction:column}
+.page-head{padding:1.5rem 2rem 1rem;border-bottom:1px solid var(--border);background:var(--white);display:flex;align-items:center;justify-content:space-between}
+.page-head-title{font-size:1rem;font-weight:700;color:var(--text)}
+.page-head-sub{font-size:.8rem;color:var(--text3);margin-top:.15rem}
+.page-body{padding:1.75rem 2rem;flex:1}
+
+/* ── CARDS ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card-p{padding:1.25rem}
+
+/* ── STAT CARDS ── */
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem}
+.stat-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.stat-card::before{content:'';position:absolute;top:0;right:0;width:80px;height:80px;border-radius:50%;opacity:.08;transform:translate(20px,-20px)}
+.stat-card.blue::before{background:var(--blue)}
+.stat-card.green::before{background:var(--green)}
+.stat-card.purple::before{background:var(--purple)}
+.stat-card.amber::before{background:var(--amber)}
+.stat-card.teal::before{background:var(--teal)}
+.stat-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;margin-bottom:.875rem}
+.stat-icon.blue{background:var(--blue3);color:var(--blue2)}
+.stat-icon.green{background:var(--green2);color:#059669}
+.stat-icon.purple{background:var(--purple2);color:#7c3aed}
+.stat-icon.amber{background:var(--amber2);color:#d97706}
+.stat-icon.teal{background:var(--teal2);color:var(--teal)}
+.stat-icon.pink{background:var(--pink2);color:var(--pink)}
+.stat-val{font-size:1.75rem;font-weight:700;color:var(--text);line-height:1;font-family:'DM Serif Display',serif}
+.stat-label{font-size:.78rem;color:var(--text2);margin-top:.25rem;font-weight:500}
+.stat-change{font-size:.75rem;margin-top:.5rem;display:flex;align-items:center;gap:.25rem}
+.stat-change.up{color:var(--green)}.stat-change.down{color:var(--red)}
+
+/* ── BUTTONS ── */
+.btn{padding:.55rem 1.1rem;border-radius:8px;font-size:.855rem;font-weight:600;cursor:pointer;transition:all .2s;border:none;font-family:'DM Sans',sans-serif;display:inline-flex;align-items:center;gap:.4rem}
+.btn-primary{background:var(--blue2);color:#fff}.btn-primary:hover{background:var(--blue);box-shadow:0 4px 12px rgba(37,99,235,.25)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-outline{background:var(--white);border:1.5px solid var(--border);color:var(--text2)}.btn-outline:hover{border-color:var(--blue2);color:var(--blue2)}
+.btn-ghost{background:transparent;border:none;color:var(--text2)}.btn-ghost:hover{color:var(--text);background:var(--bg2)}
+.btn-green{background:var(--green);color:#fff}.btn-green:hover{opacity:.85}
+.btn-red{background:var(--red2);border:1px solid #fca5a5;color:var(--red)}.btn-red:hover{background:#fecaca}
+.btn-sm{padding:.35rem .75rem;font-size:.78rem}
+
+/* ── FORM ── */
+.fg{margin-bottom:1rem}
+.fl{display:block;font-size:.78rem;font-weight:600;color:var(--text2);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.05em}
+.fi{width:100%;padding:.65rem .875rem;border:1.5px solid var(--border);border-radius:8px;font-size:.9rem;font-family:'DM Sans',sans-serif;color:var(--text);outline:none;transition:border-color .2s;background:var(--white)}
+.fi:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.fsel{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%2394a3b8'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right .75rem center;padding-right:2rem}
+
+/* ── TABLE ── */
+.tbl-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:.855rem;background:var(--white)}
+thead tr{border-bottom:1px solid var(--border);background:var(--bg)}
+th{padding:.75rem 1rem;text-align:left;color:var(--text2);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em}
+td{padding:.8rem 1rem;border-bottom:1px solid var(--border);color:var(--text);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--bg)}
+
+/* ── BADGES ── */
+.badge{display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .65rem;border-radius:20px;font-size:.72rem;font-weight:600}
+.b-blue{background:var(--blue3);color:var(--blue2)}
+.b-green{background:var(--green2);color:#059669}
+.b-amber{background:var(--amber2);color:#b45309}
+.b-red{background:var(--red2);color:#dc2626}
+.b-purple{background:var(--purple2);color:#7c3aed}
+.b-teal{background:var(--teal2);color:var(--teal)}
+.b-pink{background:var(--pink2);color:var(--pink)}
+.b-gray{background:var(--bg2);color:var(--text2)}
+
+/* ── ALERTS ── */
+.alert{padding:.875rem 1rem;border-radius:10px;font-size:.875rem;margin-bottom:1rem;display:flex;align-items:flex-start;gap:.65rem}
+.a-error{background:var(--red2);border:1px solid #fca5a5;color:#dc2626}
+.a-success{background:var(--green2);border:1px solid #6ee7b7;color:#059669}
+.a-info{background:var(--blue3);border:1px solid #93c5fd;color:var(--blue2)}
+.a-warning{background:var(--amber2);border:1px solid #fcd34d;color:#b45309}
+
+/* ── SPINNER / SKELETON ── */
+.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--blue2);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.4rem}
 @keyframes spin{to{transform:rotate(360deg)}}
-.skeleton{background:linear-gradient(90deg,var(--navy3) 25%,var(--navy4) 50%,var(--navy3) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:6px;height:1rem}
+.skel{background:linear-gradient(90deg,var(--bg) 25%,var(--border) 50%,var(--bg) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:6px;height:.875rem}
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:1.5rem}
-.tab{padding:.6rem 1.25rem;cursor:pointer;font-size:.875rem;color:var(--text2);border-bottom:2px solid transparent;transition:all .2s}
-.tab:hover{color:var(--text)}.tab.active{color:var(--amber);border-bottom-color:var(--amber)}
-.heatmap-wrap{overflow-x:auto}
-.heatmap-table{border-collapse:collapse;font-size:.8rem;white-space:nowrap}
-.heatmap-table th,.heatmap-table td{padding:.5rem .75rem;border:1px solid var(--border);text-align:center}
-.heatmap-table th{background:var(--navy3);color:var(--text2);font-weight:600}
-.heatmap-table td.course-name{text-align:left;font-weight:500;min-width:140px}
-.heat-high{background:#14401a;color:#86efac}.heat-med{background:#3f2a00;color:#fcd34d}.heat-low{background:#3f1515;color:#fca5a5}.heat-none{background:var(--navy3);color:var(--text3)}
-.progress-bar{height:8px;background:var(--navy3);border-radius:4px;overflow:hidden}
-.progress-fill{height:100%;border-radius:4px;transition:width .6s ease}
-.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:45}
-.sidebar-overlay.show{display:block}
-.question-card{background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:.75rem}
-.question-card:hover{border-color:var(--slate)}
-.bloom-badge-1{background:#1a1a3f;color:#a5b4fc}.bloom-badge-2{background:#0c2340;color:#93c5fd}
-.bloom-badge-3{background:#042f2e;color:#5eead4}.bloom-badge-4{background:#2e1065;color:#c4b5fd}
-.bloom-badge-5{background:#3f2a00;color:#fcd34d}.bloom-badge-6{background:#14401a;color:#86efac}
-.error-boundary{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:1rem;text-align:center;padding:2rem}
-.error-boundary h2{font-family:'Fraunces',serif;color:var(--red);font-size:1.5rem}
-@media(max-width:768px){.topbar{display:flex}.sidebar{position:fixed;top:0;bottom:0;left:0;transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.form-grid{grid-template-columns:1fr}.page-body{padding:1rem}.page-header{padding:1rem}}
+
+/* ── PROGRESS ── */
+.pbar{height:7px;background:var(--bg2);border-radius:10px;overflow:hidden}
+.pfill{height:100%;border-radius:10px;transition:width .6s ease}
+
+/* ── TABS ── */
+.tabs{display:flex;gap:0;border-bottom:1.5px solid var(--border);margin-bottom:1.5rem}
+.tab{padding:.65rem 1.25rem;cursor:pointer;font-size:.875rem;color:var(--text2);border-bottom:2px solid transparent;transition:all .2s;font-weight:500;margin-bottom:-1.5px}
+.tab:hover{color:var(--text)}.tab.on{color:var(--blue2);border-bottom-color:var(--blue2)}
+
+/* ── BLOOM BADGES ── */
+.bl1{background:#eff6ff;color:#1d4ed8}
+.bl2{background:#f0fdf4;color:#166534}
+.bl3{background:#fefce8;color:#854d0e}
+.bl4{background:#faf5ff;color:#6b21a8}
+.bl5{background:#fff7ed;color:#9a3412}
+.bl6{background:#fdf2f8;color:#9d174d}
+
+/* ── QUESTION CARD ── */
+.qcard{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:.75rem;box-shadow:var(--shadow);transition:box-shadow .2s}
+.qcard:hover{box-shadow:var(--shadow-md)}
+
+/* ── DASHBOARD SPECIFIC ── */
+.dash-grid{display:grid;grid-template-columns:1fr 320px;gap:1.5rem}
+.welcome-card{background:linear-gradient(135deg,#1e3a5f 0%,#1e40af 50%,#312e81 100%);border-radius:var(--radius);padding:1.75rem;color:#fff;margin-bottom:1.5rem;position:relative;overflow:hidden}
+.welcome-card::after{content:'';position:absolute;top:-40px;right:-40px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.05)}
+.welcome-card::before{content:'';position:absolute;bottom:-60px;right:60px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.04)}
+.welcome-name{font-family:'DM Serif Display',serif;font-size:1.75rem;line-height:1.2;margin-bottom:.35rem}
+.welcome-sub{font-size:.875rem;opacity:.75;margin-bottom:1.25rem}
+.welcome-chips{display:flex;gap:.5rem;flex-wrap:wrap}
+.wchip{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:.3rem .75rem;font-size:.78rem;backdrop-filter:blur(4px)}
+.schedule-item{display:flex;gap:.875rem;padding:.875rem 0;border-bottom:1px solid var(--border)}
+.schedule-item:last-child{border-bottom:none}
+.sched-time{font-size:.75rem;color:var(--text3);min-width:52px;font-weight:500;padding-top:.1rem}
+.sched-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:.25rem}
+.sched-line{width:2px;background:var(--border);flex-shrink:0;border-radius:2px}
+.sched-content{flex:1}
+.sched-title{font-size:.875rem;font-weight:600;color:var(--text)}
+.sched-sub{font-size:.78rem;color:var(--text2);margin-top:.15rem}
+.event-item{display:flex;align-items:flex-start;gap:.875rem;padding:.875rem;border-radius:10px;margin-bottom:.625rem;background:var(--bg);border:1px solid var(--border)}
+.event-date{min-width:42px;text-align:center;background:var(--white);border:1px solid var(--border);border-radius:8px;padding:.4rem .35rem}
+.event-day{font-size:1.1rem;font-weight:800;color:var(--text);line-height:1;font-family:'DM Serif Display',serif}
+.event-month{font-size:.62rem;color:var(--text3);text-transform:uppercase;letter-spacing:.06em}
+.event-body{flex:1}
+.event-title{font-size:.855rem;font-weight:600;color:var(--text)}
+.event-sub{font-size:.78rem;color:var(--text2);margin-top:.15rem}
+.quick-action{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .2s;text-align:center;box-shadow:var(--shadow)}
+.quick-action:hover{border-color:var(--blue2);box-shadow:var(--shadow-md);transform:translateY(-2px)}
+.qa-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.25rem}
+.qa-label{font-size:.78rem;font-weight:600;color:var(--text2)}
+.activity-item{display:flex;align-items:center;gap:.875rem;padding:.75rem 0;border-bottom:1px solid var(--border)}
+.activity-item:last-child{border-bottom:none}
+.act-icon{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0}
+.act-content{flex:1}
+.act-title{font-size:.855rem;font-weight:500;color:var(--text)}
+.act-sub{font-size:.75rem;color:var(--text3);margin-top:.1rem}
+.act-time{font-size:.72rem;color:var(--text3)}
+.section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.section-title{font-size:.95rem;font-weight:700;color:var(--text)}
+.section-link{font-size:.8rem;color:var(--blue2);cursor:pointer;font-weight:500}
+.section-link:hover{text-decoration:underline}
+
+/* ── HEATMAP ── */
+.htbl{border-collapse:collapse;font-size:.8rem;white-space:nowrap;width:100%}
+.htbl th,.htbl td{padding:.5rem .75rem;border:1px solid var(--border);text-align:center}
+.htbl th{background:var(--bg);color:var(--text2);font-weight:600;font-size:.72rem}
+.htbl td.cn{text-align:left;font-weight:500;background:var(--white)}
+.hh{background:#d1fae5;color:#065f46}.hm{background:#fef3c7;color:#78350f}.hl{background:#fee2e2;color:#991b1b}.hn{background:var(--bg);color:var(--text3)}
+
+/* ── RESPONSIVE ── */
+@media(max-width:900px){.dash-grid{grid-template-columns:1fr}}
+@media(max-width:768px){
+  .topbar{display:flex}
+  .sidebar{position:fixed;top:0;bottom:0;left:0;transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .fgrid{grid-template-columns:1fr}
+  .page-body{padding:1.25rem}
+  .page-head{padding:1rem 1.25rem}
+  .stat-row{grid-template-columns:1fr 1fr}
+}
+
+/* ── ERROR BOUNDARY ── */
+.eb{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:1rem;text-align:center;padding:2rem}
+.eb h2{font-family:'DM Serif Display',serif;color:var(--red);font-size:1.5rem}
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{animation:fadeUp .35s ease both}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useCallback } = React;
-const API = '';
+const {useState,useEffect,useRef}=React;
+const API='';
+const USERS={faculty:{pw:'faculty123',role:'faculty',label:'Faculty',icon:'👨‍🏫'},hod:{pw:'hod123',role:'hod',label:'HOD / Principal',icon:'🎓'}};
+const BLOOM=[{l:1,n:'Remember',c:'bl1'},{l:2,n:'Understand',c:'bl2'},{l:3,n:'Apply',c:'bl3'},{l:4,n:'Analyse',c:'bl4'},{l:5,n:'Evaluate',c:'bl5'},{l:6,n:'Create',c:'bl6'}];
+const QTYPES=['Short Answer','Long Answer','MCQ','Case Study'];
 
-const USERS = {
-  faculty:{ password:'faculty123', role:'faculty', label:'Faculty', icon:'👨‍🏫' },
-  hod:    { password:'hod123',     role:'hod',     label:'HOD',     icon:'🎓' },
-};
-
-const BLOOM_LEVELS = [
-  {level:1,label:'Remember',color:'bloom-badge-1'},
-  {level:2,label:'Understand',color:'bloom-badge-2'},
-  {level:3,label:'Apply',color:'bloom-badge-3'},
-  {level:4,label:'Analyse',color:'bloom-badge-4'},
-  {level:5,label:'Evaluate',color:'bloom-badge-5'},
-  {level:6,label:'Create',color:'bloom-badge-6'},
-];
-
-const QTYPES = ['Short Answer','Long Answer','MCQ','Case Study'];
-
-class ErrorBoundary extends React.Component {
-  constructor(props){super(props);this.state={hasError:false,error:null}}
-  static getDerivedStateFromError(e){return{hasError:true,error:e}}
-  render(){
-    if(this.state.hasError)return(
-      <div className="error-boundary">
-        <h2>⚠ Something went wrong</h2>
-        <p>{this.state.error?.message||'Unexpected error.'}</p>
-        <button className="btn btn-outline" onClick={()=>this.setState({hasError:false})}>Try Again</button>
-      </div>);
-    return this.props.children;
-  }
+class EB extends React.Component{
+  constructor(p){super(p);this.state={err:false}}
+  static getDerivedStateFromError(){return{err:true}}
+  render(){return this.state.err?<div className="eb"><h2>⚠ Something went wrong</h2><button className="btn btn-outline" onClick={()=>this.setState({err:false})}>Retry</button></div>:this.props.children}
 }
 
-async function apiFetch(path,opts={}){
-  const res=await fetch(API+path,{headers:{'Content-Type':'application/json'},...opts});
-  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.detail||`HTTP ${res.status}`)}
-  return res.json();
+async function api(path,opts={}){
+  const r=await fetch(API+path,{headers:{'Content-Type':'application/json'},...opts});
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||`HTTP ${r.status}`)}
+  return r.json();
 }
 
-function Alert({type='info',msg}){
-  if(!msg)return null;
-  const icons={error:'✗',success:'✓',warning:'⚠',info:'ℹ'};
-  return <div className={`alert alert-${type}`}><span>{icons[type]}</span>{msg}</div>;
-}
-function Spinner(){return <span className="spinner"/>}
-function Skeleton({rows=4}){return <div style={{display:'flex',flexDirection:'column',gap:'.75rem'}}>{Array.from({length:rows}).map((_,i)=><div key={i} className="skeleton" style={{width:`${60+Math.random()*35}%`}}/>)}</div>}
-function AttainmentBar({pct}){const c=pct>=70?'#22c55e':pct>=50?'#f59e0b':'#ef4444';return <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}><div className="progress-bar" style={{flex:1}}><div className="progress-fill" style={{width:`${pct}%`,background:c}}/></div><span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:'38px'}}>{pct}%</span></div>}
-function Badge({level}){const c=level==='High'?'badge-green':level==='Medium'?'badge-amber':'badge-red';return <span className={`badge ${c}`}>{level}</span>}
-function BloomBadge({level,label}){const b=BLOOM_LEVELS.find(x=>x.level===level)||BLOOM_LEVELS[0];return <span className={`badge ${b.color}`}>L{level} {label||b.label}</span>}
+const Spin=()=><span className="spin"/>;
+const Skel=({n=4})=><div style={{display:'flex',flexDirection:'column',gap:'.75rem'}}>{Array.from({length:n}).map((_,i)=><div key={i} className="skel" style={{width:`${55+Math.random()*40}%`}}/>)}</div>;
+const Alrt=({t='info',msg})=>msg?<div className={`alert a-${t}`}><span>{t==='error'?'✕':t==='success'?'✓':t==='warning'?'⚠':'ℹ'}</span>{msg}</div>:null;
+const PBar=({pct,c})=>{const col=c||(pct>=70?'#10b981':pct>=50?'#f59e0b':'#ef4444');return<div style={{display:'flex',alignItems:'center',gap:'.5rem'}}><div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${pct}%`,background:col}}/></div><span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:'36px'}}>{pct}%</span></div>};
+const BloomB=({l,n})=>{const b=BLOOM.find(x=>x.l===l)||BLOOM[0];return<span className={`badge ${b.c}`}>L{l} {n||b.n}</span>};
+const LvlB=({l})=>{const c=l==='High'?'b-green':l==='Medium'?'b-amber':'b-red';return<span className={`badge ${c}`}>{l}</span>};
 
-// ── LOGIN ────────────────────────────────────────────────────────────────────
-function LoginPage({onLogin}){
+function getGreeting(){
+  const h=new Date().getHours();
+  return h<12?'Good Morning':h<17?'Good Afternoon':'Good Evening';
+}
+
+function getDay(){
+  return new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+}
+
+// ── LOGIN ──────────────────────────────────────────────────────────────────
+function Login({onLogin}){
   const [role,setRole]=useState('faculty');
-  const [username,setUsername]=useState('faculty');
-  const [password,setPassword]=useState('');
-  const [error,setError]=useState('');
+  const [user,setUser]=useState('faculty');
+  const [pw,setPw]=useState('');
+  const [err,setErr]=useState('');
   const [loading,setLoading]=useState(false);
-  const handleLogin=()=>{
-    setError('');
-    if(!username||!password){setError('Enter username and password.');return;}
+  const go=()=>{
+    setErr('');
+    if(!user||!pw){setErr('Please fill in all fields.');return;}
     setLoading(true);
     setTimeout(()=>{
       const u=USERS[role];
-      if(username===role&&password===u.password){onLogin({username,role,label:u.label,icon:u.icon});}
-      else{setError('Invalid credentials.');}
+      if(user===role&&pw===u.pw){onLogin({user,role,label:u.label,icon:u.icon});}
+      else{setErr('Invalid credentials. Check the hint below.');}
       setLoading(false);
-    },500);
+    },600);
   };
-  return(<div className="auth-wrap"><div className="auth-card">
-    <div className="auth-logo">OBE.Auto</div>
-    <div className="auth-sub">Accreditation Engine</div>
-    {Object.entries(USERS).map(([k,u])=>(
-      <button key={k} className={`auth-role-btn ${role===k?'active':''}`} onClick={()=>{setRole(k);setUsername(k);}}>
-        <span style={{fontSize:'1.4rem'}}>{u.icon}</span>
-        <div style={{textAlign:'left'}}><div style={{fontWeight:600}}>{u.label}</div><div style={{fontSize:'.75rem',color:'var(--text3)'}}>{k} / {u.password}</div></div>
-      </button>))}
-    {error&&<div className="auth-error">⚠ {error}</div>}
-    <div className="form-group"><label className="form-label">Username</label><input className="auth-input" value={username} onChange={e=>setUsername(e.target.value)} placeholder="username"/></div>
-    <div className="form-group"><label className="form-label">Password</label><input className="auth-input" type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} placeholder="password"/></div>
-    <button className="btn-amber" onClick={handleLogin} disabled={loading}>{loading?'Signing in…':'Sign In →'}</button>
-  </div></div>);
+  return(
+    <div className="auth-wrap">
+      <div className="auth-left">
+        <div>
+          <div className="auth-brand">OBE<span className="auth-brand-dot">.</span>Auto</div>
+          <div className="auth-brand-sub" style={{color:'#6b7280',marginTop:'.35rem'}}>Accreditation Engine v0.1</div>
+          <div className="auth-tagline">From syllabus PDF to NBA/NAAC reports — fully automated using AI. Built for engineering colleges.</div>
+          <div style={{marginTop:'2.5rem',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem',maxWidth:360}}>
+            {[['📄','Syllabus Extraction','AI reads your PDF'],['📊','CO/PO Attainment','Auto calculated'],['📋','Question Bank','Bloom-classified'],['🏛','HOD Dashboard','Department view']].map(([ic,t,s],i)=>(
+              <div key={i} style={{background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,padding:'.875rem'}}>
+                <div style={{fontSize:'1.25rem',marginBottom:'.35rem'}}>{ic}</div>
+                <div style={{fontSize:'.8rem',fontWeight:600,color:'#e5e7eb'}}>{t}</div>
+                <div style={{fontSize:'.72rem',color:'#6b7280',marginTop:'.15rem'}}>{s}</div>
+              </div>))}
+          </div>
+        </div>
+      </div>
+      <div className="auth-right">
+        <div style={{width:'100%'}}>
+          <div className="auth-card-title">Welcome back</div>
+          <div className="auth-card-sub">Sign in to your OBE Automate account</div>
+          <div style={{marginBottom:'1.25rem'}}>
+            {Object.entries(USERS).map(([k,u])=>(
+              <button key={k} className={`role-btn ${role===k?'active':''}`} onClick={()=>{setRole(k);setUser(k);}}>
+                <div className="role-icon" style={{background:role===k?'#eff6ff':'var(--bg2)'}}>{u.icon}</div>
+                <div style={{textAlign:'left'}}>
+                  <div style={{fontWeight:600,fontSize:'.875rem'}}>{u.label}</div>
+                  <div style={{fontSize:'.75rem',color:'var(--text3)'}}>{k} / {u.pw}</div>
+                </div>
+                {role===k&&<span style={{marginLeft:'auto',color:'var(--blue2)',fontSize:'1rem'}}>✓</span>}
+              </button>))}
+          </div>
+          <div className="auth-hint">🔑 Credentials auto-filled — just enter the password shown above</div>
+          {err&&<div className="auth-err">⚠ {err}</div>}
+          <div className="form-group"><label className="form-label">Username</label><input className="inp" value={user} onChange={e=>setUser(e.target.value)} placeholder="username"/></div>
+          <div className="form-group"><label className="form-label">Password</label><input className="inp" type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&go()} placeholder="Enter password"/></div>
+          <button className="btn-blue" onClick={go} disabled={loading}>{loading?'Signing in…':'Sign In →'}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-// ── SIDEBAR ──────────────────────────────────────────────────────────────────
-function Sidebar({page,setPage,activeCourse,user,onLogout,isOpen,onClose}){
-  const nav=p=>{setPage(p);onClose();};
+// ── SIDEBAR ────────────────────────────────────────────────────────────────
+function Sidebar({page,go,course,user,logout,open,close}){
   const base=[
-    {section:'MAIN'},{page:'home',icon:'🏠',label:'Home'},{page:'courses',icon:'📚',label:'Courses'},
-    {section:'FACULTY FLOW'},
-    {page:'syllabus',icon:'📄',label:'Upload Syllabus'},{page:'setup',icon:'⚙',label:'Course Setup'},
-    {page:'sessions',icon:'📅',label:'Session Plan'},{page:'evaluation',icon:'📝',label:'Evaluation Plan'},
-    {section:'ATTAINMENT'},
-    {page:'marks',icon:'✏',label:'Upload Marks'},{page:'attainment',icon:'📊',label:'CO/PO Attainment'},{page:'reports',icon:'📑',label:'Reports'},
-    {section:'QUESTIONS'},
-    {page:'qgenerate',icon:'✨',label:'Generate Question'},{page:'qpaper',icon:'📋',label:'Question Paper'},
-    {page:'qbank',icon:'🗄',label:'Question Bank'},{page:'qclassify',icon:'🔍',label:'Classify Question'},
-    {page:'qmanipulate',icon:'🔄',label:'Manipulate Level'},
+    {s:'OVERVIEW'},{p:'home',i:'⊞',n:'Dashboard'},{p:'courses',i:'📚',n:'Courses'},
+    {s:'FACULTY FLOW'},
+    {p:'syllabus',i:'📄',n:'Upload Syllabus'},{p:'setup',i:'⚙',n:'Course Setup'},
+    {p:'sessions',i:'📅',n:'Session Plan'},{p:'evaluation',i:'📝',n:'Evaluation Plan'},
+    {s:'ATTAINMENT'},
+    {p:'marks',i:'✏',n:'Upload Marks'},{p:'attainment',i:'📊',n:'CO/PO Attainment'},{p:'reports',i:'📑',n:'Reports'},
+    {s:'QUESTIONS'},
+    {p:'qgenerate',i:'✨',n:'Generate Question'},{p:'qpaper',i:'📋',n:'Question Paper'},
+    {p:'qbank',i:'🗄',n:'Question Bank'},{p:'qclassify',i:'🔍',n:'Classify Question'},{p:'qmanipulate',i:'🔄',n:'Manipulate Level'},
   ];
-  const items=user?.role==='hod'?[{section:'HOD VIEW'},{page:'hod',icon:'🏛',label:'Dept Dashboard'},...base]:base;
-  return(<div className={`sidebar ${isOpen?'open':''}`}>
-    <div className="sidebar-logo"><div className="logo-name">OBE.Auto</div><div className="logo-sub">Accreditation Engine</div></div>
-    {activeCourse&&<div className="course-pill"><div className="course-pill-label">Active Course</div><div className="course-pill-name">{activeCourse.course_code} — {activeCourse.course_name}</div></div>}
-    <div className="sidebar-nav">
-      {items.map((item,i)=>item.section
-        ?<div key={i} className="nav-section">{item.section}</div>
-        :<div key={i} onClick={()=>nav(item.page)} className={`nav-item ${page===item.page?'active':''}`}><span className="nav-icon">{item.icon}</span>{item.label}</div>)}
-    </div>
-    <div className="sidebar-footer">
-      <a href="/docs" target="_blank" style={{display:'flex',alignItems:'center',gap:'.5rem',color:'var(--teal)',textDecoration:'none',fontSize:'.8rem',padding:'.4rem 0'}}>⚡ API Docs</a>
-      <div className="role-badge"><span>{user?.icon}</span><span>{user?.label}</span></div>
-      <button className="logout-btn" onClick={onLogout}>Sign Out</button>
-    </div>
-  </div>);
-}
-
-// ── HOME ─────────────────────────────────────────────────────────────────────
-function HomePage({setPage}){
-  const [courseCount,setCourseCount]=useState(0);
-  useEffect(()=>{apiFetch('/courses/').then(d=>setCourseCount(d.length)).catch(()=>{})},[]);
-  return(<div className="page-body">
-    <div style={{marginBottom:'2rem'}}>
-      <div style={{fontSize:'.8rem',color:'var(--amber)',letterSpacing:'.1em',textTransform:'uppercase',marginBottom:'.5rem'}}>OBE AUTOMATE — V0.1.0</div>
-      <h1 style={{fontFamily:'Fraunces,serif',fontSize:'clamp(1.8rem,5vw,3rem)',lineHeight:1.1,marginBottom:'.5rem'}}>Outcome-Based<br/><span style={{color:'var(--amber)',fontStyle:'italic'}}>Education, Automated.</span></h1>
-      <p style={{color:'var(--text2)',maxWidth:'520px',lineHeight:1.6,marginBottom:'1.5rem'}}>From syllabus PDF to NBA/NAAC reports — fully automated using AI.</p>
-      <div style={{display:'flex',gap:'1rem',flexWrap:'wrap'}}>
-        <button className="btn btn-primary" onClick={()=>setPage('syllabus')}>↗ Start New Course</button>
-        <button className="btn btn-outline" onClick={()=>setPage('courses')}>View All Courses</button>
-        <button className="btn btn-teal" style={{borderRadius:8}} onClick={()=>setPage('qgenerate')}>✨ Generate Question</button>
+  const items=user?.role==='hod'?[{s:'HOD VIEW'},{p:'hod',i:'🏛',n:'Dept Dashboard'},...base]:base;
+  return(
+    <div className={`sidebar ${open?'open':''}`}>
+      <div className="sb-top">
+        <div className="sb-brand">OBE<span style={{color:'var(--blue)'}}>.</span>Auto</div>
+        <div className="sb-sub">Accreditation Engine</div>
+      </div>
+      {course&&<div className="sb-course"><div className="sb-course-label">Active Course</div><div className="sb-course-name">{course.course_code} — {course.course_name}</div></div>}
+      <div className="sb-nav">
+        {items.map((x,i)=>x.s?<div key={i} className="sb-section">{x.s}</div>:
+          <div key={i} onClick={()=>{go(x.p);close();}} className={`sb-item ${page===x.p?'active':''}`}>
+            <span className="sb-icon">{x.i}</span>{x.n}
+          </div>)}
+      </div>
+      <div className="sb-bottom">
+        <div className="sb-user">
+          <div className="sb-avatar">{user?.user?.[0]?.toUpperCase()}</div>
+          <div><div className="sb-user-name">{user?.user}</div><div className="sb-user-role">{user?.label}</div></div>
+        </div>
+        <a href="/docs" target="_blank" style={{display:'flex',alignItems:'center',gap:'.5rem',color:'#60a5fa',fontSize:'.8rem',textDecoration:'none',marginBottom:'.5rem',padding:'.35rem 0'}}>⚡ API Docs</a>
+        <button className="sb-logout" onClick={logout}>Sign Out</button>
       </div>
     </div>
-    <div className="stat-grid">
-      {[{val:courseCount,label:'Courses',c:'var(--amber)'},{val:'AI',label:'Powered Plans',c:'var(--amber)'},{val:'NBA',label:'Format Reports',c:'var(--teal)'},{val:'5',label:'Question Tools',c:'var(--purple)'}].map((s,i)=>(
-        <div key={i} className="stat-card"><div className="stat-val" style={{color:s.c}}>{s.val}</div><div className="stat-label">{s.label}</div></div>))}
+  );
+}
+
+// ── HOME / DASHBOARD ───────────────────────────────────────────────────────
+function HomePage({go,setCourse}){
+  const [courses,setCourses]=useState([]);
+  const [loading,setLoading]=useState(true);
+  useEffect(()=>{api('/courses/').then(d=>{setCourses(d);setLoading(false)}).catch(()=>setLoading(false));},[]);
+
+  const schedule=[
+    {time:'09:00',title:'OS Lecture — Unit 3',sub:'Semaphores & Deadlock',color:'#3b82f6',done:true},
+    {time:'11:00',title:'CO Attainment Review',sub:'Check course 5 results',color:'#8b5cf6',done:true},
+    {time:'14:00',title:'Question Paper Setup',sub:'Generate mid-sem paper',color:'#10b981',done:false},
+    {time:'16:00',title:'NBA Report Submission',sub:'Upload to accreditation portal',color:'#f59e0b',done:false},
+    {time:'17:30',title:'HOD Meeting',sub:'Department PO review',color:'#ef4444',done:false},
+  ];
+  const events=[
+    {day:'28',mon:'Apr',title:'Mid-Semester Exam',sub:'All courses — Hall A',c:'b-red'},
+    {day:'05',mon:'May',title:'NBA Documentation',sub:'Submission deadline',c:'b-amber'},
+    {day:'12',mon:'May',title:'Faculty Meeting',sub:'Academic committee',c:'b-blue'},
+    {day:'20',mon:'May',title:'End Semester Exam',sub:'Exam schedule released',c:'b-purple'},
+  ];
+  const activity=[
+    {i:'📄',ic:'blue',t:'Syllabus uploaded',s:'Operating Systems — PDF extracted',time:'2h ago'},
+    {i:'📊',ic:'green',t:'Attainment calculated',s:'Course ID 5 — CO/PO report ready',time:'5h ago'},
+    {i:'✨',ic:'purple',t:'Question generated',s:'L4 Analyse — Process Scheduling',time:'Yesterday'},
+    {i:'📋',ic:'amber',t:'Question paper created',s:'Mid-sem paper — 3 sections, 100M',time:'Yesterday'},
+  ];
+
+  return(
+    <div className="page-body fade-up">
+      {/* Welcome */}
+      <div className="welcome-card">
+        <div style={{position:'relative',zIndex:1}}>
+          <div style={{fontSize:'.8rem',opacity:.65,marginBottom:'.25rem'}}>{getDay()}</div>
+          <div className="welcome-name">{getGreeting()}, Professor! 👋</div>
+          <div className="welcome-sub">You have 3 pending tasks today. NBA submission is in 7 days.</div>
+          <div className="welcome-chips">
+            <span className="wchip">📚 {loading?'…':courses.length} Courses</span>
+            <span className="wchip">⏰ 3 Tasks Today</span>
+            <span className="wchip">🎯 NBA Due: May 5</span>
+            <span className="wchip">✅ 2 Completed</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="stat-row">
+        {[{i:'📚',ic:'blue',v:loading?'…':courses.length,l:'Total Courses',chg:'+2 this sem',up:true},
+          {i:'👥',ic:'green',v:'143',l:'Total Students',chg:'+12 enrolled',up:true},
+          {i:'📊',ic:'purple',v:'78%',l:'Avg CO Attainment',chg:'↑ 4% from last',up:true},
+          {i:'📋',ic:'amber',v:'47',l:'Questions in Bank',chg:'12 this week',up:true},
+          {i:'🏆',ic:'teal',v:'3/5',l:'Courses NBA-ready',chg:'2 pending',up:false}].map((s,i)=>(
+          <div key={i} className={`stat-card ${s.ic}`}>
+            <div className={`stat-icon ${s.ic}`}>{s.i}</div>
+            <div className="stat-val">{s.v}</div>
+            <div className="stat-label">{s.l}</div>
+            <div className={`stat-change ${s.up?'up':'down'}`}>{s.up?'↑':'↓'} {s.chg}</div>
+          </div>))}
+      </div>
+
+      {/* Quick Actions */}
+      <div style={{marginBottom:'1.5rem'}}>
+        <div className="section-head"><div className="section-title">Quick Actions</div></div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:'.875rem'}}>
+          {[{i:'📄',ic:'blue',n:'Upload Syllabus',p:'syllabus'},{i:'✨',ic:'purple',n:'Generate Q',p:'qgenerate'},
+            {i:'📋',ic:'green',n:'Question Paper',p:'qpaper'},{i:'📊',ic:'amber',n:'Attainment',p:'attainment'},
+            {i:'📑',ic:'teal',n:'NBA Report',p:'reports'},{i:'🔍',ic:'pink',n:'Classify Q',p:'qclassify'}].map((a,i)=>(
+            <div key={i} className="quick-action" onClick={()=>go(a.p)}>
+              <div className={`qa-icon stat-icon ${a.ic}`}>{a.i}</div>
+              <div className="qa-label">{a.n}</div>
+            </div>))}
+        </div>
+      </div>
+
+      <div className="dash-grid">
+        {/* Left column */}
+        <div>
+          {/* Today's Schedule */}
+          <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+            <div className="section-head"><div className="section-title">📅 Today's Schedule</div><span className="badge b-blue">5 events</span></div>
+            {schedule.map((s,i)=>(
+              <div key={i} className="schedule-item" style={{opacity:s.done?.8:1}}>
+                <div className="sched-time">{s.time}</div>
+                <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                  <div className="sched-dot" style={{background:s.color,opacity:s.done?.5:1}}/>
+                  {i<schedule.length-1&&<div className="sched-line" style={{flex:1,minHeight:24}}/>}
+                </div>
+                <div className="sched-content">
+                  <div className="sched-title" style={{textDecoration:s.done?'line-through':'none',opacity:s.done?.6:1}}>{s.title}</div>
+                  <div className="sched-sub">{s.sub}</div>
+                  {s.done&&<span className="badge b-green" style={{marginTop:'.35rem',fontSize:'.68rem'}}>✓ Done</span>}
+                </div>
+              </div>))}
+          </div>
+
+          {/* Recent Activity */}
+          <div className="card card-p">
+            <div className="section-head"><div className="section-title">⚡ Recent Activity</div><span className="section-link" onClick={()=>go('qbank')}>View all</span></div>
+            {activity.map((a,i)=>(
+              <div key={i} className="activity-item">
+                <div className={`act-icon stat-icon ${a.ic}`}>{a.i}</div>
+                <div className="act-content"><div className="act-title">{a.t}</div><div className="act-sub">{a.s}</div></div>
+                <div className="act-time">{a.time}</div>
+              </div>))}
+          </div>
+        </div>
+
+        {/* Right column */}
+        <div>
+          {/* Upcoming Events */}
+          <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+            <div className="section-head"><div className="section-title">📆 Upcoming Events</div></div>
+            {events.map((e,i)=>(
+              <div key={i} className="event-item">
+                <div className="event-date"><div className="event-day">{e.day}</div><div className="event-month">{e.mon}</div></div>
+                <div className="event-body"><div className="event-title">{e.title}</div><div className="event-sub">{e.sub}</div></div>
+                <span className={`badge ${e.c}`} style={{flexShrink:0}}>Soon</span>
+              </div>))}
+          </div>
+
+          {/* NBA Readiness */}
+          <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+            <div className="section-head"><div className="section-title">🏆 NBA Readiness</div></div>
+            {[{n:'Operating Systems',p:85,c:'#10b981'},{n:'Data Structures',p:72,c:'#10b981'},{n:'Computer Networks',p:58,c:'#f59e0b'},{n:'DBMS',p:43,c:'#ef4444'},{n:'Algorithms',p:31,c:'#ef4444'}].map((c,i)=>(
+              <div key={i} style={{marginBottom:'.875rem'}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:'.35rem'}}>
+                  <span style={{fontSize:'.8rem',fontWeight:500,color:'var(--text)'}}>{c.n}</span>
+                  <span style={{fontSize:'.78rem',color:'var(--text2)'}}>{c.p}%</span>
+                </div>
+                <PBar pct={c.p} c={c.c}/>
+              </div>))}
+          </div>
+
+          {/* Bloom Distribution */}
+          <div className="card card-p">
+            <div className="section-head"><div className="section-title">🧠 Question Bank</div></div>
+            {BLOOM.map((b,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:'.65rem',marginBottom:'.65rem'}}>
+                <span className={`badge ${b.c}`} style={{minWidth:90}}>L{b.l} {b.n}</span>
+                <div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${[40,30,55,25,15,10][i]}%`,background:['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#ec4899'][i]}}/></div>
+                <span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:24}}>{[12,9,16,7,5,3][i]}</span>
+              </div>))}
+          </div>
+        </div>
+      </div>
     </div>
+  );
+}
+
+// ── COURSES ────────────────────────────────────────────────────────────────
+function CoursesPage({setCourse,go}){
+  const [courses,setCourses]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
+  useEffect(()=>{api('/courses/').then(d=>{setCourses(d);setLoading(false)}).catch(e=>{setErr(e.message);setLoading(false)});},[]);
+  return(<div className="page-body fade-up">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem'}}>
+      <div><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>All Courses</div><div style={{color:'var(--text2)',fontSize:'.855rem',marginTop:'.2rem'}}>{courses.length} courses in department</div></div>
+      <button className="btn btn-primary" onClick={()=>go('syllabus')}>+ New Course</button>
+    </div>
+    <Alrt t="error" msg={err}/>
+    {loading?<Skel/>:courses.length===0?<Alrt t="info" msg="No courses yet. Upload a syllabus to get started."/>:
+    <div className="tbl-wrap"><table>
+      <thead><tr><th>Code</th><th>Course Name</th><th>Faculty</th><th>Semester</th><th>Department</th><th>Action</th></tr></thead>
+      <tbody>{courses.map(c=><tr key={c.id}>
+        <td><span className="badge b-blue">{c.course_code}</span></td>
+        <td style={{fontWeight:500}}>{c.course_name}</td><td>{c.faculty_name}</td><td>{c.semester}</td><td>{c.department}</td>
+        <td><button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('attainment')}}>Open →</button></td>
+      </tr>)}</tbody>
+    </table></div>}
   </div>);
 }
 
-// ── COURSES ──────────────────────────────────────────────────────────────────
-function CoursesPage({setActiveCourse,setPage}){
-  const [courses,setCourses]=useState([]);const [loading,setLoading]=useState(true);const [error,setError]=useState('');
-  useEffect(()=>{apiFetch('/courses/').then(d=>{setCourses(d);setLoading(false)}).catch(e=>{setError(e.message);setLoading(false)});},[]);
-  return(<div className="page-body">
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.25rem'}}>
-      <h2 style={{fontFamily:'Fraunces,serif'}}>All Courses</h2>
-      <button className="btn btn-primary" onClick={()=>setPage('syllabus')}>+ New Course</button>
-    </div>
-    <Alert type="error" msg={error}/>
-    {loading?<Skeleton/>:courses.length===0?<Alert type="info" msg="No courses yet."/>:
-    <div className="tbl-wrap"><table><thead><tr><th>Code</th><th>Course</th><th>Faculty</th><th>Semester</th><th>Action</th></tr></thead>
-    <tbody>{courses.map(c=><tr key={c.id}><td><span className="badge badge-blue">{c.course_code}</span></td><td>{c.course_name}</td><td>{c.faculty_name}</td><td>{c.semester}</td>
-    <td><button className="btn btn-outline" style={{fontSize:'.8rem',padding:'.3rem .7rem'}} onClick={()=>{setActiveCourse(c);setPage('attainment')}}>Select →</button></td></tr>)}</tbody></table></div>}
-  </div>);
-}
-
-// ── SYLLABUS ─────────────────────────────────────────────────────────────────
+// ── SYLLABUS ───────────────────────────────────────────────────────────────
 function SyllabusPage(){
-  const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);const [result,setResult]=useState(null);const [error,setError]=useState('');
-  const upload=async()=>{if(!file){setError('Select a PDF.');return;}setLoading(true);setError('');setResult(null);
-    try{const fd=new FormData();fd.append('file',file);const res=await fetch(API+'/syllabus/upload',{method:'POST',body:fd});if(!res.ok)throw new Error((await res.json()).detail);setResult(await res.json());}
-    catch(e){setError(e.message);}setLoading(false);};
-  return(<div className="page-body"><h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>Upload Syllabus</h2>
-    <div className="card" style={{maxWidth:500}}>
-      <div className="form-group"><label className="form-label">Syllabus PDF</label><input type="file" accept=".pdf" className="form-input" onChange={e=>setFile(e.target.files[0])}/></div>
-      <Alert type="error" msg={error}/>
-      <button className="btn btn-primary" onClick={upload} disabled={loading}>{loading?<><Spinner/>Extracting…</>:'↑ Upload & Extract'}</button>
+  const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);const [res,setRes]=useState(null);const [err,setErr]=useState('');
+  const upload=async()=>{if(!file){setErr('Select a PDF.');return;}setLoading(true);setErr('');setRes(null);
+    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd});if(!r.ok)throw new Error((await r.json()).detail);setRes(await r.json());}
+    catch(e){setErr(e.message);}setLoading(false);};
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Upload Syllabus</div>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',maxWidth:900}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Upload PDF</div>
+        <div className="fg"><label className="fl">Syllabus PDF</label><input type="file" accept=".pdf" className="fi" onChange={e=>setFile(e.target.files[0])}/></div>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" onClick={upload} disabled={loading}>{loading?<><Spin/>Extracting with AI…</>:'↑ Upload & Extract'}</button>
+      </div>
+      {res&&<div className="card card-p fade-up">
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem',color:'var(--green)'}}>✓ Extracted Successfully</div>
+        <div style={{fontSize:'1.1rem',fontWeight:700,marginBottom:'.25rem'}}>{res.course_name}</div>
+        <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1rem'}}>{res.course_code} · {res.credits} credits</div>
+        <div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.5rem'}}>Course Outcomes</div>
+        {res.cos?.map((co,i)=><div key={i} style={{padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.4rem',fontSize:'.855rem'}}><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong>: {co.statement}</div>)}
+      </div>}
     </div>
-    {result&&<div className="card" style={{marginTop:'1.25rem'}}><Alert type="success" msg="Extracted! Proceed to Course Setup."/>
-      <div style={{marginTop:'.75rem'}}><div style={{fontSize:'1.1rem',fontWeight:600}}>{result.course_name}</div><div style={{color:'var(--text2)',fontSize:'.85rem'}}>{result.course_code}</div></div></div>}
   </div>);
 }
 
-// ── COURSE SETUP ─────────────────────────────────────────────────────────────
-function CourseSetupPage({setActiveCourse}){
-  const [form,setForm]=useState({course_name:'',course_code:'',credits:4,total_hours:52,faculty_name:'',department:'',semester:'',academic_year:''});
-  const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [success,setSuccess]=useState('');
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const submit=async()=>{setLoading(true);setError('');setSuccess('');
-    try{const d=await apiFetch('/courses/setup',{method:'POST',body:JSON.stringify({...form,credits:+form.credits,total_hours:+form.total_hours,
-      cos:[{co_id:'CO1',statement:'Apply concepts',bloom_level:'Apply'}],pos:[{po_id:'PO1',statement:'Engineering Knowledge'}],
+// ── COURSE SETUP ───────────────────────────────────────────────────────────
+function CourseSetupPage({setCourse}){
+  const [f,setF]=useState({course_name:'',course_code:'',credits:4,total_hours:52,faculty_name:'',department:'',semester:'',academic_year:''});
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const s=(k,v)=>setF(x=>({...x,[k]:v}));
+  const sub=async()=>{setLoading(true);setErr('');setOk('');
+    try{const d=await api('/courses/setup',{method:'POST',body:JSON.stringify({...f,credits:+f.credits,total_hours:+f.total_hours,
+      cos:[{co_id:'CO1',statement:'Apply core concepts',bloom_level:'Apply'}],pos:[{po_id:'PO1',statement:'Engineering Knowledge'}],
       co_po_matrix:{CO1:{PO1:3}},evaluation_config:{components:{Quiz:10,'Unit Test':20}}})});
-      setSuccess(`Course created! ID: ${d.course_id}`);setActiveCourse({...form,id:d.course_id});}
-    catch(e){setError(e.message);}setLoading(false);};
-  return(<div className="page-body"><h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>Course Setup</h2>
-    <div className="card" style={{maxWidth:640}}>
-      <div className="form-grid">{[['course_name','Course Name','text'],['course_code','Course Code','text'],['credits','Credits','number'],['total_hours','Total Hours','number'],['faculty_name','Faculty Name','text'],['department','Department','text'],['semester','Semester','text'],['academic_year','Academic Year','text']].map(([k,l,t])=>(
-        <div key={k} className="form-group"><label className="form-label">{l}</label><input className="form-input" type={t} value={form[k]} onChange={e=>set(k,e.target.value)}/></div>))}</div>
-      <Alert type="error" msg={error}/><Alert type="success" msg={success}/>
-      <button className="btn btn-primary" onClick={submit} disabled={loading}>{loading?<><Spinner/>Creating…</>:'Create Course →'}</button>
+      setOk(`Course created! ID: ${d.course_id}`);setCourse({...f,id:d.course_id});}
+    catch(e){setErr(e.message);}setLoading(false);};
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Course Setup</div>
+    <div className="card card-p" style={{maxWidth:680}}>
+      <Alrt t="info" msg="After setup, AI will auto-generate session and evaluation plans."/>
+      <div className="fgrid" style={{marginTop:'1rem'}}>
+        {[['course_name','Course Name','text'],['course_code','Course Code','text'],['credits','Credits','number'],['total_hours','Total Hours','number'],['faculty_name','Faculty Name','text'],['department','Department','text'],['semester','Semester','text'],['academic_year','Academic Year','text']].map(([k,l,t])=>(
+          <div key={k} className="fg"><label className="fl">{l}</label><input className="fi" type={t} value={f[k]} onChange={e=>s(k,e.target.value)}/></div>))}
+      </div>
+      <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+      <button className="btn btn-primary" onClick={sub} disabled={loading}>{loading?<><Spin/>Creating…</>:'Create Course →'}</button>
     </div>
   </div>);
 }
 
-// ── SESSION PLAN ──────────────────────────────────────────────────────────────
-function SessionPlanPage({activeCourse}){
-  const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [success,setSuccess]=useState('');
-  const generate=async()=>{if(!activeCourse){setError('Select a course first.');return;}setLoading(true);setError('');setSuccess('');
-    try{await apiFetch(`/session-plan/generate/${activeCourse.id}`,{method:'POST'});setSuccess('Session plan generated!');}
-    catch(e){setError(e.message);}setLoading(false);};
-  return(<div className="page-body"><h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>Session Plan</h2>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first."/>}
-    <div className="card" style={{maxWidth:480,marginTop:'1rem'}}>
-      <Alert type="error" msg={error}/><Alert type="success" msg={success}/>
-      <div style={{display:'flex',gap:'1rem',flexWrap:'wrap'}}>
-        <button className="btn btn-primary" onClick={generate} disabled={loading||!activeCourse}>{loading?<><Spinner/>Generating…</>:'🤖 Generate with AI'}</button>
-        {activeCourse&&<a href={`${API}/session-plan/download/${activeCourse.id}`} className="btn btn-outline" style={{textDecoration:'none',display:'inline-flex',alignItems:'center'}}>⬇ Download .docx</a>}
+// ── SESSION PLAN ──────────────────────────────────────────────────────────
+function SessionPlanPage({course}){
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');setOk('');
+    try{await api(`/session-plan/generate/${course.id}`,{method:'POST'});setOk('Session plan generated!');}
+    catch(e){setErr(e.message);}setLoading(false);};
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Session Plan</div>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+    {course&&<Alrt t="info" msg={`Course: ${course.course_name} (${course.course_code})`}/>}
+    <div className="card card-p" style={{maxWidth:480,marginTop:'1rem'}}><Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+      <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap'}}>
+        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating…</>:'🤖 Generate with AI'}</button>
+        {course&&<a href={`${API}/session-plan/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ Download .docx</a>}
       </div>
     </div>
   </div>);
 }
 
-// ── EVALUATION PLAN ───────────────────────────────────────────────────────────
-function EvaluationPlanPage({activeCourse}){
-  const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [success,setSuccess]=useState('');
-  const generate=async()=>{if(!activeCourse){setError('Select a course first.');return;}setLoading(true);setError('');setSuccess('');
-    try{await apiFetch(`/evaluation-plan/generate/${activeCourse.id}`,{method:'POST'});setSuccess('Evaluation plan generated!');}
-    catch(e){setError(e.message);}setLoading(false);};
-  return(<div className="page-body"><h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>Evaluation Plan</h2>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first."/>}
-    <div className="card" style={{maxWidth:480,marginTop:'1rem'}}>
-      <Alert type="error" msg={error}/><Alert type="success" msg={success}/>
-      <div style={{display:'flex',gap:'1rem',flexWrap:'wrap'}}>
-        <button className="btn btn-primary" onClick={generate} disabled={loading||!activeCourse}>{loading?<><Spinner/>Generating…</>:'🤖 Generate CIE+SEE Plan'}</button>
-        {activeCourse&&<a href={`${API}/evaluation-plan/download/${activeCourse.id}`} className="btn btn-outline" style={{textDecoration:'none',display:'inline-flex',alignItems:'center'}}>⬇ Download .docx</a>}
+// ── EVALUATION PLAN ───────────────────────────────────────────────────────
+function EvalPlanPage({course}){
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');setOk('');
+    try{await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});setOk('Evaluation plan generated!');}
+    catch(e){setErr(e.message);}setLoading(false);};
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Evaluation Plan</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div className="card card-p" style={{maxWidth:480,marginTop:'1rem'}}><Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+      <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap'}}>
+        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating…</>:'🤖 Generate CIE+SEE Plan'}</button>
+        {course&&<a href={`${API}/evaluation-plan/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ Download .docx</a>}
       </div>
     </div>
   </div>);
 }
 
-// ── MARKS ─────────────────────────────────────────────────────────────────────
-function MarksPage({activeCourse}){
-  const [json,setJson]=useState('');const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [success,setSuccess]=useState('');
+// ── MARKS ─────────────────────────────────────────────────────────────────
+function MarksPage({course}){
+  const [json,setJson]=useState('');const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
   const sample=JSON.stringify([{student_id:'USN001',student_name:'Alice',marks:{CO1:{Quiz:8,'Unit Test':18},CO2:{Quiz:7,'Unit Test':15}}}],null,2);
-  const upload=async()=>{if(!activeCourse){setError('Select a course.');return;}setLoading(true);setError('');setSuccess('');
-    try{const d=await apiFetch(`/attainment/marks/${activeCourse.id}`,{method:'POST',body:json});setSuccess(`Saved ${d.students_saved} students.`);}
-    catch(e){setError(e.message);}setLoading(false);};
-  return(<div className="page-body"><h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>Upload Marks</h2>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first."/>}
-    <div className="card" style={{maxWidth:720}}>
-      <div className="form-group"><label className="form-label">Student Marks JSON</label>
-        <textarea className="form-input" rows={10} style={{fontFamily:'monospace',fontSize:'.8rem',resize:'vertical'}} value={json} onChange={e=>setJson(e.target.value)} placeholder={sample}/></div>
-      <button className="btn btn-ghost" style={{marginBottom:'.75rem',fontSize:'.8rem'}} onClick={()=>setJson(sample)}>Load Sample</button>
-      <Alert type="error" msg={error}/><Alert type="success" msg={success}/>
-      <button className="btn btn-primary" onClick={upload} disabled={loading||!activeCourse}>{loading?<><Spinner/>Uploading…</>:'↑ Upload Marks'}</button>
+  const upload=async()=>{if(!course){setErr('Select a course.');return;}setLoading(true);setErr('');setOk('');
+    try{const d=await api(`/attainment/marks/${course.id}`,{method:'POST',body:json});setOk(`Saved ${d.students_saved} students.`);}
+    catch(e){setErr(e.message);}setLoading(false);};
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Upload Student Marks</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div className="card card-p" style={{maxWidth:720}}>
+      <div className="fg"><label className="fl">Marks JSON</label>
+        <textarea className="fi" rows={10} style={{fontFamily:'monospace',fontSize:'.8rem',resize:'vertical'}} value={json} onChange={e=>setJson(e.target.value)} placeholder={sample}/></div>
+      <button className="btn btn-ghost btn-sm" style={{marginBottom:'.875rem'}} onClick={()=>setJson(sample)}>Load Sample Data</button>
+      <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+      <button className="btn btn-primary" onClick={upload} disabled={loading||!course}>{loading?<><Spin/>Uploading…</>:'↑ Upload Marks'}</button>
     </div>
   </div>);
 }
 
-// ── ATTAINMENT ────────────────────────────────────────────────────────────────
-function AttainmentPage({activeCourse}){
-  const [data,setData]=useState(null);const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [tab,setTab]=useState('co');
-  const calculate=async()=>{if(!activeCourse){setError('Select a course.');return;}setLoading(true);setError('');
-    try{setData(await apiFetch(`/attainment/calculate/${activeCourse.id}`));}catch(e){setError(e.message);}setLoading(false);};
-  return(<div className="page-body"><h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>CO/PO Attainment</h2>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first."/>}
-    <div style={{display:'flex',gap:'1rem',flexWrap:'wrap',marginBottom:'1.25rem'}}>
-      <button className="btn btn-primary" onClick={calculate} disabled={loading||!activeCourse}>{loading?<><Spinner/>Calculating…</>:'📊 Calculate'}</button>
-      {data&&<><button className="btn btn-outline" onClick={()=>apiFetch(`/attainment/report/${activeCourse.id}`,{method:'POST'})}>📄 Word Report</button>
-        <a href={`${API}/attainment/download/${activeCourse.id}`} className="btn btn-outline" style={{textDecoration:'none',display:'inline-flex',alignItems:'center'}}>⬇ Download</a></>}
+// ── ATTAINMENT ────────────────────────────────────────────────────────────
+function AttainmentPage({course}){
+  const [data,setData]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [tab,setTab]=useState('co');
+  const calc=async()=>{if(!course){setErr('Select a course.');return;}setLoading(true);setErr('');
+    try{setData(await api(`/attainment/calculate/${course.id}`));}catch(e){setErr(e.message);}setLoading(false);};
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>CO/PO Attainment</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap',marginBottom:'1.25rem'}}>
+      <button className="btn btn-primary" onClick={calc} disabled={loading||!course}>{loading?<><Spin/>Calculating…</>:'📊 Calculate Attainment'}</button>
+      {data&&<><button className="btn btn-outline" onClick={()=>api(`/attainment/report/${course.id}`,{method:'POST'})}>📄 Generate Report</button>
+        <a href={`${API}/attainment/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ Download</a></>}
     </div>
-    <Alert type="error" msg={error}/>
-    {data&&<><div className="stat-grid">
-      {[{v:data.overall_co_attainment+'%',l:'CO Attainment'},{v:data.total_students,l:'Students'},{v:data.threshold_percentage+'%',l:'Threshold'}].map((s,i)=>
-        <div key={i} className="stat-card"><div className="stat-val">{s.v}</div><div className="stat-label">{s.l}</div></div>)}
+    <Alrt t="error" msg={err}/>
+    {data&&<><div className="stat-row">
+      {[{i:'📊',ic:'blue',v:data.overall_co_attainment+'%',l:'Overall CO Attainment'},{i:'👥',ic:'green',v:data.total_students,l:'Students'},{i:'🎯',ic:'amber',v:data.threshold_percentage+'%',l:'Threshold'}].map((s,i)=>(
+        <div key={i} className={`stat-card ${s.ic}`}><div className={`stat-icon ${s.ic}`}>{s.i}</div><div className="stat-val">{s.v}</div><div className="stat-label">{s.l}</div></div>))}
     </div>
-    <div className="tabs">{['co','po'].map(t=><div key={t} className={`tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>{t.toUpperCase()} Attainment</div>)}</div>
-    {tab==='co'&&<div className="tbl-wrap"><table><thead><tr><th>CO</th><th>Bloom</th><th>Avg</th><th>Attainment</th><th>Level</th></tr></thead>
-    <tbody>{Object.values(data.co_attainment).map(co=><tr key={co.co_id}><td><strong>{co.co_id}</strong></td><td><span className="badge badge-blue">{co.bloom_level}</span></td>
-    <td>{co.avg_marks_scored}/{co.max_marks}</td><td style={{minWidth:160}}><AttainmentBar pct={co.attainment_percentage}/></td><td><Badge level={co.attainment_level}/></td></tr>)}</tbody></table></div>}
+    <div className="tabs">{['co','po'].map(t=><div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{t.toUpperCase()} Attainment</div>)}</div>
+    {tab==='co'&&<div className="tbl-wrap"><table><thead><tr><th>CO</th><th>Bloom</th><th>Score</th><th>Attainment</th><th>Level</th></tr></thead>
+    <tbody>{Object.values(data.co_attainment).map(co=><tr key={co.co_id}><td style={{fontWeight:600}}>{co.co_id}</td><td><span className="badge b-blue">{co.bloom_level}</span></td>
+    <td>{co.avg_marks_scored}/{co.max_marks}</td><td style={{minWidth:160}}><PBar pct={co.attainment_percentage}/></td><td><LvlB l={co.attainment_level}/></td></tr>)}</tbody></table></div>}
     {tab==='po'&&<div className="tbl-wrap"><table><thead><tr><th>PO</th><th>Statement</th><th>Attainment</th><th>Level</th></tr></thead>
-    <tbody>{Object.values(data.po_attainment).map(po=><tr key={po.po_id}><td><strong>{po.po_id}</strong></td><td>{po.statement}</td>
-    <td style={{minWidth:180}}><AttainmentBar pct={po.attainment_percentage}/></td><td><Badge level={po.attainment_level}/></td></tr>)}</tbody></table></div>}</>}
+    <tbody>{Object.values(data.po_attainment).map(po=><tr key={po.po_id}><td style={{fontWeight:600}}>{po.po_id}</td><td>{po.statement}</td>
+    <td style={{minWidth:180}}><PBar pct={po.attainment_percentage}/></td><td><LvlB l={po.attainment_level}/></td></tr>)}</tbody></table></div>}</>}
   </div>);
 }
 
-// ── REPORTS ───────────────────────────────────────────────────────────────────
-function ReportsPage({activeCourse}){
-  const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [success,setSuccess]=useState('');
-  const gen=async()=>{if(!activeCourse){setError('Select a course.');return;}setLoading(true);setError('');setSuccess('');
-    try{await apiFetch(`/attainment/nba-report/${activeCourse.id}`,{method:'POST'});setSuccess('NBA/NAAC PDF generated!');}
-    catch(e){setError(e.message);}setLoading(false);};
-  return(<div className="page-body"><h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>NBA / NAAC Reports</h2>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first."/>}
-    <div style={{display:'flex',gap:'1rem',flexWrap:'wrap',marginBottom:'1.25rem'}}>
-      <button className="btn btn-primary" onClick={gen} disabled={loading||!activeCourse}>{loading?<><Spinner/>Generating…</>:'📊 Generate PDF'}</button>
-      {activeCourse&&<a href={`${API}/attainment/nba-report/download/${activeCourse.id}`} className="btn btn-outline" style={{textDecoration:'none',display:'inline-flex',alignItems:'center'}}>⬇ Download PDF</a>}
+// ── REPORTS ───────────────────────────────────────────────────────────────
+function ReportsPage({course}){
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const gen=async()=>{if(!course){setErr('Select a course.');return;}setLoading(true);setErr('');setOk('');
+    try{await api(`/attainment/nba-report/${course.id}`,{method:'POST'});setOk('NBA/NAAC PDF generated!');}
+    catch(e){setErr(e.message);}setLoading(false);};
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>NBA / NAAC Reports</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap',marginBottom:'1.25rem'}}>
+      <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating PDF…</>:'📊 Generate NBA/NAAC PDF'}</button>
+      {course&&<a href={`${API}/attainment/nba-report/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ Download PDF</a>}
     </div>
-    <Alert type="error" msg={error}/><Alert type="success" msg={success}/>
+    <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
   </div>);
 }
 
-// ── HOD DASHBOARD ─────────────────────────────────────────────────────────────
-function HodDashboardPage(){
-  const [data,setData]=useState(null);const [loading,setLoading]=useState(true);const [error,setError]=useState('');
-  useEffect(()=>{apiFetch('/dashboard/department').then(d=>{setData(d);setLoading(false)}).catch(e=>{setError(e.message);setLoading(false)});},[]);
-  const heatCls=pct=>!pct&&pct!==0?'heat-none':pct>=70?'heat-high':pct>=50?'heat-med':'heat-low';
-  if(loading)return <div className="page-body"><Skeleton rows={8}/></div>;
-  return(<div className="page-body">
-    <h2 style={{fontFamily:'Fraunces,serif',marginBottom:'.25rem'}}>Department Dashboard</h2>
-    <p style={{color:'var(--text2)',marginBottom:'1.5rem',fontSize:'.875rem'}}>Aggregated CO/PO attainment across all courses</p>
-    <Alert type="error" msg={error}/>
-    {data&&<>
-      <div className="stat-grid">
-        {[{v:data.total_courses,l:'Total Courses'},{v:data.courses_with_data,l:'With Data'},{v:data.summary.avg_co_attainment+'%',l:'Avg CO'},{v:data.summary.courses_above_target,l:'≥60% Target'},{v:data.summary.total_students,l:'Students'}].map((s,i)=>
-          <div key={i} className="stat-card"><div className="stat-val">{s.v}</div><div className="stat-label">{s.l}</div></div>)}
+// ── HOD DASHBOARD ─────────────────────────────────────────────────────────
+function HodPage(){
+  const [data,setData]=useState(null);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
+  useEffect(()=>{api('/dashboard/department').then(d=>{setData(d);setLoading(false)}).catch(e=>{setErr(e.message);setLoading(false)});},[]);
+  const hc=p=>p>=70?'hh':p>=50?'hm':p>0?'hl':'hn';
+  if(loading)return<div className="page-body"><Skel n={8}/></div>;
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.25rem'}}>Department Dashboard</div>
+    <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1.5rem'}}>Aggregated CO/PO attainment across all courses</div>
+    <Alrt t="error" msg={err}/>
+    {data&&<><div className="stat-row">
+      {[{i:'📚',ic:'blue',v:data.total_courses,l:'Total Courses'},{i:'📊',ic:'green',v:data.courses_with_data,l:'With Data'},
+        {i:'🎯',ic:'purple',v:data.summary.avg_co_attainment+'%',l:'Avg CO Attainment'},
+        {i:'🏆',ic:'amber',v:data.summary.courses_above_target,l:'Above Target'},{i:'👥',ic:'teal',v:data.summary.total_students,l:'Students'}].map((s,i)=>(
+        <div key={i} className={`stat-card ${s.ic}`}><div className={`stat-icon ${s.ic}`}>{s.i}</div><div className="stat-val">{s.v}</div><div className="stat-label">{s.l}</div></div>))}
+    </div>
+    {data.courses_with_data===0?<Alrt t="info" msg="No marks uploaded yet."/>:<>
+      <div className="card card-p" style={{marginBottom:'1.5rem'}}>
+        <div className="section-head"><div className="section-title">PO Attainment Heatmap</div>
+          <div style={{display:'flex',gap:'.5rem',fontSize:'.75rem'}}>
+            {[['hh','≥70%'],['hm','50–69%'],['hl','<50%']].map(([c,l])=><span key={c} className={`badge ${c==='hh'?'b-green':c==='hm'?'b-amber':'b-red'}`}>{l}</span>)}
+          </div>
+        </div>
+        <div style={{overflowX:'auto'}}><table className="htbl">
+          <thead><tr><th style={{textAlign:'left'}}>Course</th>{data.courses[0]&&Object.keys(data.courses[0].po_attainment).map(po=><th key={po}>{po}</th>)}</tr></thead>
+          <tbody>
+            {data.courses.map(c=><tr key={c.course_id}><td className="cn"><div style={{fontWeight:600,fontSize:'.8rem'}}>{c.course_code}</div><div style={{fontSize:'.72rem',color:'var(--text2)'}}>{c.faculty_name}</div></td>
+              {Object.entries(c.po_attainment).map(([po,p])=><td key={po} className={hc(p)}>{p?`${p}%`:'—'}</td>)}</tr>)}
+            <tr style={{fontWeight:700,borderTop:'2px solid var(--border)'}}>
+              <td className="cn" style={{color:'var(--blue2)'}}>Dept Avg</td>
+              {Object.entries(data.department_po_average).map(([po,p])=><td key={po} className={hc(p)}><strong>{p}%</strong></td>)}
+            </tr>
+          </tbody>
+        </table></div>
       </div>
-      {data.courses_with_data===0?<Alert type="info" msg="No marks uploaded yet."/>:<>
-        <div className="card" style={{marginBottom:'1.5rem'}}>
-          <h3 style={{fontFamily:'Fraunces,serif',marginBottom:'1rem'}}>PO Attainment Heatmap</h3>
-          <div className="heatmap-wrap"><table className="heatmap-table"><thead><tr><th style={{textAlign:'left'}}>Course</th>
-            {data.courses.length>0&&Object.keys(data.courses[0].po_attainment).map(po=><th key={po}>{po}</th>)}</tr></thead>
-            <tbody>
-              {data.courses.map(c=><tr key={c.course_id}><td className="course-name"><div style={{fontWeight:600}}>{c.course_code}</div><div style={{fontSize:'.75rem',color:'var(--text2)'}}>{c.faculty_name}</div></td>
-                {Object.entries(c.po_attainment).map(([po,pct])=><td key={po} className={heatCls(pct)}>{pct?`${pct}%`:'—'}</td>)}</tr>)}
-              <tr style={{borderTop:'2px solid var(--border)',fontWeight:700}}>
-                <td className="course-name" style={{color:'var(--amber)'}}>Dept Average</td>
-                {Object.entries(data.department_po_average).map(([po,pct])=><td key={po} className={heatCls(pct)} style={{fontWeight:700}}>{pct}%</td>)}
-              </tr>
-            </tbody>
-          </table></div>
-        </div>
-        <div className="card"><h3 style={{fontFamily:'Fraunces,serif',marginBottom:'1rem'}}>Course Summary</h3>
-          <div className="tbl-wrap"><table><thead><tr><th>Code</th><th>Course</th><th>Students</th><th>CO Attainment</th><th>Status</th></tr></thead>
-          <tbody>{data.courses.map(c=><tr key={c.course_id}><td><span className="badge badge-blue">{c.course_code}</span></td><td>{c.course_name}</td><td>{c.total_students}</td>
-          <td style={{minWidth:160}}><AttainmentBar pct={c.overall_co_attainment}/></td><td><Badge level={c.overall_co_attainment>=70?'High':c.overall_co_attainment>=50?'Medium':'Low'}/></td></tr>)}</tbody></table></div>
-        </div>
-      </>}
-    </>}
+      <div className="tbl-wrap"><table><thead><tr><th>Code</th><th>Course</th><th>Faculty</th><th>Students</th><th>CO Attainment</th><th>Status</th></tr></thead>
+      <tbody>{data.courses.map(c=><tr key={c.course_id}><td><span className="badge b-blue">{c.course_code}</span></td><td style={{fontWeight:500}}>{c.course_name}</td>
+      <td>{c.faculty_name}</td><td>{c.total_students}</td><td style={{minWidth:160}}><PBar pct={c.overall_co_attainment}/></td>
+      <td><LvlB l={c.overall_co_attainment>=70?'High':c.overall_co_attainment>=50?'Medium':'Low'}/></td></tr>)}</tbody></table></div>
+    </>}</>}
   </div>);
 }
 
-// ── GENERATE SINGLE QUESTION ──────────────────────────────────────────────────
-function GenerateQuestionPage({activeCourse}){
-  const [form,setForm]=useState({topic:'',bloom_level:1,question_type:'Short Answer',co_id:'',marks:5,extra_instructions:''});
-  const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [result,setResult]=useState(null);
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const generate=async()=>{
-    if(!activeCourse){setError('Select a course first.');return;}
-    if(!form.topic){setError('Enter a topic.');return;}
-    setLoading(true);setError('');setResult(null);
-    try{const d=await apiFetch('/questions/generate-single',{method:'POST',body:JSON.stringify({...form,bloom_level:+form.bloom_level,marks:+form.marks,course_id:activeCourse.id,course_name:activeCourse.course_name,save_to_bank:true})});setResult(d);}
-    catch(e){setError(e.message);}setLoading(false);
+// ── GENERATE QUESTION ─────────────────────────────────────────────────────
+function GenQPage({course}){
+  const [f,setF]=useState({topic:'',bloom_level:1,question_type:'Short Answer',co_id:'',marks:5,extra_instructions:''});
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [res,setRes]=useState(null);
+  const s=(k,v)=>setF(x=>({...x,[k]:v}));
+  const gen=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    if(!f.topic){setErr('Enter a topic.');return;}
+    setLoading(true);setErr('');setRes(null);
+    try{const d=await api('/questions/generate-single',{method:'POST',body:JSON.stringify({...f,bloom_level:+f.bloom_level,marks:+f.marks,course_id:course.id,course_name:course.course_name,save_to_bank:true})});setRes(d);}
+    catch(e){setErr(e.message);}setLoading(false);
   };
-  const bl=BLOOM_LEVELS.find(x=>x.level===+form.bloom_level)||BLOOM_LEVELS[0];
-  return(<div className="page-body">
-    <h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>✨ Generate Question</h2>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first from the Courses page."/>}
-    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',flexWrap:'wrap'}}>
-      <div className="card">
-        <h3 style={{marginBottom:'1rem',fontSize:'1rem'}}>Question Parameters</h3>
-        <div className="form-group"><label className="form-label">Topic / Subject</label><input className="form-input" value={form.topic} onChange={e=>set('topic',e.target.value)} placeholder="e.g. Process Scheduling, Binary Trees…"/></div>
-        <div className="form-group"><label className="form-label">Bloom's Taxonomy Level</label>
-          <select className="form-input form-select" value={form.bloom_level} onChange={e=>set('bloom_level',e.target.value)}>
-            {BLOOM_LEVELS.map(b=><option key={b.level} value={b.level}>L{b.level} — {b.label}</option>)}
-          </select>
-          <div style={{marginTop:'.4rem'}}><BloomBadge level={+form.bloom_level}/></div>
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>✨ Generate Question</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Parameters</div>
+        <div className="fg"><label className="fl">Topic</label><input className="fi" value={f.topic} onChange={e=>s('topic',e.target.value)} placeholder="e.g. Process Scheduling, Binary Trees…"/></div>
+        <div className="fg"><label className="fl">Bloom's Level</label>
+          <select className="fi fsel" value={f.bloom_level} onChange={e=>s('bloom_level',e.target.value)}>
+            {BLOOM.map(b=><option key={b.l} value={b.l}>L{b.l} — {b.n}</option>)}</select>
+          <div style={{marginTop:'.4rem'}}><BloomB l={+f.bloom_level}/></div>
         </div>
-        <div className="form-group"><label className="form-label">Question Type</label>
-          <select className="form-input form-select" value={form.question_type} onChange={e=>set('question_type',e.target.value)}>
-            {QTYPES.map(t=><option key={t}>{t}</option>)}
-          </select>
+        <div className="fg"><label className="fl">Question Type</label>
+          <select className="fi fsel" value={f.question_type} onChange={e=>s('question_type',e.target.value)}>{QTYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+        <div className="fgrid">
+          <div className="fg"><label className="fl">CO (optional)</label><input className="fi" value={f.co_id} onChange={e=>s('co_id',e.target.value)} placeholder="CO1"/></div>
+          <div className="fg"><label className="fl">Marks</label><input className="fi" type="number" value={f.marks} onChange={e=>s('marks',e.target.value)}/></div>
         </div>
-        <div className="form-grid">
-          <div className="form-group"><label className="form-label">CO Mapping (optional)</label><input className="form-input" value={form.co_id} onChange={e=>set('co_id',e.target.value)} placeholder="CO1"/></div>
-          <div className="form-group"><label className="form-label">Marks</label><input className="form-input" type="number" value={form.marks} onChange={e=>set('marks',e.target.value)}/></div>
-        </div>
-        <div className="form-group"><label className="form-label">Additional Instructions</label><textarea className="form-input" rows={2} value={form.extra_instructions} onChange={e=>set('extra_instructions',e.target.value)} placeholder="e.g. Include a diagram, use real-world example…"/></div>
-        <Alert type="error" msg={error}/>
-        <button className="btn btn-primary" onClick={generate} disabled={loading||!activeCourse}>{loading?<><Spinner/>Generating…</>:'✨ Generate Question'}</button>
+        <div className="fg"><label className="fl">Extra Instructions</label><textarea className="fi" rows={2} value={f.extra_instructions} onChange={e=>s('extra_instructions',e.target.value)} placeholder="e.g. Include a real-world example…"/></div>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating…</>:'✨ Generate Question'}</button>
       </div>
       <div>
-        {result&&<div className="card">
+        {loading&&<div className="card card-p" style={{display:'flex',alignItems:'center',justifyContent:'center',height:200,color:'var(--text2)'}}><Spin/>Generating your question…</div>}
+        {res&&<div className="card card-p fade-up">
           <div style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'1rem'}}>
-            <h3 style={{fontSize:'1rem'}}>Generated Question</h3>
-            {result.saved_id&&<span className="badge badge-green">✓ Saved to Bank (#{result.saved_id})</span>}
+            <div style={{fontWeight:700,fontSize:'.95rem'}}>Generated Question</div>
+            {res.saved_id&&<span className="badge b-green">✓ Saved #{res.saved_id}</span>}
           </div>
-          <div style={{background:'var(--navy3)',border:'1px solid var(--border)',borderRadius:8,padding:'1rem',marginBottom:'1rem'}}>
-            <p style={{lineHeight:1.7,fontSize:'.95rem'}}>{result.question.question_text}</p>
-          </div>
-          {result.question.options&&<div style={{marginBottom:'1rem'}}>
-            {result.question.options.map((o,i)=><div key={i} style={{padding:'.35rem .5rem',fontSize:'.9rem',color:o.startsWith(result.question.correct_option)?'var(--green)':'var(--text2)'}}>{o}{o.startsWith(result.question.correct_option)&&' ✓'}</div>)}
-          </div>}
-          <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
-            <BloomBadge level={result.question.bloom_level} label={result.question.bloom_label}/>
-            {result.question.co_id&&<span className="badge badge-blue">{result.question.co_id}</span>}
-            <span className="badge badge-amber">{result.question.marks}M</span>
-            <span className="badge badge-purple">{result.question.question_type}</span>
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem',marginBottom:'1rem',lineHeight:1.7,fontSize:'.9rem'}}>{res.question.question_text}</div>
+          {res.question.options&&<div style={{marginBottom:'1rem'}}>{res.question.options.map((o,i)=><div key={i} style={{padding:'.35rem .5rem',fontSize:'.875rem',color:o.startsWith(res.question.correct_option)?'var(--green)':'var(--text2)'}}>{o}{o.startsWith(res.question.correct_option)&&' ✓'}</div>)}</div>}
+          <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap'}}>
+            <BloomB l={res.question.bloom_level} n={res.question.bloom_label}/>
+            {res.question.co_id&&<span className="badge b-blue">{res.question.co_id}</span>}
+            <span className="badge b-amber">{res.question.marks}M</span>
+            <span className="badge b-purple">{res.question.question_type}</span>
           </div>
         </div>}
-        {!result&&!loading&&<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,color:'var(--text3)',fontSize:'2rem'}}>✨<div style={{fontSize:'.9rem',marginTop:'.5rem'}}>Your question will appear here</div></div>}
-        {loading&&<div className="card" style={{display:'flex',alignItems:'center',justifyContent:'center',height:200}}><Spinner/><span style={{marginLeft:'.5rem',color:'var(--text2)'}}>AI is crafting your question…</span></div>}
+        {!res&&!loading&&<div className="card card-p" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,color:'var(--text3)',border:'2px dashed var(--border)',background:'transparent',boxShadow:'none'}}>
+          <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>✨</div>
+          <div style={{fontSize:'.875rem'}}>Your question will appear here</div>
+        </div>}
       </div>
     </div>
   </div>);
 }
 
-// ── QUESTION PAPER GENERATOR ──────────────────────────────────────────────────
-function QuestionPaperPage({activeCourse}){
-  const [config,setConfig]=useState({duration_hours:3,total_marks:100});
-  const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [result,setResult]=useState(null);
-  const [sections,setSections]=useState([
+// ── QUESTION PAPER ────────────────────────────────────────────────────────
+function QPaperPage({course}){
+  const [cfg,setCfg]=useState({duration_hours:3,total_marks:100});
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [res,setRes]=useState(null);
+  const [secs,setSecs]=useState([
     {name:'Section A',question_type:'MCQ',bloom_levels:[1,2],count:10,marks_each:1},
     {name:'Section B',question_type:'Short Answer',bloom_levels:[3,4],count:5,marks_each:5},
     {name:'Section C',question_type:'Long Answer',bloom_levels:[5,6],count:3,marks_each:10},
   ]);
-  const updateSection=(i,k,v)=>setSections(s=>s.map((x,j)=>j===i?{...x,[k]:v}:x));
-  const generate=async()=>{
-    if(!activeCourse){setError('Select a course first.');return;}
-    setLoading(true);setError('');setResult(null);
-    try{const d=await apiFetch(`/questions/generate-paper/${activeCourse.id}`,{method:'POST',body:JSON.stringify({
-      course_id:activeCourse.id,course_name:activeCourse.course_name,course_code:activeCourse.course_code,
-      duration_hours:+config.duration_hours,total_marks:+config.total_marks,
-      cos:activeCourse.cos||[{co_id:'CO1',statement:'Apply fundamental concepts',bloom_level:'Apply'}],sections})});setResult(d);}
-    catch(e){setError(e.message);}setLoading(false);
+  const upd=(i,k,v)=>setSecs(s=>s.map((x,j)=>j===i?{...x,[k]:v}:x));
+  const gen=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setLoading(true);setErr('');setRes(null);
+    try{const d=await api(`/questions/generate-paper/${course.id}`,{method:'POST',body:JSON.stringify({
+      course_id:course.id,course_name:course.course_name,course_code:course.course_code,
+      duration_hours:+cfg.duration_hours,total_marks:+cfg.total_marks,
+      cos:course.cos||[{co_id:'CO1',statement:'Apply concepts',bloom_level:'Apply'}],sections:secs})});setRes(d);}
+    catch(e){setErr(e.message);}setLoading(false);
   };
-  const sectionGroups=result?result.questions.reduce((a,q)=>{(a[q.section]=a[q.section]||[]).push(q);return a;},{}):null;
-  return(<div className="page-body">
-    <h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>📋 Question Paper Generator</h2>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first."/>}
-    <div style={{display:'grid',gridTemplateColumns:'340px 1fr',gap:'1.5rem',flexWrap:'wrap'}}>
+  const groups=res?res.questions.reduce((a,q)=>{(a[q.section]=a[q.section]||[]).push(q);return a;},{}):null;
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>📋 Question Paper Generator</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div style={{display:'grid',gridTemplateColumns:'320px 1fr',gap:'1.5rem'}}>
       <div>
-        <div className="card" style={{marginBottom:'1rem'}}>
-          <h3 style={{marginBottom:'1rem',fontSize:'1rem'}}>Paper Config</h3>
-          <div className="form-group"><label className="form-label">Duration (hours)</label><input className="form-input" type="number" value={config.duration_hours} onChange={e=>setConfig(c=>({...c,duration_hours:e.target.value}))}/></div>
-          <div className="form-group"><label className="form-label">Total Marks</label><input className="form-input" type="number" value={config.total_marks} onChange={e=>setConfig(c=>({...c,total_marks:e.target.value}))}/></div>
+        <div className="card card-p" style={{marginBottom:'1rem'}}>
+          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem'}}>Paper Config</div>
+          <div className="fg"><label className="fl">Duration (hrs)</label><input className="fi" type="number" value={cfg.duration_hours} onChange={e=>setCfg(c=>({...c,duration_hours:e.target.value}))}/></div>
+          <div className="fg"><label className="fl">Total Marks</label><input className="fi" type="number" value={cfg.total_marks} onChange={e=>setCfg(c=>({...c,total_marks:e.target.value}))}/></div>
         </div>
-        <div className="card" style={{marginBottom:'1rem'}}>
-          <h3 style={{marginBottom:'1rem',fontSize:'1rem'}}>Sections</h3>
-          {sections.map((s,i)=><div key={i} style={{background:'var(--navy3)',borderRadius:8,padding:'.75rem',marginBottom:'.75rem',border:'1px solid var(--border)'}}>
-            <div style={{fontWeight:600,marginBottom:'.5rem',fontSize:'.875rem'}}>{s.name}</div>
-            <div className="form-grid" style={{gap:'.5rem'}}>
-              <div><label className="form-label">Type</label><select className="form-input form-select" style={{fontSize:'.8rem',padding:'.4rem'}} value={s.question_type} onChange={e=>updateSection(i,'question_type',e.target.value)}>{QTYPES.map(t=><option key={t}>{t}</option>)}</select></div>
-              <div><label className="form-label">Count</label><input className="form-input" style={{fontSize:'.8rem',padding:'.4rem'}} type="number" value={s.count} onChange={e=>updateSection(i,'count',+e.target.value)}/></div>
-              <div><label className="form-label">Marks each</label><input className="form-input" style={{fontSize:'.8rem',padding:'.4rem'}} type="number" value={s.marks_each} onChange={e=>updateSection(i,'marks_each',+e.target.value)}/></div>
-              <div><label className="form-label">Total</label><div style={{padding:'.4rem',color:'var(--amber)',fontWeight:600}}>{s.count*s.marks_each}M</div></div>
+        <div className="card card-p" style={{marginBottom:'1rem'}}>
+          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem'}}>Sections</div>
+          {secs.map((s,i)=><div key={i} style={{background:'var(--bg)',borderRadius:8,padding:'.75rem',marginBottom:'.65rem',border:'1px solid var(--border)'}}>
+            <div style={{fontWeight:600,fontSize:'.8rem',marginBottom:'.5rem',color:'var(--text)'}}>{s.name}</div>
+            <div className="fgrid" style={{gap:'.4rem'}}>
+              {[['Type','question_type','select'],['Count','count','number'],['Marks','marks_each','number']].map(([l,k,t])=>(
+                <div key={k} className="fg" style={{marginBottom:'.5rem'}}>
+                  <label className="fl" style={{fontSize:'.7rem'}}>{l}</label>
+                  {t==='select'?<select className="fi fsel" style={{padding:'.4rem',fontSize:'.8rem'}} value={s[k]} onChange={e=>upd(i,k,e.target.value)}>{QTYPES.map(t=><option key={t}>{t}</option>)}</select>:
+                  <input className="fi" style={{padding:'.4rem',fontSize:'.8rem'}} type={t} value={s[k]} onChange={e=>upd(i,k,+e.target.value)}/>}
+                </div>))}
+              <div className="fg" style={{marginBottom:'.5rem'}}><label className="fl" style={{fontSize:'.7rem'}}>Total</label><div style={{padding:'.4rem',color:'var(--blue2)',fontWeight:700,fontSize:'.875rem'}}>{s.count*s.marks_each}M</div></div>
             </div>
           </div>)}
         </div>
-        <Alert type="error" msg={error}/>
-        <button className="btn btn-primary" style={{width:'100%'}} onClick={generate} disabled={loading||!activeCourse}>{loading?<><Spinner/>Generating Paper…</>:'📋 Generate Full Paper'}</button>
-        {result&&<div style={{display:'flex',gap:'.5rem',marginTop:'.75rem',flexWrap:'wrap'}}>
-          <a href={`${API}/questions/paper/download/${activeCourse.id}/docx`} className="btn btn-outline" style={{textDecoration:'none',display:'inline-flex',alignItems:'center',flex:1,justifyContent:'center'}}>⬇ Word</a>
-          <a href={`${API}/questions/paper/download/${activeCourse.id}/pdf`} className="btn btn-outline" style={{textDecoration:'none',display:'inline-flex',alignItems:'center',flex:1,justifyContent:'center'}}>⬇ PDF</a>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" style={{width:'100%'}} onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating…</>:'📋 Generate Paper'}</button>
+        {res&&<div style={{display:'flex',gap:'.5rem',marginTop:'.75rem'}}>
+          <a href={`${API}/questions/paper/download/${course.id}/docx`} className="btn btn-outline" style={{textDecoration:'none',flex:1,justifyContent:'center'}}>⬇ Word</a>
+          <a href={`${API}/questions/paper/download/${course.id}/pdf`} className="btn btn-outline" style={{textDecoration:'none',flex:1,justifyContent:'center'}}>⬇ PDF</a>
         </div>}
       </div>
       <div>
-        {loading&&<div className="card" style={{display:'flex',alignItems:'center',justifyContent:'center',height:300}}><Spinner/><span style={{marginLeft:'.5rem',color:'var(--text2)'}}>AI is generating your paper…</span></div>}
-        {result&&sectionGroups&&Object.entries(sectionGroups).map(([sec,qs])=>(
-          <div key={sec} className="card" style={{marginBottom:'1rem'}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.75rem'}}>
-              <h3 style={{fontFamily:'Fraunces,serif',fontSize:'1rem'}}>{sec}</h3>
-              <span className="badge badge-amber">{qs.reduce((a,q)=>a+q.marks,0)}M</span>
+        {loading&&<div className="card card-p" style={{display:'flex',alignItems:'center',justifyContent:'center',height:300,color:'var(--text2)'}}><Spin/>AI is generating your question paper…</div>}
+        {groups&&Object.entries(groups).map(([sec,qs])=>(
+          <div key={sec} className="card card-p" style={{marginBottom:'1rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.875rem'}}>
+              <div style={{fontWeight:700,fontSize:'1rem'}}>{sec}</div>
+              <span className="badge b-amber">{qs.reduce((a,q)=>a+q.marks,0)}M</span>
             </div>
-            {qs.map((q,i)=><div key={i} className="question-card">
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'.5rem'}}>
+            {qs.map((q,i)=><div key={i} className="qcard">
+              <div style={{display:'flex',justifyContent:'space-between',gap:'.5rem'}}>
                 <p style={{fontSize:'.875rem',lineHeight:1.6,flex:1}}><strong>Q{q.question_number}.</strong> {q.question_text}</p>
-                <span className="badge badge-amber" style={{whiteSpace:'nowrap'}}>{q.marks}M</span>
+                <span className="badge b-amber">{q.marks}M</span>
               </div>
               {q.options&&<div style={{marginTop:'.5rem'}}>{q.options.map((o,j)=><div key={j} style={{fontSize:'.8rem',color:'var(--text2)',padding:'.15rem 0'}}>{o}</div>)}</div>}
-              <div style={{display:'flex',gap:'.4rem',marginTop:'.5rem',flexWrap:'wrap'}}>
-                <BloomBadge level={q.bloom_level} label={q.bloom_label}/>
-                {q.co_id&&<span className="badge badge-blue">{q.co_id}</span>}
+              <div style={{display:'flex',gap:'.35rem',marginTop:'.5rem',flexWrap:'wrap'}}>
+                <BloomB l={q.bloom_level} n={q.bloom_label}/>
+                {q.co_id&&<span className="badge b-blue">{q.co_id}</span>}
               </div>
             </div>)}
           </div>))}
-        {!result&&!loading&&<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:300,color:'var(--text3)',fontSize:'2.5rem'}}>📋<div style={{fontSize:'.9rem',marginTop:'.5rem'}}>Generated paper will appear here</div></div>}
+        {!res&&!loading&&<div className="card card-p" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:300,color:'var(--text3)',border:'2px dashed var(--border)',background:'transparent',boxShadow:'none'}}>
+          <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>📋</div>
+          <div style={{fontSize:'.875rem'}}>Generated paper will appear here</div>
+        </div>}
       </div>
     </div>
   </div>);
 }
 
-// ── QUESTION BANK ─────────────────────────────────────────────────────────────
-function QuestionBankPage({activeCourse,setPage}){
-  const [questions,setQuestions]=useState([]);const [stats,setStats]=useState(null);const [loading,setLoading]=useState(false);
-  const [error,setError]=useState('');const [filters,setFilters]=useState({bloom_level:'',question_type:'',source:''});
-  const load=async()=>{
-    if(!activeCourse){setError('Select a course first.');return;}
-    setLoading(true);setError('');
-    try{const params=new URLSearchParams();
-      if(filters.bloom_level)params.append('bloom_level',filters.bloom_level);
-      if(filters.question_type)params.append('question_type',filters.question_type);
-      if(filters.source)params.append('source',filters.source);
-      const d=await apiFetch(`/questions/bank/${activeCourse.id}?${params}`);
-      setQuestions(d.questions);setStats(d.stats);}
-    catch(e){setError(e.message);}setLoading(false);
-  };
-  useEffect(()=>{if(activeCourse)load();},[activeCourse]);
-  const deleteQ=async(id)=>{try{await apiFetch(`/questions/bank/${id}`,{method:'DELETE'});setQuestions(q=>q.filter(x=>x.id!==id));}catch(e){setError(e.message);}};
-  const srcColors={generated:'badge-green',classified:'badge-blue',manipulated:'badge-purple',manual:'badge-amber'};
-  return(<div className="page-body">
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
-      <h2 style={{fontFamily:'Fraunces,serif'}}>🗄 Question Bank</h2>
-      <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
-        <button className="btn btn-outline" onClick={()=>setPage('qgenerate')} style={{fontSize:'.8rem'}}>+ Generate</button>
-        <button className="btn btn-outline" onClick={()=>setPage('qclassify')} style={{fontSize:'.8rem'}}>+ Classify</button>
+// ── QUESTION BANK ─────────────────────────────────────────────────────────
+function QBankPage({course,go}){
+  const [qs,setQs]=useState([]);const [stats,setStats]=useState(null);const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');const [fil,setFil]=useState({bloom_level:'',question_type:'',source:''});
+  const load=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
+    try{const p=new URLSearchParams();Object.entries(fil).forEach(([k,v])=>v&&p.append(k,v));
+      const d=await api(`/questions/bank/${course.id}?${p}`);setQs(d.questions);setStats(d.stats);}
+    catch(e){setErr(e.message);}setLoading(false);};
+  useEffect(()=>{if(course)load();},[course]);
+  const del=async(id)=>{try{await api(`/questions/bank/${id}`,{method:'DELETE'});setQs(q=>q.filter(x=>x.id!==id));}catch(e){setErr(e.message);}};
+  const srcC={generated:'b-green',classified:'b-blue',manipulated:'b-purple',manual:'b-amber'};
+  return(<div className="page-body fade-up">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',flexWrap:'wrap',gap:'.75rem'}}>
+      <div><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>Question Bank</div>
+        <div style={{color:'var(--text2)',fontSize:'.855rem',marginTop:'.2rem'}}>{qs.length} questions stored</div></div>
+      <div style={{display:'flex',gap:'.5rem'}}>
+        <button className="btn btn-primary btn-sm" onClick={()=>go('qgenerate')}>+ Generate</button>
+        <button className="btn btn-outline btn-sm" onClick={()=>go('qclassify')}>+ Classify</button>
       </div>
     </div>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first."/>}
-    {stats&&<div className="stat-grid" style={{marginBottom:'1.25rem'}}>
-      {[{v:stats.total,l:'Total'},{v:Object.keys(stats.by_bloom).length,l:'Bloom Levels'},{v:Object.keys(stats.by_co).length,l:'COs Covered'},{v:Object.keys(stats.by_source).length,l:'Sources'}].map((s,i)=>
-        <div key={i} className="stat-card"><div className="stat-val" style={{fontSize:'1.4rem'}}>{s.v}</div><div className="stat-label">{s.l}</div></div>)}
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    {stats&&<div className="stat-row" style={{marginBottom:'1.25rem'}}>
+      {[{i:'🗄',ic:'blue',v:stats.total,l:'Total'},{i:'🧠',ic:'purple',v:Object.keys(stats.by_bloom).length,l:'Bloom Levels'},
+        {i:'🎯',ic:'green',v:Object.keys(stats.by_co).length,l:'COs Covered'},{i:'⚡',ic:'amber',v:Object.keys(stats.by_source).length,l:'Sources'}].map((s,i)=>(
+        <div key={i} className={`stat-card ${s.ic}`}><div className={`stat-icon ${s.ic}`}>{s.i}</div><div className="stat-val" style={{fontSize:'1.4rem'}}>{s.v}</div><div className="stat-label">{s.l}</div></div>))}
     </div>}
-    {/* Filters */}
-    <div className="card" style={{marginBottom:'1.25rem'}}>
+    <div className="card card-p" style={{marginBottom:'1.25rem'}}>
       <div style={{display:'flex',gap:'.75rem',flexWrap:'wrap',alignItems:'flex-end'}}>
-        <div><label className="form-label">Bloom Level</label>
-          <select className="form-input form-select" style={{width:160}} value={filters.bloom_level} onChange={e=>setFilters(f=>({...f,bloom_level:e.target.value}))}>
-            <option value="">All Levels</option>{BLOOM_LEVELS.map(b=><option key={b.level} value={b.level}>L{b.level} {b.label}</option>)}</select></div>
-        <div><label className="form-label">Type</label>
-          <select className="form-input form-select" style={{width:160}} value={filters.question_type} onChange={e=>setFilters(f=>({...f,question_type:e.target.value}))}>
-            <option value="">All Types</option>{QTYPES.map(t=><option key={t}>{t}</option>)}</select></div>
-        <div><label className="form-label">Source</label>
-          <select className="form-input form-select" style={{width:160}} value={filters.source} onChange={e=>setFilters(f=>({...f,source:e.target.value}))}>
-            <option value="">All Sources</option>{['generated','classified','manipulated','manual'].map(s=><option key={s}>{s}</option>)}</select></div>
-        <button className="btn btn-primary" onClick={load} disabled={loading||!activeCourse}>{loading?<Spinner/>:'🔍 Filter'}</button>
+        {[['Bloom Level','bloom_level',['',...BLOOM.map(b=>`${b.l}`)]],['Type','question_type',['',...QTYPES]],['Source','source',['','generated','classified','manipulated','manual']]].map(([l,k,opts])=>(
+          <div key={k}><label className="fl">{l}</label>
+            <select className="fi fsel" style={{width:160}} value={fil[k]} onChange={e=>setFil(f=>({...f,[k]:e.target.value}))}>
+              {opts.map((o,i)=><option key={i} value={o}>{o||`All ${l}s`}</option>)}</select></div>))}
+        <button className="btn btn-primary" onClick={load} disabled={loading||!course}>{loading?<Spin/>:'Filter'}</button>
       </div>
     </div>
-    <Alert type="error" msg={error}/>
-    {loading?<Skeleton rows={6}/>:questions.length===0?<Alert type="info" msg="No questions in bank yet. Generate or classify questions to add them."/>:
-    <div>{questions.map(q=>(
-      <div key={q.id} className="question-card" style={{position:'relative'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'.5rem'}}>
-          <p style={{fontSize:'.9rem',lineHeight:1.6,flex:1}}>{q.question_text}</p>
-          <button className="btn btn-danger" style={{fontSize:'.7rem',padding:'.3rem .6rem',whiteSpace:'nowrap'}} onClick={()=>deleteQ(q.id)}>Delete</button>
-        </div>
-        {q.options&&<div style={{marginTop:'.5rem'}}>{q.options.map((o,i)=><div key={i} style={{fontSize:'.8rem',color:'var(--text2)',padding:'.1rem 0'}}>{o}</div>)}</div>}
-        <div style={{display:'flex',gap:'.4rem',marginTop:'.65rem',flexWrap:'wrap',alignItems:'center'}}>
-          <BloomBadge level={q.bloom_level} label={q.bloom_label}/>
-          {q.co_id&&<span className="badge badge-blue">{q.co_id}</span>}
-          {q.po_id&&<span className="badge badge-teal">{q.po_id}</span>}
-          <span className="badge badge-purple">{q.question_type}</span>
-          <span className={`badge ${srcColors[q.source]||'badge-amber'}`}>{q.source}</span>
-          <span className="badge badge-amber">{q.marks}M</span>
-          {q.topic&&<span style={{fontSize:'.72rem',color:'var(--text3)'}}>📌 {q.topic}</span>}
-          <span style={{fontSize:'.72rem',color:'var(--text3)',marginLeft:'auto'}}>#{q.id}</span>
-        </div>
-      </div>))}</div>}
+    <Alrt t="error" msg={err}/>
+    {loading?<Skel/>:qs.length===0?<Alrt t="info" msg="No questions yet. Generate or classify questions to populate the bank."/>:
+    <div>{qs.map(q=><div key={q.id} className="qcard">
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'.5rem'}}>
+        <p style={{fontSize:'.875rem',lineHeight:1.6,flex:1,color:'var(--text)'}}>{q.question_text}</p>
+        <button className="btn btn-red btn-sm" onClick={()=>del(q.id)}>Delete</button>
+      </div>
+      {q.options&&<div style={{marginTop:'.5rem'}}>{q.options.map((o,i)=><div key={i} style={{fontSize:'.8rem',color:'var(--text2)',padding:'.1rem 0'}}>{o}</div>)}</div>}
+      <div style={{display:'flex',gap:'.35rem',marginTop:'.65rem',flexWrap:'wrap',alignItems:'center'}}>
+        <BloomB l={q.bloom_level} n={q.bloom_label}/>
+        {q.co_id&&<span className="badge b-blue">{q.co_id}</span>}
+        {q.po_id&&<span className="badge b-teal">{q.po_id}</span>}
+        <span className="badge b-purple">{q.question_type}</span>
+        <span className={`badge ${srcC[q.source]||'b-gray'}`}>{q.source}</span>
+        <span className="badge b-amber">{q.marks}M</span>
+        {q.topic&&<span style={{fontSize:'.72rem',color:'var(--text3)'}}>📌 {q.topic}</span>}
+        <span style={{fontSize:'.72rem',color:'var(--text3)',marginLeft:'auto'}}>#{q.id}</span>
+      </div>
+    </div>)}</div>}
   </div>);
 }
 
-// ── CLASSIFY QUESTION ─────────────────────────────────────────────────────────
-function ClassifyQuestionPage({activeCourse}){
-  const [questionText,setQuestionText]=useState('');const [loading,setLoading]=useState(false);
-  const [error,setError]=useState('');const [result,setResult]=useState(null);const [saved,setSaved]=useState(false);
+// ── CLASSIFY ──────────────────────────────────────────────────────────────
+function ClassifyPage({course}){
+  const [txt,setTxt]=useState('');const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [res,setRes]=useState(null);
   const classify=async()=>{
-    if(!activeCourse){setError('Select a course first.');return;}
-    if(!questionText.trim()){setError('Enter a question to classify.');return;}
-    setLoading(true);setError('');setResult(null);setSaved(false);
-    try{const d=await apiFetch('/questions/classify',{method:'POST',body:JSON.stringify({
-      course_id:activeCourse.id,course_name:activeCourse.course_name,
-      question_text:questionText,cos:activeCourse.cos||[],pos:activeCourse.pos||[],save_to_bank:true})});setResult(d);}
-    catch(e){setError(e.message);}setLoading(false);
+    if(!course){setErr('Select a course first.');return;}
+    if(!txt.trim()){setErr('Enter a question.');return;}
+    setLoading(true);setErr('');setRes(null);
+    try{const d=await api('/questions/classify',{method:'POST',body:JSON.stringify({course_id:course.id,course_name:course.course_name,question_text:txt,cos:course.cos||[],pos:course.pos||[],save_to_bank:true})});setRes(d);}
+    catch(e){setErr(e.message);}setLoading(false);
   };
-  return(<div className="page-body">
-    <h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>🔍 Classify Question</h2>
-    <p style={{color:'var(--text2)',marginBottom:'1.5rem',fontSize:'.875rem'}}>Paste any question — AI will classify its Bloom's level, CO mapping, and PO mapping, then save it to the bank.</p>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first."/>}
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.5rem'}}>🔍 Classify Question</div>
+    <div style={{color:'var(--text2)',fontSize:'.875rem',marginBottom:'1.5rem'}}>Paste any question — AI identifies Bloom's level, CO and PO mapping, then saves to bank.</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem'}}>
-      <div className="card">
-        <div className="form-group"><label className="form-label">Question Text</label>
-          <textarea className="form-input" rows={8} value={questionText} onChange={e=>setQuestionText(e.target.value)} placeholder="Paste or type any question here…&#10;&#10;e.g. Compare the time complexity of bubble sort and merge sort, and justify which is more suitable for large datasets."/></div>
-        <Alert type="error" msg={error}/>
-        <button className="btn btn-primary" onClick={classify} disabled={loading||!activeCourse}>{loading?<><Spinner/>Classifying…</>:'🔍 Classify & Save to Bank'}</button>
+      <div className="card card-p">
+        <div className="fg"><label className="fl">Question Text</label>
+          <textarea className="fi" rows={8} value={txt} onChange={e=>setTxt(e.target.value)} placeholder="Paste or type any question here…&#10;&#10;e.g. Compare the time complexity of bubble sort and merge sort, and justify which is more suitable for large datasets."/></div>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" onClick={classify} disabled={loading||!course}>{loading?<><Spin/>Classifying…</>:'🔍 Classify & Save to Bank'}</button>
       </div>
       <div>
-        {loading&&<div className="card" style={{display:'flex',alignItems:'center',justifyContent:'center',height:200}}><Spinner/><span style={{marginLeft:'.5rem',color:'var(--text2)'}}>AI is analysing your question…</span></div>}
-        {result&&<div className="card">
+        {loading&&<div className="card card-p" style={{display:'flex',alignItems:'center',justifyContent:'center',height:200,color:'var(--text2)'}}><Spin/>AI is analysing your question…</div>}
+        {res&&<div className="card card-p fade-up">
           <div style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'1rem'}}>
-            <h3 style={{fontSize:'1rem'}}>Classification Result</h3>
-            {result.saved_id&&<span className="badge badge-green">✓ Saved (#{result.saved_id})</span>}
+            <div style={{fontWeight:700,fontSize:'.95rem'}}>Classification Result</div>
+            {res.saved_id&&<span className="badge b-green">✓ Saved #{res.saved_id}</span>}
           </div>
-          <div style={{background:'var(--navy3)',borderRadius:8,padding:'.75rem',marginBottom:'1rem',fontSize:'.875rem',lineHeight:1.6,color:'var(--text)'}}>{result.classification.question_text}</div>
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem',marginBottom:'1rem',fontSize:'.875rem',lineHeight:1.6}}>{res.classification.question_text}</div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.75rem',marginBottom:'1rem'}}>
-            {[['Bloom Level',<BloomBadge level={result.classification.bloom_level} label={result.classification.bloom_label}/>],
-              ['Question Type',<span className="badge badge-purple">{result.classification.question_type}</span>],
-              ['CO Mapping',result.classification.co_id?<span className="badge badge-blue">{result.classification.co_id}</span>:<span style={{color:'var(--text3)'}}>—</span>],
-              ['PO Mapping',result.classification.po_id?<span className="badge badge-teal">{result.classification.po_id}</span>:<span style={{color:'var(--text3)'}}>—</span>]].map(([label,val],i)=>(
-              <div key={i} style={{background:'var(--navy)',borderRadius:6,padding:'.65rem'}}>
-                <div style={{fontSize:'.7rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:'.35rem'}}>{label}</div>
-                {val}
+            {[['Bloom Level',<BloomB l={res.classification.bloom_level} n={res.classification.bloom_label}/>],
+              ['Question Type',<span className="badge b-purple">{res.classification.question_type}</span>],
+              ['CO Mapping',res.classification.co_id?<span className="badge b-blue">{res.classification.co_id}</span>:<span style={{color:'var(--text3)'}}>—</span>],
+              ['PO Mapping',res.classification.po_id?<span className="badge b-teal">{res.classification.po_id}</span>:<span style={{color:'var(--text3)'}}>—</span>]].map(([l,v],i)=>(
+              <div key={i} style={{background:'var(--bg)',borderRadius:8,padding:'.65rem',border:'1px solid var(--border)'}}>
+                <div style={{fontSize:'.7rem',fontWeight:600,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.35rem'}}>{l}</div>{v}
               </div>))}
           </div>
-          {result.classification.reasoning&&<div style={{background:'var(--navy)',borderRadius:8,padding:'.75rem',borderLeft:'3px solid var(--amber)'}}>
-            <div style={{fontSize:'.7rem',color:'var(--amber)',marginBottom:'.35rem',textTransform:'uppercase',letterSpacing:'.06em'}}>AI Reasoning</div>
-            <p style={{fontSize:'.85rem',color:'var(--text2)',lineHeight:1.6}}>{result.classification.reasoning}</p>
+          {res.classification.reasoning&&<div style={{background:'#eff6ff',borderRadius:8,padding:'.75rem',borderLeft:'3px solid var(--blue2)'}}>
+            <div style={{fontSize:'.7rem',fontWeight:600,color:'var(--blue2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.35rem'}}>AI Reasoning</div>
+            <p style={{fontSize:'.85rem',color:'var(--text2)',lineHeight:1.6}}>{res.classification.reasoning}</p>
           </div>}
         </div>}
-        {!result&&!loading&&<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,color:'var(--text3)',fontSize:'2.5rem'}}>🔍<div style={{fontSize:'.9rem',marginTop:'.5rem'}}>Classification will appear here</div></div>}
+        {!res&&!loading&&<div className="card card-p" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,color:'var(--text3)',border:'2px dashed var(--border)',background:'transparent',boxShadow:'none'}}>
+          <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>🔍</div><div style={{fontSize:'.875rem'}}>Classification will appear here</div>
+        </div>}
       </div>
     </div>
   </div>);
 }
 
-// ── MANIPULATE QUESTION ───────────────────────────────────────────────────────
-function ManipulateQuestionPage({activeCourse}){
-  const [form,setForm]=useState({original_question:'',original_bloom_level:1,target_bloom_level:3,topic:'',teacher_hint:''});
-  const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [result,setResult]=useState(null);
-  const [selected,setSelected]=useState('suggested');const [saving,setSaving]=useState(false);const [saved,setSaved]=useState(null);
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const manipulate=async()=>{
-    if(!activeCourse){setError('Select a course first.');return;}
-    if(!form.original_question.trim()){setError('Enter the original question.');return;}
-    if(+form.original_bloom_level===+form.target_bloom_level){setError('Target level must be different from original.');return;}
-    setLoading(true);setError('');setResult(null);setSaved(null);
-    try{const d=await apiFetch('/questions/manipulate',{method:'POST',body:JSON.stringify({...form,original_bloom_level:+form.original_bloom_level,target_bloom_level:+form.target_bloom_level,course_id:activeCourse.id,course_name:activeCourse.course_name})});setResult(d);}
-    catch(e){setError(e.message);}setLoading(false);
+// ── MANIPULATE ────────────────────────────────────────────────────────────
+function ManipulatePage({course}){
+  const [f,setF]=useState({original_question:'',original_bloom_level:1,target_bloom_level:3,topic:'',teacher_hint:''});
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [res,setRes]=useState(null);
+  const [sel,setSel]=useState('suggested');const [saving,setSaving]=useState(false);const [saved,setSaved]=useState(null);
+  const s=(k,v)=>setF(x=>({...x,[k]:v}));
+  const run=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    if(!f.original_question.trim()){setErr('Enter the original question.');return;}
+    if(+f.original_bloom_level===+f.target_bloom_level){setErr('Target must differ from original.');return;}
+    setLoading(true);setErr('');setRes(null);setSaved(null);
+    try{const d=await api('/questions/manipulate',{method:'POST',body:JSON.stringify({...f,original_bloom_level:+f.original_bloom_level,target_bloom_level:+f.target_bloom_level,course_id:course.id,course_name:course.course_name})});setRes(d);}
+    catch(e){setErr(e.message);}setLoading(false);
   };
-  const saveToBank=async()=>{
-    if(!result||!activeCourse)return;
-    setSaving(true);
-    const text=selected==='suggested'?result.suggested_rewrite:result.alternative_rewrite;
-    try{const d=await apiFetch('/questions/manipulate/save',{method:'POST',body:JSON.stringify({
-      course_id:activeCourse.id,question_text:text,topic:form.topic,
-      bloom_level:result.target_bloom_level,question_type:'Short Answer',marks:5,source:'manipulated'})});setSaved(d.id);}
-    catch(e){setError(e.message);}setSaving(false);
-  };
-  return(<div className="page-body">
-    <h2 style={{fontFamily:'Fraunces,serif',marginBottom:'1.25rem'}}>🔄 Manipulate Bloom's Level</h2>
-    <p style={{color:'var(--text2)',marginBottom:'1.5rem',fontSize:'.875rem'}}>Rewrite any question to a different Bloom's Taxonomy level. AI suggests rewrites; you choose and save.</p>
-    {!activeCourse&&<Alert type="warning" msg="Select a course first."/>}
+  const save=async()=>{if(!res||!course)return;setSaving(true);
+    const txt=sel==='suggested'?res.suggested_rewrite:res.alternative_rewrite;
+    try{const d=await api('/questions/manipulate/save',{method:'POST',body:JSON.stringify({course_id:course.id,question_text:txt,topic:f.topic,bloom_level:res.target_bloom_level,question_type:'Short Answer',marks:5,source:'manipulated'})});setSaved(d.id);}
+    catch(e){setErr(e.message);}setSaving(false);};
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.5rem'}}>🔄 Manipulate Bloom Level</div>
+    <div style={{color:'var(--text2)',fontSize:'.875rem',marginBottom:'1.5rem'}}>Rewrite any question to a different Bloom's level. AI suggests rewrites — you pick and save.</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem'}}>
-      <div className="card">
-        <div className="form-group"><label className="form-label">Original Question</label>
-          <textarea className="form-input" rows={6} value={form.original_question} onChange={e=>set('original_question',e.target.value)} placeholder="Paste the original question here…"/></div>
-        <div className="form-grid">
-          <div className="form-group"><label className="form-label">Current Bloom Level</label>
-            <select className="form-input form-select" value={form.original_bloom_level} onChange={e=>set('original_bloom_level',e.target.value)}>
-              {BLOOM_LEVELS.map(b=><option key={b.level} value={b.level}>L{b.level} — {b.label}</option>)}</select></div>
-          <div className="form-group"><label className="form-label">Target Bloom Level</label>
-            <select className="form-input form-select" value={form.target_bloom_level} onChange={e=>set('target_bloom_level',e.target.value)}>
-              {BLOOM_LEVELS.map(b=><option key={b.level} value={b.level}>L{b.level} — {b.label}</option>)}</select></div>
+      <div className="card card-p">
+        <div className="fg"><label className="fl">Original Question</label><textarea className="fi" rows={5} value={f.original_question} onChange={e=>s('original_question',e.target.value)} placeholder="Paste original question here…"/></div>
+        <div className="fgrid">
+          <div className="fg"><label className="fl">Current Level</label><select className="fi fsel" value={f.original_bloom_level} onChange={e=>s('original_bloom_level',e.target.value)}>{BLOOM.map(b=><option key={b.l} value={b.l}>L{b.l} — {b.n}</option>)}</select></div>
+          <div className="fg"><label className="fl">Target Level</label><select className="fi fsel" value={f.target_bloom_level} onChange={e=>s('target_bloom_level',e.target.value)}>{BLOOM.map(b=><option key={b.l} value={b.l}>L{b.l} — {b.n}</option>)}</select></div>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:'.75rem',marginBottom:'1rem',padding:'.75rem',background:'var(--navy3)',borderRadius:8}}>
-          <BloomBadge level={+form.original_bloom_level}/>
-          <span style={{color:'var(--text3)'}}>→</span>
-          <BloomBadge level={+form.target_bloom_level}/>
+        <div style={{display:'flex',alignItems:'center',gap:.75+'rem',padding:'.75rem',background:'var(--bg)',borderRadius:8,marginBottom:'1rem',border:'1px solid var(--border)'}}>
+          <BloomB l={+f.original_bloom_level}/><span style={{color:'var(--text3)'}}>→</span><BloomB l={+f.target_bloom_level}/>
         </div>
-        <div className="form-group"><label className="form-label">Topic (optional)</label><input className="form-input" value={form.topic} onChange={e=>set('topic',e.target.value)} placeholder="e.g. Sorting Algorithms"/></div>
-        <div className="form-group"><label className="form-label">Teacher Hint (optional)</label><textarea className="form-input" rows={2} value={form.teacher_hint} onChange={e=>set('teacher_hint',e.target.value)} placeholder="e.g. Focus on real-world application, include a scenario…"/></div>
-        <Alert type="error" msg={error}/>
-        <button className="btn btn-primary" onClick={manipulate} disabled={loading||!activeCourse}>{loading?<><Spinner/>Rewriting…</>:'🔄 Rewrite Question'}</button>
+        <div className="fg"><label className="fl">Topic (optional)</label><input className="fi" value={f.topic} onChange={e=>s('topic',e.target.value)} placeholder="e.g. Sorting Algorithms"/></div>
+        <div className="fg"><label className="fl">Teacher Hint (optional)</label><textarea className="fi" rows={2} value={f.teacher_hint} onChange={e=>s('teacher_hint',e.target.value)} placeholder="e.g. Include a real-world scenario…"/></div>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" onClick={run} disabled={loading||!course}>{loading?<><Spin/>Rewriting…</>:'🔄 Rewrite Question'}</button>
       </div>
       <div>
-        {loading&&<div className="card" style={{display:'flex',alignItems:'center',justifyContent:'center',height:300}}><Spinner/><span style={{marginLeft:'.5rem',color:'var(--text2)'}}>AI is rewriting your question…</span></div>}
-        {result&&<div className="card">
-          <h3 style={{fontSize:'1rem',marginBottom:'1rem'}}>Choose a Rewrite</h3>
-          {[['suggested','✨ Suggested Rewrite',result.suggested_rewrite],['alternative','🔀 Alternative Rewrite',result.alternative_rewrite]].map(([key,label,text])=>(
-            <div key={key} onClick={()=>setSelected(key)} style={{cursor:'pointer',background:selected===key?'var(--navy4)':'var(--navy3)',border:`1px solid ${selected===key?'var(--amber)':'var(--border)'}`,borderRadius:8,padding:'1rem',marginBottom:'.75rem',transition:'all .15s'}}>
+        {loading&&<div className="card card-p" style={{display:'flex',alignItems:'center',justifyContent:'center',height:300,color:'var(--text2)'}}><Spin/>Rewriting…</div>}
+        {res&&<div className="card card-p fade-up">
+          <div style={{fontWeight:700,fontSize:'.95rem',marginBottom:'1rem'}}>Choose a Rewrite</div>
+          {[['suggested','✨ Suggested',res.suggested_rewrite],['alternative','🔀 Alternative',res.alternative_rewrite]].map(([k,l,t])=>(
+            <div key={k} onClick={()=>setSel(k)} style={{cursor:'pointer',background:sel===k?'#eff6ff':'var(--bg)',border:`1.5px solid ${sel===k?'var(--blue2)':'var(--border)'}`,borderRadius:10,padding:'1rem',marginBottom:'.75rem',transition:'all .15s'}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:'.5rem'}}>
-                <span style={{fontSize:'.8rem',fontWeight:600,color:selected===key?'var(--amber)':'var(--text2)'}}>{label}</span>
-                {selected===key&&<span style={{fontSize:'.75rem',color:'var(--amber)'}}>● Selected</span>}
+                <span style={{fontSize:'.8rem',fontWeight:700,color:sel===k?'var(--blue2)':'var(--text2)'}}>{l}</span>
+                {sel===k&&<span style={{fontSize:'.72rem',color:'var(--blue2)',fontWeight:600}}>● Selected</span>}
               </div>
-              <p style={{fontSize:'.875rem',lineHeight:1.6,color:'var(--text)'}}>{text}</p>
+              <p style={{fontSize:'.875rem',lineHeight:1.6,color:'var(--text)'}}>{t}</p>
             </div>))}
-          {result.explanation&&<div style={{background:'var(--navy)',borderRadius:8,padding:'.75rem',borderLeft:'3px solid var(--teal)',marginBottom:'1rem'}}>
-            <div style={{fontSize:'.7rem',color:'var(--teal)',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:'.35rem'}}>Why this works</div>
-            <p style={{fontSize:'.85rem',color:'var(--text2)',lineHeight:1.6}}>{result.explanation}</p>
+          {res.explanation&&<div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'.75rem',marginBottom:'1rem'}}>
+            <div style={{fontSize:'.7rem',fontWeight:700,color:'#166534',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.35rem'}}>Why This Works</div>
+            <p style={{fontSize:'.85rem',color:'#166534',lineHeight:1.6}}>{res.explanation}</p>
           </div>}
-          {saved?<Alert type="success" msg={`Saved to Question Bank (ID: #${saved})`}/>:
-          <button className="btn btn-teal" style={{width:'100%',padding:'.7rem',cursor:'pointer',borderRadius:8}} onClick={saveToBank} disabled={saving}>
-            {saving?<><Spinner/>Saving…</>:'✓ Save Selected to Question Bank'}</button>}
+          {saved?<Alrt t="success" msg={`Saved to Question Bank (#${saved})`}/>:
+          <button className="btn btn-green" style={{width:'100%',justifyContent:'center'}} onClick={save} disabled={saving}>{saving?<><Spin/>Saving…</>:'✓ Save to Question Bank'}</button>}
         </div>}
-        {!result&&!loading&&<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:300,color:'var(--text3)',fontSize:'2.5rem'}}>🔄<div style={{fontSize:'.9rem',marginTop:'.5rem'}}>Rewritten question will appear here</div></div>}
+        {!res&&!loading&&<div className="card card-p" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:300,color:'var(--text3)',border:'2px dashed var(--border)',background:'transparent',boxShadow:'none'}}>
+          <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>🔄</div><div style={{fontSize:'.875rem'}}>Rewritten question will appear here</div>
+        </div>}
       </div>
     </div>
   </div>);
 }
 
-// ── APP SHELL ─────────────────────────────────────────────────────────────────
+// ── APP ───────────────────────────────────────────────────────────────────
 function App(){
   const [user,setUser]=useState(null);
   const [page,setPage]=useState('home');
-  const [activeCourse,setActiveCourse]=useState(null);
-  const [sidebarOpen,setSidebarOpen]=useState(false);
-  if(!user)return <LoginPage onLogin={setUser}/>;
-  const titles={home:'Dashboard — Overview',courses:'All Courses',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper Generator',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Bloom Level'};
+  const [course,setCourse]=useState(null);
+  const [open,setOpen]=useState(false);
+
+  if(!user)return<Login onLogin={setUser}/>;
+
+  const titles={home:'Dashboard',courses:'Courses',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Level'};
+
   const pages={
-    home:<HomePage setPage={setPage}/>,courses:<CoursesPage setActiveCourse={setActiveCourse} setPage={setPage}/>,
-    syllabus:<SyllabusPage/>,setup:<CourseSetupPage setActiveCourse={setActiveCourse}/>,
-    sessions:<SessionPlanPage activeCourse={activeCourse}/>,evaluation:<EvaluationPlanPage activeCourse={activeCourse}/>,
-    marks:<MarksPage activeCourse={activeCourse}/>,attainment:<AttainmentPage activeCourse={activeCourse}/>,
-    reports:<ReportsPage activeCourse={activeCourse}/>,hod:<HodDashboardPage/>,
-    qgenerate:<GenerateQuestionPage activeCourse={activeCourse}/>,
-    qpaper:<QuestionPaperPage activeCourse={activeCourse}/>,
-    qbank:<QuestionBankPage activeCourse={activeCourse} setPage={setPage}/>,
-    qclassify:<ClassifyQuestionPage activeCourse={activeCourse}/>,
-    qmanipulate:<ManipulateQuestionPage activeCourse={activeCourse}/>,
+    home:<HomePage go={setPage} setCourse={setCourse}/>,
+    courses:<CoursesPage setCourse={setCourse} go={setPage}/>,
+    syllabus:<SyllabusPage/>,
+    setup:<CourseSetupPage setCourse={setCourse}/>,
+    sessions:<SessionPlanPage course={course}/>,
+    evaluation:<EvalPlanPage course={course}/>,
+    marks:<MarksPage course={course}/>,
+    attainment:<AttainmentPage course={course}/>,
+    reports:<ReportsPage course={course}/>,
+    hod:<HodPage/>,
+    qgenerate:<GenQPage course={course}/>,
+    qpaper:<QPaperPage course={course}/>,
+    qbank:<QBankPage course={course} go={setPage}/>,
+    qclassify:<ClassifyPage course={course}/>,
+    qmanipulate:<ManipulatePage course={course}/>,
   };
-  return(<div className="app-shell">
-    <div className={`sidebar-overlay ${sidebarOpen?'show':''}`} onClick={()=>setSidebarOpen(false)}/>
-    <Sidebar page={page} setPage={setPage} activeCourse={activeCourse} user={user} onLogout={()=>{setUser(null);setPage('home');setActiveCourse(null);}} isOpen={sidebarOpen} onClose={()=>setSidebarOpen(false)}/>
-    <div className="main-area">
+
+  return(<div className="shell">
+    <div className={`overlay ${open?'show':''}`} onClick={()=>setOpen(false)}/>
+    <Sidebar page={page} go={setPage} course={course} user={user} logout={()=>{setUser(null);setPage('home');setCourse(null);}} open={open} close={()=>setOpen(false)}/>
+    <div className="main">
       <div className="topbar">
-        <button className="hamburger" onClick={()=>setSidebarOpen(o=>!o)}>☰</button>
-        <span className="topbar-logo">OBE.Auto</span>
-        {activeCourse&&<span style={{fontSize:'.75rem',color:'var(--amber)',marginLeft:'auto'}}>{activeCourse.course_code}</span>}
+        <button className="hamburger" onClick={()=>setOpen(o=>!o)}>☰</button>
+        <span style={{fontFamily:'DM Serif Display,serif',fontSize:'1.1rem',color:'var(--text)'}}>OBE<span style={{color:'var(--blue2)'}}>.</span>Auto</span>
+        {course&&<span className="badge b-blue" style={{marginLeft:'auto'}}>{course.course_code}</span>}
       </div>
-      <div className="page-header"><div className="page-title">{titles[page]||page}</div></div>
-      <ErrorBoundary key={page}>{pages[page]||<div className="page-body"><Alert type="error" msg="Page not found."/></div>}</ErrorBoundary>
+      <div className="page-head">
+        <div>
+          <div className="page-head-title">{titles[page]||page}</div>
+          <div className="page-head-sub">{getDay()}</div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:'.875rem'}}>
+          {course&&<span className="badge b-blue" style={{fontSize:'.8rem'}}>📚 {course.course_code}</span>}
+          <div style={{width:34,height:34,borderRadius:'50%',background:'linear-gradient(135deg,var(--blue),var(--indigo))',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'.8rem',fontWeight:700}}>{user.user?.[0]?.toUpperCase()}</div>
+        </div>
+      </div>
+      <EB key={page}>{pages[page]||<div className="page-body"><Alrt t="error" msg="Page not found."/></div>}</EB>
     </div>
   </div>);
 }
