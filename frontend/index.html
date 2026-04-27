@@ -799,8 +799,10 @@ function CourseSetupPage({setCourse}){
   const s=(k,v)=>setF(x=>({...x,[k]:v}));
   const sub=async()=>{setLoading(true);setErr('');setOk('');
     try{const d=await api('/courses/setup',{method:'POST',body:JSON.stringify({...f,credits:+f.credits,total_hours:+f.total_hours,
-      cos:[{co_id:'CO1',statement:'Apply core concepts',bloom_level:'Apply'}],pos:[{po_id:'PO1',statement:'Engineering Knowledge'}],
-      co_po_matrix:{CO1:{PO1:3}},evaluation_config:{components:{Quiz:10,'Unit Test':20}}})});
+      cos:[{co_id:'CO1',statement:'Apply core concepts',bloom_level:'Apply'},{co_id:'CO2',statement:'Analyse and evaluate methods',bloom_level:'Analyse'},{co_id:'CO3',statement:'Design and implement solutions',bloom_level:'Create'}],
+      pos:[{po_id:'PO1',statement:'Engineering Knowledge'},{po_id:'PO2',statement:'Problem Analysis'},{po_id:'PO3',statement:'Design Solutions'}],
+      co_po_matrix:{CO1:{PO1:3,PO2:2,PO3:1},CO2:{PO1:2,PO2:3,PO3:2},CO3:{PO1:1,PO2:2,PO3:3}},
+      evaluation_config:{continuous_assessment_total:40,end_sem_total:60,components:{Quiz:10,'Unit Test':20,Assignment:10}}})});
       setOk(`Course created! ID: ${d.course_id}`);setCourse({...f,id:d.course_id});}
     catch(e){setErr(e.message);}setLoading(false);};
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Course Setup</div>
