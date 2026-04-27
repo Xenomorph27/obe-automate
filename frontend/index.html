@@ -109,7 +109,7 @@ html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg
 
 /* ── MAIN ── */
 .main{flex:1;overflow-y:auto;background:var(--bg);display:flex;flex-direction:column}
-.page-head{padding:1.5rem 2rem 1rem;border-bottom:1px solid var(--border);background:var(--white);display:flex;align-items:center;justify-content:space-between}
+.page-head{padding:1.5rem 2rem 1rem;border-bottom:1px solid #bfdbfe;background:linear-gradient(135deg,#dbeafe 0%,#eff6ff 100%);display:flex;align-items:center;justify-content:space-between}
 .page-head-title{font-size:1rem;font-weight:700;color:var(--text)}
 .page-head-sub{font-size:.8rem;color:var(--text3);margin-top:.15rem}
 .page-body{padding:1.75rem 2rem;flex:1}
@@ -128,12 +128,12 @@ html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg
 .stat-card.amber::before{background:var(--amber)}
 .stat-card.teal::before{background:var(--teal)}
 .stat-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;margin-bottom:.875rem}
-.stat-icon.blue{background:var(--blue3);color:var(--blue2)}
-.stat-icon.green{background:var(--green2);color:#059669}
-.stat-icon.purple{background:var(--purple2);color:#7c3aed}
-.stat-icon.amber{background:var(--amber2);color:#d97706}
-.stat-icon.teal{background:var(--teal2);color:var(--teal)}
-.stat-icon.pink{background:var(--pink2);color:var(--pink)}
+.stat-icon.blue{background:#bfdbfe;color:#1d4ed8}
+.stat-icon.green{background:#6ee7b7;color:#065f46}
+.stat-icon.purple{background:#c4b5fd;color:#5b21b6}
+.stat-icon.amber{background:#fcd34d;color:#92400e}
+.stat-icon.teal{background:#5eead4;color:#0f766e}
+.stat-icon.pink{background:#f9a8d4;color:#9d174d}
 .stat-val{font-size:1.75rem;font-weight:700;color:var(--text);line-height:1;font-family:'DM Serif Display',serif}
 .stat-label{font-size:.78rem;color:var(--text2);margin-top:.25rem;font-weight:500}
 .stat-change{font-size:.75rem;margin-top:.5rem;display:flex;align-items:center;gap:.25rem}
@@ -309,32 +309,46 @@ tbody tr:hover{background:var(--bg)}
 }
 
 /* ── DEEP BLUE HOVER on main content buttons/cards ── */
+.main .btn,
+.main button:not(.sb-logout):not(.hamburger){
+  transition: background .15s, color .15s, border-color .15s, box-shadow .15s !important;
+}
 .main .btn:hover,
 .main button:not(.sb-logout):not(.hamburger):hover{
-  background:var(--blue2) !important;
-  color:#fff !important;
-  border-color:var(--blue2) !important;
-  box-shadow:0 4px 14px rgba(37,99,235,.35) !important;
-}
-.main .btn-primary:hover{
   background:#1d4ed8 !important;
+  color:#fff !important;
+  border-color:#1d4ed8 !important;
+  box-shadow:0 4px 14px rgba(29,78,216,.4) !important;
 }
 .main .btn-red:hover{
-  background:#dc2626 !important;
+  background:#b91c1c !important;
   color:#fff !important;
-  border-color:#dc2626 !important;
+  border-color:#b91c1c !important;
+  box-shadow:0 4px 14px rgba(185,28,28,.35) !important;
 }
 .main .btn-green:hover{
-  background:#059669 !important;
-}
-.main .quick-action:hover{
-  border-color:var(--blue2);
-  box-shadow:0 6px 20px rgba(37,99,235,.2);
+  background:#047857 !important;
+  color:#fff !important;
+  border-color:#047857 !important;
 }
 .main a.btn:hover{
-  background:var(--blue2) !important;
+  background:#1d4ed8 !important;
   color:#fff !important;
-  border-color:var(--blue2) !important;
+  border-color:#1d4ed8 !important;
+  box-shadow:0 4px 14px rgba(29,78,216,.4) !important;
+}
+.main .quick-action:hover{
+  background:#1d4ed8 !important;
+  border-color:#1d4ed8 !important;
+  box-shadow:0 6px 20px rgba(29,78,216,.35) !important;
+  transform:translateY(-2px);
+}
+.main .quick-action:hover .qa-label{
+  color:#fff !important;
+}
+.main .quick-action:hover .qa-icon,
+.main .quick-action:hover .stat-icon{
+  background:rgba(255,255,255,.2) !important;
 }
 </style>
 </head>
@@ -504,11 +518,22 @@ function HomePage({go,setCourse}){
   const [ttFile,setTtFile]=useState(null);
   const [ttUploading,setTtUploading]=useState(false);
   const [ttErr,setTtErr]=useState('');
+  const [qStats,setQStats]=useState(null);
+  const [deptData,setDeptData]=useState(null);
 
   useEffect(()=>{
     api('/courses/').then(d=>{setCourses(d);setLoading(false)}).catch(()=>setLoading(false));
     api('/dashboard/timetable').then(d=>{setTt(d.data);setTtLoading(false)}).catch(()=>setTtLoading(false));
+    api('/dashboard/department').then(d=>setDeptData(d)).catch(()=>{});
   },[]);
+
+  // Fetch question stats once courses load
+  useEffect(()=>{
+    if(courses.length>0){
+      // Get question bank stats from first course as proxy for total
+      api(`/questions/bank/${courses[0].id}`).then(d=>setQStats(d.stats)).catch(()=>{});
+    }
+  },[courses]);
 
   const uploadTimetable=async()=>{
     if(!ttFile)return;setTtUploading(true);setTtErr('');
@@ -521,17 +546,18 @@ function HomePage({go,setCourse}){
   const TODAY=new Date().toLocaleDateString('en-US',{weekday:'long'});
   const todaySchedule=tt?.schedule?.[TODAY]||[];
 
+  // Real computed values
+  const totalStudents=deptData?.summary?.total_students??'—';
+  const avgCO=deptData?.summary?.avg_co_attainment!=null?deptData.summary.avg_co_attainment+'%':'—';
+  const totalQ=qStats?.total??'—';
+  const coursesAbove=deptData?.summary?.courses_above_target??'—';
+  const totalCourses=loading?'…':courses.length;
+
   const events=[
     {day:'28',mon:'Apr',title:'Mid-Semester Exam',sub:'All courses — Hall A',c:'b-red'},
     {day:'05',mon:'May',title:'NBA Documentation',sub:'Submission deadline',c:'b-amber'},
     {day:'12',mon:'May',title:'Faculty Meeting',sub:'Academic committee',c:'b-blue'},
     {day:'20',mon:'May',title:'End Semester Exam',sub:'Exam schedule released',c:'b-purple'},
-  ];
-  const activity=[
-    {i:'📄',ic:'blue',t:'Syllabus uploaded',s:'Operating Systems — PDF extracted',time:'2h ago'},
-    {i:'📊',ic:'green',t:'Attainment calculated',s:'Course ID 5 — CO/PO report ready',time:'5h ago'},
-    {i:'✨',ic:'purple',t:'Question generated',s:'L4 Analyse — Process Scheduling',time:'Yesterday'},
-    {i:'📋',ic:'amber',t:'Question paper created',s:'Mid-sem paper — 3 sections, 100M',time:'Yesterday'},
   ];
 
   return(
@@ -543,7 +569,7 @@ function HomePage({go,setCourse}){
           <div className="welcome-name">{getGreeting()}, {tt?.faculty_name?tt.faculty_name.split(' ').slice(-1)[0]:'Professor'}! 👋</div>
           <div className="welcome-sub">{tt?`${tt.department} · ${tt.academic_year}`:'Upload your timetable to personalise your dashboard.'}</div>
           <div className="welcome-chips">
-            <span className="wchip">📚 {loading?'…':courses.length} Courses</span>
+            <span className="wchip">📚 {totalCourses} Courses</span>
             <span className="wchip">⏰ {todaySchedule.length} Classes Today</span>
             <span className="wchip">🎯 NBA Due: May 5</span>
             {tt&&<span className="wchip">✅ Timetable Loaded</span>}
@@ -551,18 +577,18 @@ function HomePage({go,setCourse}){
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Stats — all real data */}
       <div className="stat-row">
-        {[{i:'📚',ic:'blue',v:loading?'…':courses.length,l:'Total Courses',chg:'+2 this sem',up:true},
-          {i:'👥',ic:'green',v:'143',l:'Total Students',chg:'+12 enrolled',up:true},
-          {i:'📊',ic:'purple',v:'78%',l:'Avg CO Attainment',chg:'↑ 4% from last',up:true},
-          {i:'📋',ic:'amber',v:'47',l:'Questions in Bank',chg:'12 this week',up:true},
-          {i:'🏆',ic:'teal',v:'3/5',l:'Courses NBA-ready',chg:'2 pending',up:false}].map((s,i)=>(
+        {[{i:'📚',ic:'blue',v:totalCourses,l:'Total Courses',sub:'from database'},
+          {i:'👥',ic:'green',v:totalStudents,l:'Total Students',sub:'marks uploaded'},
+          {i:'📊',ic:'purple',v:avgCO,l:'Avg CO Attainment',sub:'dept average'},
+          {i:'📋',ic:'amber',v:totalQ,l:'Questions in Bank',sub:'this course'},
+          {i:'🏆',ic:'teal',v:coursesAbove,l:'Above Target',sub:'≥70% attainment'}].map((s,i)=>(
           <div key={i} className={`stat-card ${s.ic}`}>
             <div className={`stat-icon ${s.ic}`}>{s.i}</div>
             <div className="stat-val">{s.v}</div>
             <div className="stat-label">{s.l}</div>
-            <div className={`stat-change ${s.up?'up':'down'}`}>{s.up?'↑':'↓'} {s.chg}</div>
+            <div style={{fontSize:'.72rem',color:'var(--text3)',marginTop:'.25rem'}}>{s.sub}</div>
           </div>))}
       </div>
 
@@ -583,7 +609,7 @@ function HomePage({go,setCourse}){
       <div className="dash-grid">
         {/* Left column */}
         <div>
-          {/* Today's Schedule from timetable */}
+          {/* Today's Schedule */}
           <div className="card card-p" style={{marginBottom:'1.25rem'}}>
             <div className="section-head">
               <div className="section-title">📅 Today's Schedule <span style={{fontSize:'.75rem',fontWeight:400,color:'var(--text2)'}}>({TODAY})</span></div>
@@ -636,15 +662,24 @@ function HomePage({go,setCourse}){
             })}
           </div>}
 
-          {/* Recent Activity */}
+          {/* Courses list — real data */}
           <div className="card card-p">
-            <div className="section-head"><div className="section-title">⚡ Recent Activity</div><span className="section-link" onClick={()=>go('qbank')}>View all</span></div>
-            {activity.map((a,i)=>(
-              <div key={i} className="activity-item">
-                <div className={`act-icon stat-icon ${a.ic}`}>{a.i}</div>
-                <div className="act-content"><div className="act-title">{a.t}</div><div className="act-sub">{a.s}</div></div>
-                <div className="act-time">{a.time}</div>
-              </div>))}
+            <div className="section-head">
+              <div className="section-title">📚 Your Courses</div>
+              <span className="section-link" onClick={()=>go('courses')}>View all</span>
+            </div>
+            {loading?<Skel n={3}/>:courses.length===0?
+              <div style={{textAlign:'center',padding:'1.5rem',color:'var(--text2)',fontSize:'.855rem'}}>No courses yet. <span style={{color:'var(--blue2)',cursor:'pointer'}} onClick={()=>go('syllabus')}>Upload a syllabus →</span></div>:
+              courses.slice(0,5).map((c,i)=>(
+                <div key={i} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.65rem 0',borderBottom:i<Math.min(courses.length,5)-1?'1px solid var(--border)':''}}>
+                  <div style={{width:36,height:36,borderRadius:9,background:'var(--blue3)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.75rem',fontWeight:700,color:'var(--blue2)',flexShrink:0}}>{c.course_code?.slice(0,3)||'?'}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:'.855rem',fontWeight:600,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.course_name}</div>
+                    <div style={{fontSize:'.75rem',color:'var(--text2)'}}>{c.course_code} · {c.department}</div>
+                  </div>
+                  <button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('attainment');}}>Open</button>
+                </div>))
+            }
           </div>
         </div>
 
@@ -661,34 +696,55 @@ function HomePage({go,setCourse}){
               </div>))}
           </div>
 
-          {/* NBA Readiness */}
+          {/* NBA Readiness — real data from dept dashboard */}
           <div className="card card-p" style={{marginBottom:'1.25rem'}}>
             <div className="section-head"><div className="section-title">🏆 NBA Readiness</div></div>
-            {[{n:'Operating Systems',p:85,c:'#10b981'},{n:'Data Structures',p:72,c:'#10b981'},{n:'Computer Networks',p:58,c:'#f59e0b'},{n:'DBMS',p:43,c:'#ef4444'},{n:'Algorithms',p:31,c:'#ef4444'}].map((c,i)=>(
-              <div key={i} style={{marginBottom:'.875rem'}}>
-                <div style={{display:'flex',justifyContent:'space-between',marginBottom:'.35rem'}}>
-                  <span style={{fontSize:'.8rem',fontWeight:500,color:'var(--text)'}}>{c.n}</span>
-                  <span style={{fontSize:'.78rem',color:'var(--text2)'}}>{c.p}%</span>
-                </div>
-                <PBar pct={c.p} c={c.c}/>
-              </div>))}
+            {!deptData||deptData.courses_with_data===0?(
+              <div style={{textAlign:'center',padding:'1.25rem',color:'var(--text2)',fontSize:'.855rem'}}>
+                <div style={{fontSize:'1.5rem',marginBottom:'.5rem'}}>📊</div>
+                No attainment data yet.<br/>
+                <span style={{fontSize:'.78rem'}}>Upload marks and calculate attainment first.</span>
+              </div>
+            ):(
+              deptData.courses.map((c,i)=>(
+                <div key={i} style={{marginBottom:'.875rem'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:'.35rem'}}>
+                    <span style={{fontSize:'.8rem',fontWeight:500,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:140}}>{c.course_name}</span>
+                    <span style={{fontSize:'.78rem',color:'var(--text2)'}}>{c.overall_co_attainment}%</span>
+                  </div>
+                  <PBar pct={c.overall_co_attainment}/>
+                </div>))
+            )}
           </div>
 
-          {/* Bloom Distribution */}
+          {/* Bloom Distribution — real data */}
           <div className="card card-p">
             <div className="section-head"><div className="section-title">🧠 Question Bank</div></div>
-            {BLOOM.map((b,i)=>(
-              <div key={i} style={{display:'flex',alignItems:'center',gap:'.65rem',marginBottom:'.65rem'}}>
-                <span className={`badge ${b.c}`} style={{minWidth:90}}>L{b.l} {b.n}</span>
-                <div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${[40,30,55,25,15,10][i]}%`,background:['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#ec4899'][i]}}/></div>
-                <span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:24}}>{[12,9,16,7,5,3][i]}</span>
-              </div>))}
+            {!qStats||qStats.total===0?(
+              <div style={{textAlign:'center',padding:'1.25rem',color:'var(--text2)',fontSize:'.855rem'}}>
+                <div style={{fontSize:'1.5rem',marginBottom:'.5rem'}}>✨</div>
+                No questions yet.<br/>
+                <span style={{fontSize:'.78rem',cursor:'pointer',color:'var(--blue2)'}} onClick={()=>go('qgenerate')}>Generate your first question →</span>
+              </div>
+            ):(
+              BLOOM.map((b,i)=>{
+                const count=qStats.by_bloom?.[b.l]||0;
+                const max=Math.max(...BLOOM.map(x=>qStats.by_bloom?.[x.l]||0),1);
+                return(
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:'.65rem',marginBottom:'.65rem'}}>
+                    <span className={`badge ${b.c}`} style={{minWidth:90}}>L{b.l} {b.n}</span>
+                    <div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${Math.round(count/max*100)}%`,background:['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#ec4899'][i]}}/></div>
+                    <span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:24}}>{count}</span>
+                  </div>);
+              })
+            )}
           </div>
         </div>
       </div>
     </div>
   );
 }
+
 // ── COURSES ────────────────────────────────────────────────────────────────
 function CoursesPage({setCourse,go}){
   const [courses,setCourses]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
