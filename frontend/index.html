@@ -277,6 +277,65 @@ tbody tr:hover{background:var(--bg)}
 /* ── ANIMATIONS ── */
 @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 .fade-up{animation:fadeUp .35s ease both}
+
+/* ── TOP ANNOUNCEMENT BANNER ── */
+.top-banner{
+  width:100%;
+  background:linear-gradient(90deg,#dbeafe 0%,#eff6ff 50%,#dbeafe 100%);
+  border-bottom:1px solid #bfdbfe;
+  padding:.45rem 1.5rem;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:.65rem;
+  font-size:.78rem;
+  color:#1e40af;
+  font-weight:500;
+  letter-spacing:.01em;
+  flex-shrink:0;
+}
+.top-banner-dot{
+  width:7px;height:7px;border-radius:50%;
+  background:#3b82f6;
+  animation:pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.5;transform:scale(.8)}
+}
+.top-banner-link{
+  color:#2563eb;font-weight:700;cursor:pointer;
+  text-decoration:underline;text-underline-offset:2px;
+}
+
+/* ── DEEP BLUE HOVER on main content buttons/cards ── */
+.main .btn:hover,
+.main button:not(.sb-logout):not(.hamburger):hover{
+  background:var(--blue2) !important;
+  color:#fff !important;
+  border-color:var(--blue2) !important;
+  box-shadow:0 4px 14px rgba(37,99,235,.35) !important;
+}
+.main .btn-primary:hover{
+  background:#1d4ed8 !important;
+}
+.main .btn-red:hover{
+  background:#dc2626 !important;
+  color:#fff !important;
+  border-color:#dc2626 !important;
+}
+.main .btn-green:hover{
+  background:#059669 !important;
+}
+.main .quick-action:hover{
+  border-color:var(--blue2);
+  box-shadow:0 6px 20px rgba(37,99,235,.2);
+}
+.main a.btn:hover{
+  background:var(--blue2) !important;
+  color:#fff !important;
+  border-color:var(--blue2) !important;
+}
 </style>
 </head>
 <body>
@@ -778,7 +837,8 @@ function MarksPage({course}){
         <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{Object.entries(s.marks).map(([co,m])=>`${co}: ${Object.values(m)[0]}`).join(' | ')}</td>
       </tr>)}</tbody></table></div>
     </div>}
-  </div>);\n}
+  </div>);
+}
 
 // ── ATTAINMENT ────────────────────────────────────────────────────────────
 function AttainmentPage({course}){
@@ -1407,6 +1467,12 @@ function App(){
     <div className={`overlay ${open?'show':''}`} onClick={()=>setOpen(false)}/>
     <Sidebar page={page} go={setPage} course={course} user={user} logout={()=>{setToken('');setUser(null);setPage('home');setCourse(null);}} open={open} close={()=>setOpen(false)}/>
     <div className="main">
+      <div className="top-banner">
+        <div className="top-banner-dot"/>
+        <span>OBE Automate is live — NBA/NAAC automation powered by Gemini AI</span>
+        <span style={{background:'#bfdbfe',width:1,height:12,display:'inline-block'}}/>
+        <span className="top-banner-link" onClick={()=>go('reports')}>Generate Report →</span>
+      </div>
       <div className="topbar">
         <button className="hamburger" onClick={()=>setOpen(o=>!o)}>☰</button>
         <span style={{fontFamily:'DM Serif Display,serif',fontSize:'1.1rem',color:'var(--text)'}}>OBE<span style={{color:'var(--blue2)'}}>.</span>Auto</span>
