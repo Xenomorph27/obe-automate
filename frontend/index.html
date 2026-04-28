@@ -768,10 +768,10 @@ function CoursesPage({setCourse,go}){
 }
 
 // ── SYLLABUS ───────────────────────────────────────────────────────────────
-function SyllabusPage(){
+function SyllabusPage({onExtracted}){
   const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);const [res,setRes]=useState(null);const [err,setErr]=useState('');
   const upload=async()=>{if(!file){setErr('Select a PDF.');return;}setLoading(true);setErr('');setRes(null);
-    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();setRes(j.data||j);}
+    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;setRes(d);}
     catch(e){setErr(e.message);}setLoading(false);};
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Upload Syllabus</div>
     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',maxWidth:900}}>
@@ -789,32 +789,81 @@ function SyllabusPage(){
         {(res.course_outcomes||res.cos||[]).length===0&&<div style={{color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No outcomes found — fill in manually during Course Setup.</div>}
         {(res.course_outcomes||res.cos||[]).map((co,i)=><div key={i} style={{padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.4rem',fontSize:'.855rem'}}><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong>: {co.statement}</div>)}
         {res.units&&res.units.length>0&&<><div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',margin:'.75rem 0 .5rem'}}>Units ({res.units.length})</div>
-        {res.units.map((u,i)=><div key={i} style={{padding:'.4rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.3rem',fontSize:'.855rem'}}><strong>{u.unit_number}. {u.unit_title}</strong></div>)}</>}
+        {res.units.map((u,i)=><div key={i} style={{padding:'.4rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.3rem',fontSize:'.855rem'}}><strong>{u.unit_number}. {u.unit_title}</strong></div>)}</>
+        {onExtracted&&<button className="btn btn-primary" style={{marginTop:'1rem',width:'100%'}} onClick={()=>onExtracted(res)}>Continue to Course Setup →</button>}
       </div>}
     </div>
   </div>);
 }
 
 // ── COURSE SETUP ───────────────────────────────────────────────────────────
-function CourseSetupPage({setCourse}){
-  const [f,setF]=useState({course_name:'',course_code:'',credits:4,total_hours:52,faculty_name:'',department:'',semester:'',academic_year:''});
+function CourseSetupPage({setCourse,syllabusData}){
+  const initCos=syllabusData?.course_outcomes||[];
+  const defaultPos=[{po_id:'PO1',statement:'Engineering Knowledge'},{po_id:'PO2',statement:'Problem Analysis'},{po_id:'PO3',statement:'Design Solutions'},{po_id:'PO4',statement:'Conduct investigations of complex problems'},{po_id:'PO5',statement:'Modern Tool Usage'},{po_id:'PO6',statement:'The Engineer and Society'},{po_id:'PO7',statement:'Environment and Sustainability'},{po_id:'PO8',statement:'Ethics'},{po_id:'PO9',statement:'Individual and Team Work'},{po_id:'PO10',statement:'Communication'},{po_id:'PO11',statement:'Project Management and Finance'},{po_id:'PO12',statement:'Life-long Learning'}];
+  const [f,setF]=useState({
+    course_name:syllabusData?.course_name||'',
+    course_code:syllabusData?.course_code||'',
+    credits:syllabusData?.credits||4,
+    total_hours:52,
+    faculty_name:'',department:'',semester:'',academic_year:''
+  });
+  const [cos,setCos]=useState(initCos.length>0?initCos:[{co_id:'CO1',statement:'',bloom_level:'Apply'}]);
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
   const s=(k,v)=>setF(x=>({...x,[k]:v}));
-  const sub=async()=>{setLoading(true);setErr('');setOk('');
-    try{const d=await api('/courses/setup',{method:'POST',body:JSON.stringify({...f,credits:+f.credits,total_hours:+f.total_hours,
-      cos:[{co_id:'CO1',statement:'Apply core concepts',bloom_level:'Apply'},{co_id:'CO2',statement:'Analyse and evaluate methods',bloom_level:'Analyse'},{co_id:'CO3',statement:'Design and implement solutions',bloom_level:'Create'}],
-      pos:[{po_id:'PO1',statement:'Engineering Knowledge'},{po_id:'PO2',statement:'Problem Analysis'},{po_id:'PO3',statement:'Design Solutions'}],
-      co_po_matrix:{CO1:{PO1:3,PO2:2,PO3:1},CO2:{PO1:2,PO2:3,PO3:2},CO3:{PO1:1,PO2:2,PO3:3}},
-      evaluation_config:{continuous_assessment_total:40,end_sem_total:60,components:{Quiz:10,'Unit Test':20,Assignment:10}}})});
-      setOk(`Course created! ID: ${d.course_id}`);setCourse({...f,id:d.course_id});}
-    catch(e){setErr(e.message);}setLoading(false);};
+  const setCo=(i,k,v)=>setCos(x=>{const a=[...x];a[i]={...a[i],[k]:v};return a;});
+  const addCo=()=>setCos(x=>[...x,{co_id:`CO${x.length+1}`,statement:'',bloom_level:'Apply'}]);
+  const rmCo=(i)=>setCos(x=>x.filter((_,j)=>j!==i));
+  const buildMatrix=(cosArr)=>{
+    const m={};
+    cosArr.forEach(co=>{m[co.co_id]={};defaultPos.forEach(po=>{m[co.co_id][po.po_id]=1;});});
+    return m;
+  };
+  const sub=async()=>{
+    if(!f.course_name.trim()){setErr('Course name is required.');return;}
+    if(cos.some(c=>!c.statement.trim())){setErr('All CO statements must be filled.');return;}
+    setLoading(true);setErr('');setOk('');
+    try{
+      const matrix=buildMatrix(cos);
+      const d=await api('/courses/setup',{method:'POST',body:JSON.stringify({
+        ...f,credits:+f.credits,total_hours:+f.total_hours,
+        cos,
+        pos:defaultPos,
+        co_po_matrix:matrix,
+        evaluation_config:{continuous_assessment_total:40,end_sem_total:60,components:{Quiz:10,'Unit Test':20,Assignment:10}}
+      })});
+      setOk(`✓ Course created! ID: ${d.course_id} — Go to Session Plan to generate your first plan.`);
+      setCourse({...f,id:d.course_id,cos,pos:defaultPos});
+    }catch(e){setErr(e.message);}setLoading(false);
+  };
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Course Setup</div>
-    <div className="card card-p" style={{maxWidth:680}}>
-      <Alrt t="info" msg="After setup, AI will auto-generate session and evaluation plans."/>
-      <div className="fgrid" style={{marginTop:'1rem'}}>
-        {[['course_name','Course Name','text'],['course_code','Course Code','text'],['credits','Credits','number'],['total_hours','Total Hours','number'],['faculty_name','Faculty Name','text'],['department','Department','text'],['semester','Semester','text'],['academic_year','Academic Year','text']].map(([k,l,t])=>(
-          <div key={k} className="fg"><label className="fl">{l}</label><input className="fi" type={t} value={f[k]} onChange={e=>s(k,e.target.value)}/></div>))}
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',maxWidth:980,alignItems:'start'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Course Details</div>
+        {syllabusData&&<Alrt t="info" msg="Pre-filled from uploaded syllabus. Please complete the remaining fields."/>}
+        <div className="fgrid" style={{marginTop:'1rem'}}>
+          {[['course_name','Course Name','text'],['course_code','Course Code','text'],['credits','Credits','number'],['total_hours','Total Hours','number'],['faculty_name','Faculty Name','text'],['department','Department','text'],['semester','Semester','text'],['academic_year','Academic Year','text']].map(([k,l,t])=>(
+            <div key={k} className="fg"><label className="fl">{l}</label><input className="fi" type={t} value={f[k]} onChange={e=>s(k,e.target.value)}/></div>))}
+        </div>
       </div>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>Course Outcomes (COs)</div>
+        {syllabusData&&<div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem'}}>Extracted from syllabus — edit if needed.</div>}
+        {cos.map((co,i)=>(
+          <div key={i} style={{padding:'.75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.5rem',border:'1px solid var(--border)'}}>
+            <div style={{display:'flex',gap:'.5rem',marginBottom:'.4rem',alignItems:'center'}}>
+              <input className="fi" style={{width:70,flexShrink:0}} value={co.co_id} onChange={e=>setCo(i,'co_id',e.target.value)} placeholder="CO1"/>
+              <select className="fi" style={{width:130,flexShrink:0}} value={co.bloom_level} onChange={e=>setCo(i,'bloom_level',e.target.value)}>
+                {['Remember','Understand','Apply','Analyze','Evaluate','Create'].map(b=><option key={b}>{b}</option>)}
+              </select>
+              {cos.length>1&&<button onClick={()=>rmCo(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem'}}>×</button>}
+            </div>
+            <textarea className="fi" rows={2} style={{resize:'vertical',fontSize:'.855rem'}} value={co.statement} onChange={e=>setCo(i,'statement',e.target.value)} placeholder="CO statement…"/>
+          </div>
+        ))}
+        <button className="btn btn-outline btn-sm" onClick={addCo} style={{marginTop:'.25rem'}}>+ Add CO</button>
+      </div>
+    </div>
+    <div className="card card-p" style={{maxWidth:980,marginTop:'1.5rem'}}>
       <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
       <button className="btn btn-primary" onClick={sub} disabled={loading}>{loading?<><Spin/>Creating…</>:'Create Course →'}</button>
     </div>
@@ -1499,6 +1548,7 @@ function App(){
   const [page,setPage]=useState('home');
   const [course,setCourse]=useState(null);
   const [open,setOpen]=useState(false);
+  const [syllabusData,setSyllabusData]=useState(null);
 
   if(!user)return<Login onLogin={setUser}/>;
 
@@ -1507,8 +1557,8 @@ function App(){
   const pages={
     home:<HomePage go={setPage} setCourse={setCourse}/>,
     courses:<CoursesPage setCourse={setCourse} go={setPage}/>,
-    syllabus:<SyllabusPage/>,
-    setup:<CourseSetupPage setCourse={setCourse}/>,
+    syllabus:<SyllabusPage onExtracted={d=>{setSyllabusData(d);setPage('setup');}}/>,
+    setup:<CourseSetupPage setCourse={setCourse} syllabusData={syllabusData}/>,
     sessions:<SessionPlanPage course={course}/>,
     evaluation:<EvalPlanPage course={course}/>,
     marks:<MarksPage course={course}/>,
