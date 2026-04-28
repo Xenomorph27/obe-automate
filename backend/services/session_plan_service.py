@@ -68,12 +68,10 @@ class SessionPlanService:
         prompt = self._build_prompt(course_name, course_code, cos, course.total_hours)
         plan = await self._call_llm(prompt)
 
-        # 3. Write Word doc
-        # Save via storage abstraction
-        import tempfile
+        # 3. Write Word doc via storage abstraction
         _storage = get_storage()
         _filename = f"session_plan_{course_id}.docx"
-        self._build_docx(course_name, course_code, cos, plan, filepath)
+        filepath = self._build_docx(course_name, course_code, cos, plan, _storage, _filename)
 
         total_sessions = sum(len(u.get("sessions", [])) for u in plan.get("units", []))
 
@@ -169,8 +167,9 @@ Schema:
         course_code: str,
         cos: list,
         data: dict,
-        filepath: str,
-    ):
+        _storage,
+        _filename: str,
+    ) -> str:
         doc = Document()
 
         # Page margins — 1 inch all sides
@@ -246,7 +245,8 @@ Schema:
             doc.save(str(_p))
             _storage.save_from_path(_CATEGORY, _filename, _p)
         filepath = str(_storage.get_path(_CATEGORY, _filename))
-        logger.info(f"Session plan saved → {filepath}")
+        logger.info(f"Session plan saved: {filepath}")
+        return filepath
 
     # ------------------------------------------------------------------
     # Small helpers

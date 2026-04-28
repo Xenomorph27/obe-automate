@@ -71,7 +71,7 @@ class EvaluationPlanService:
         # 3. Write Word doc
         _storage = get_storage()
         _filename = f"evaluation_plan_{course_id}.docx"
-        self._build_docx(course_name, course_code, cos, eval_cfg, plan, filepath)
+        filepath = self._build_docx(course_name, course_code, cos, eval_cfg, plan, _storage, _filename)
 
         return {
             "course_id": course_id,
@@ -193,8 +193,9 @@ Schema:
         cos: list,
         eval_cfg: dict,
         data: dict,
-        filepath: str,
-    ):
+        _storage,
+        _filename: str,
+    ) -> str:
         doc = Document()
 
         for section in doc.sections:
@@ -338,7 +339,8 @@ Schema:
             doc.save(str(_p))
             _storage.save_from_path(_CATEGORY, _filename, _p)
         filepath = str(_storage.get_path(_CATEGORY, _filename))
-        logger.info(f"Evaluation plan saved → {filepath}")
+        logger.info(f"Evaluation plan saved: {filepath}")
+        return filepath
 
     # ------------------------------------------------------------------
     # Small helpers
