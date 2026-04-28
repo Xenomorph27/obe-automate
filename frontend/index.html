@@ -788,9 +788,9 @@ function SyllabusPage({onExtracted}){
         <div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.5rem'}}>Course Outcomes</div>
         {(res.course_outcomes||res.cos||[]).length===0&&<div style={{color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No outcomes found - fill in manually during Course Setup.</div>}
         {(res.course_outcomes||res.cos||[]).map((co,i)=><div key={i} style={{padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.4rem',fontSize:'.855rem'}}><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong>: {co.statement}</div>)}
-        {res.units&&res.units.length>0&&<><div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',margin:'.75rem 0 .5rem'}}>Units ({res.units.length})</div>
-        {res.units.map((u,i)=><div key={i} style={{padding:'.4rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.3rem',fontSize:'.855rem'}}><strong>{u.unit_number}. {u.unit_title}</strong></div>)}</>
-        {onExtracted&&<button className="btn btn-primary" style={{marginTop:'1rem',width:'100%'}} onClick={()=>onExtracted(res)}>Continue to Course Setup >></button>}
+        {res.units&&res.units.length>0&&<div><div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',margin:'.75rem 0 .5rem'}}>Units ({res.units.length})</div>
+        {res.units.map((u,i)=><div key={i} style={{padding:'.4rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.3rem',fontSize:'.855rem'}}><strong>{u.unit_number}. {u.unit_title}</strong></div>)}</div>}
+        {onExtracted&&<button className="btn btn-primary" style={{marginTop:'1rem',width:'100%'}} onClick={()=>onExtracted(res)}>Continue to Course Setup</button>}
       </div>}
     </div>
   </div>);
