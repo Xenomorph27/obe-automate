@@ -779,18 +779,18 @@ function SyllabusPage({onExtracted}){
         <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Upload PDF</div>
         <div className="fg"><label className="fl">Syllabus PDF</label><input type="file" accept=".pdf" className="fi" onChange={e=>setFile(e.target.files[0])}/></div>
         <Alrt t="error" msg={err}/>
-        <button className="btn btn-primary" onClick={upload} disabled={loading}>{loading?<><Spin/>Extracting with AI…</>:'↑ Upload & Extract'}</button>
+        <button className="btn btn-primary" onClick={upload} disabled={loading}>{loading?<><Spin/>Extracting with AI...</>:'Upload & Extract'}</button>
       </div>
       {res&&<div className="card card-p fade-up">
-        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem',color:'var(--green)'}}>✓ Extracted Successfully</div>
-        <div style={{fontSize:'1.1rem',fontWeight:700,marginBottom:'.25rem'}}>{res.course_name||'—'}</div>
-        <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1rem'}}>{res.course_code||'—'} · {res.credits||'—'} credits</div>
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem',color:'var(--green)'}}>Extracted Successfully</div>
+        <div style={{fontSize:'1.1rem',fontWeight:700,marginBottom:'.25rem'}}>{res.course_name||'--'}</div>
+        <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1rem'}}>{res.course_code||'--'} | {res.credits||'--'} credits</div>
         <div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.5rem'}}>Course Outcomes</div>
-        {(res.course_outcomes||res.cos||[]).length===0&&<div style={{color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No outcomes found — fill in manually during Course Setup.</div>}
+        {(res.course_outcomes||res.cos||[]).length===0&&<div style={{color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No outcomes found - fill in manually during Course Setup.</div>}
         {(res.course_outcomes||res.cos||[]).map((co,i)=><div key={i} style={{padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.4rem',fontSize:'.855rem'}}><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong>: {co.statement}</div>)}
         {res.units&&res.units.length>0&&<><div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',margin:'.75rem 0 .5rem'}}>Units ({res.units.length})</div>
         {res.units.map((u,i)=><div key={i} style={{padding:'.4rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.3rem',fontSize:'.855rem'}}><strong>{u.unit_number}. {u.unit_title}</strong></div>)}</>
-        {onExtracted&&<button className="btn btn-primary" style={{marginTop:'1rem',width:'100%'}} onClick={()=>onExtracted(res)}>Continue to Course Setup →</button>}
+        {onExtracted&&<button className="btn btn-primary" style={{marginTop:'1rem',width:'100%'}} onClick={()=>onExtracted(res)}>Continue to Course Setup >></button>}
       </div>}
     </div>
   </div>);
@@ -831,7 +831,7 @@ function CourseSetupPage({setCourse,syllabusData}){
         co_po_matrix:matrix,
         evaluation_config:{continuous_assessment_total:40,end_sem_total:60,components:{Quiz:10,'Unit Test':20,Assignment:10}}
       })});
-      setOk(`✓ Course created! ID: ${d.course_id} — Go to Session Plan to generate your first plan.`);
+      setOk(`Course created! ID: ${d.course_id} - Go to Session Plan to generate your first plan.`);
       setCourse({...f,id:d.course_id,cos,pos:defaultPos});
     }catch(e){setErr(e.message);}setLoading(false);
   };
@@ -847,7 +847,7 @@ function CourseSetupPage({setCourse,syllabusData}){
       </div>
       <div className="card card-p">
         <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>Course Outcomes (COs)</div>
-        {syllabusData&&<div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem'}}>Extracted from syllabus — edit if needed.</div>}
+        {syllabusData&&<div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem'}}>Extracted from syllabus - edit if needed.</div>}
         {cos.map((co,i)=>(
           <div key={i} style={{padding:'.75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.5rem',border:'1px solid var(--border)'}}>
             <div style={{display:'flex',gap:'.5rem',marginBottom:'.4rem',alignItems:'center'}}>
@@ -855,9 +855,9 @@ function CourseSetupPage({setCourse,syllabusData}){
               <select className="fi" style={{width:130,flexShrink:0}} value={co.bloom_level} onChange={e=>setCo(i,'bloom_level',e.target.value)}>
                 {['Remember','Understand','Apply','Analyze','Evaluate','Create'].map(b=><option key={b}>{b}</option>)}
               </select>
-              {cos.length>1&&<button onClick={()=>rmCo(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem'}}>×</button>}
+              {cos.length>1&&<button onClick={()=>rmCo(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem'}}>x</button>}
             </div>
-            <textarea className="fi" rows={2} style={{resize:'vertical',fontSize:'.855rem'}} value={co.statement} onChange={e=>setCo(i,'statement',e.target.value)} placeholder="CO statement…"/>
+            <textarea className="fi" rows={2} style={{resize:'vertical',fontSize:'.855rem'}} value={co.statement} onChange={e=>setCo(i,'statement',e.target.value)} placeholder="CO statement..."/>
           </div>
         ))}
         <button className="btn btn-outline btn-sm" onClick={addCo} style={{marginTop:'.25rem'}}>+ Add CO</button>
@@ -865,7 +865,7 @@ function CourseSetupPage({setCourse,syllabusData}){
     </div>
     <div className="card card-p" style={{maxWidth:980,marginTop:'1.5rem'}}>
       <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
-      <button className="btn btn-primary" onClick={sub} disabled={loading}>{loading?<><Spin/>Creating…</>:'Create Course →'}</button>
+      <button className="btn btn-primary" onClick={sub} disabled={loading}>{loading?<><Spin/>Creating...</>:'Create Course >>'}</button>
     </div>
   </div>);
 }
@@ -1501,7 +1501,7 @@ function UserMgmtPage({currentUser}){
               </div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:600,fontSize:'.9rem'}}>{u.full_name||u.username} <span style={{color:'var(--text3)',fontWeight:400}}>@{u.username}</span></div>
-                <div style={{fontSize:'.78rem',color:'var(--text2)'}}>{u.email||'—'} · {u.department||'All Departments'}</div>
+                <div style={{fontSize:'.78rem',color:'var(--text2)'}}>{u.email||'--'} · {u.department||'All Departments'}</div>
               </div>
               <span className={`badge ${roleColors[u.role]||'b-blue'}`}>{u.role}</span>
               {!u.is_active&&<span className="badge b-red">Inactive</span>}
