@@ -771,7 +771,7 @@ function CoursesPage({setCourse,go}){
 function SyllabusPage(){
   const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);const [res,setRes]=useState(null);const [err,setErr]=useState('');
   const upload=async()=>{if(!file){setErr('Select a PDF.');return;}setLoading(true);setErr('');setRes(null);
-    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd});if(!r.ok)throw new Error((await r.json()).detail);setRes(await r.json());}
+    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();setRes(j.data||j);}
     catch(e){setErr(e.message);}setLoading(false);};
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Upload Syllabus</div>
     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',maxWidth:900}}>
@@ -783,10 +783,13 @@ function SyllabusPage(){
       </div>
       {res&&<div className="card card-p fade-up">
         <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem',color:'var(--green)'}}>✓ Extracted Successfully</div>
-        <div style={{fontSize:'1.1rem',fontWeight:700,marginBottom:'.25rem'}}>{res.course_name}</div>
-        <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1rem'}}>{res.course_code} · {res.credits} credits</div>
+        <div style={{fontSize:'1.1rem',fontWeight:700,marginBottom:'.25rem'}}>{res.course_name||'—'}</div>
+        <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1rem'}}>{res.course_code||'—'} · {res.credits||'—'} credits</div>
         <div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.5rem'}}>Course Outcomes</div>
-        {res.cos?.map((co,i)=><div key={i} style={{padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.4rem',fontSize:'.855rem'}}><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong>: {co.statement}</div>)}
+        {(res.course_outcomes||res.cos||[]).length===0&&<div style={{color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No outcomes found — fill in manually during Course Setup.</div>}
+        {(res.course_outcomes||res.cos||[]).map((co,i)=><div key={i} style={{padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.4rem',fontSize:'.855rem'}}><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong>: {co.statement}</div>)}
+        {res.units&&res.units.length>0&&<><div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',margin:'.75rem 0 .5rem'}}>Units ({res.units.length})</div>
+        {res.units.map((u,i)=><div key={i} style={{padding:'.4rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.3rem',fontSize:'.855rem'}}><strong>{u.unit_number}. {u.unit_title}</strong></div>)}</>}
       </div>}
     </div>
   </div>);

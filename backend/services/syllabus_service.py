@@ -83,15 +83,26 @@ TASK: Extract structured information from the syllabus text below.
 CRITICAL RULES:
 1. Return ONLY a raw JSON object. No explanation, no markdown, no code blocks, no backticks.
 2. Your entire response must start with {{ and end with }}
-3. Never return null for course_name or course_code — use empty string "" if not found.
-4. Extract ALL course outcomes (COs) listed. They usually appear as CO1, CO2, CO3... or "At the end of this course, students will be able to..."
-5. For bloom_level, pick the closest match from: Remember, Understand, Apply, Analyze, Evaluate, Create
-6. Extract all units/modules with their topics as arrays of strings.
+3. Never return null for any field — use empty string "" or empty array [] if not found.
+4. For credits: look for "Course Credit", "Credits", "Credit Hours" — extract the number as a string.
+5. For course_outcomes: Look for sections labelled "Course Outcomes", "COs", or "Learning Objectives". 
+   - If you find "Course Outcomes" or "COs" → use those directly as CO1, CO2, CO3...
+   - If you only find "Learning Objectives" → treat each objective as a CO (CO1, CO2, CO3...).
+   - NEVER leave course_outcomes empty if any objectives or outcomes exist in the text.
+6. For bloom_level: infer from the action verb in the statement. 
+   - Explain/Describe/List/Define → Understand
+   - Apply/Use/Implement/Solve → Apply
+   - Analyze/Compare/Distinguish → Analyze
+   - Evaluate/Justify/Assess → Evaluate
+   - Design/Create/Build/Develop → Create
+   - Remember/Recall/Identify → Remember
+7. Extract all units/modules/topics from the Course Outline section.
 
 OUTPUT FORMAT (copy this structure exactly):
 {{
   "course_name": "Full course name as written in syllabus",
   "course_code": "Course code e.g. TE7760",
+  "credits": "3",
   "units": [
     {{
       "unit_number": 1,
@@ -107,13 +118,13 @@ OUTPUT FORMAT (copy this structure exactly):
   "course_outcomes": [
     {{
       "co_id": "CO1",
-      "statement": "Full CO statement as written",
-      "bloom_level": "Apply"
+      "statement": "Full statement as written in the syllabus",
+      "bloom_level": "Understand"
     }},
     {{
       "co_id": "CO2",
-      "statement": "Full CO statement as written",
-      "bloom_level": "Understand"
+      "statement": "Full statement as written in the syllabus",
+      "bloom_level": "Apply"
     }}
   ]
 }}
@@ -123,7 +134,7 @@ SYLLABUS TEXT:
 {text_chunk}
 ---
 
-Remember: Start your response with {{ immediately. No preamble."""
+Remember: Start your response with {{ immediately. No preamble. Extract ALL objectives/outcomes — do not skip any."""
 
         try:
             logger.info("Sending syllabus to LLM for extraction")
