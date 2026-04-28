@@ -459,7 +459,7 @@ function Login({onLogin}){
           <div className="form-group" style={{marginTop:'1rem'}}><label className="form-label">Username</label><input className="inp" value={username} onChange={e=>setUsername(e.target.value)} placeholder="username" autoFocus/></div>
           <div className="form-group"><label className="form-label">Password</label><input className="inp" type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&go()} placeholder="Enter password"/></div>
           <button className="btn-blue" onClick={go} disabled={loading}>{loading?'Signing in…':'Sign In →'}</button>
-          <div style={{marginTop:'1rem',fontSize:'.78rem',color:'var(--text3)',textAlign:'center'}}>Secured by JWT · Sessions expire after 8 hours</div>
+          <div style={{marginTop:'1rem',fontSize:'.78rem',color:'var(--text3)',textAlign:'center'}}>Secured by JWT | Sessions expire after 8 hours</div>
         </div>
       </div>
     </div>
@@ -522,7 +522,7 @@ function HomePage({go,setCourse}){
   const [deptData,setDeptData]=useState(null);
 
   useEffect(()=>{
-    api('/courses/').then(d=>{setCourses(d);setLoading(false)}).catch(()=>setLoading(false));
+    api('/courses/').then(d=>{setCourses(d.data||d);setLoading(false)}).catch(()=>setLoading(false));
     api('/dashboard/timetable').then(d=>{setTt(d.data);setTtLoading(false)}).catch(()=>setTtLoading(false));
     api('/dashboard/department').then(d=>setDeptData(d)).catch(()=>{});
   },[]);
@@ -547,10 +547,10 @@ function HomePage({go,setCourse}){
   const todaySchedule=tt?.schedule?.[TODAY]||[];
 
   // Real computed values
-  const totalStudents=deptData?.summary?.total_students??'—';
+  const totalStudents=deptData?.summary?.total_students??'--';
   const avgCO=deptData?.summary?.avg_co_attainment!=null?deptData.summary.avg_co_attainment+'%':'—';
-  const totalQ=qStats?.total??'—';
-  const coursesAbove=deptData?.summary?.courses_above_target??'—';
+  const totalQ=qStats?.total??'--';
+  const coursesAbove=deptData?.summary?.courses_above_target??'--';
   const totalCourses=loading?'…':courses.length;
 
   const events=[
@@ -567,7 +567,7 @@ function HomePage({go,setCourse}){
         <div style={{position:'relative',zIndex:1}}>
           <div style={{fontSize:'.8rem',opacity:.65,marginBottom:'.25rem'}}>{getDay()}</div>
           <div className="welcome-name">{getGreeting()}, {tt?.faculty_name?tt.faculty_name.split(' ').slice(-1)[0]:'Professor'}! 👋</div>
-          <div className="welcome-sub">{tt?`${tt.department} · ${tt.academic_year}`:'Upload your timetable to personalise your dashboard.'}</div>
+          <div className="welcome-sub">{tt?`${tt.department} | ${tt.academic_year}`:'Upload your timetable to personalise your dashboard.'}</div>
           <div className="welcome-chips">
             <span className="wchip">📚 {totalCourses} Courses</span>
             <span className="wchip">⏰ {todaySchedule.length} Classes Today</span>
@@ -641,7 +641,7 @@ function HomePage({go,setCourse}){
                   </div>
                   <div className="sched-content">
                     <div className="sched-title">{s.course}</div>
-                    <div className="sched-sub">{[s.section,s.room].filter(Boolean).join(' · ')}</div>
+                    <div className="sched-sub">{[s.section,s.room].filter(Boolean).join(' | ')}</div>
                   </div>
                 </div>))
             )}
@@ -675,7 +675,7 @@ function HomePage({go,setCourse}){
                   <div style={{width:36,height:36,borderRadius:9,background:'var(--blue3)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.75rem',fontWeight:700,color:'var(--blue2)',flexShrink:0}}>{c.course_code?.slice(0,3)||'?'}</div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:'.855rem',fontWeight:600,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.course_name}</div>
-                    <div style={{fontSize:'.75rem',color:'var(--text2)'}}>{c.course_code} · {c.department}</div>
+                    <div style={{fontSize:'.75rem',color:'var(--text2)'}}>{c.course_code} | {c.department}</div>
                   </div>
                   <button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('attainment');}}>Open</button>
                 </div>))
@@ -748,7 +748,7 @@ function HomePage({go,setCourse}){
 // ── COURSES ────────────────────────────────────────────────────────────────
 function CoursesPage({setCourse,go}){
   const [courses,setCourses]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
-  useEffect(()=>{api('/courses/').then(d=>{setCourses(d);setLoading(false)}).catch(e=>{setErr(e.message);setLoading(false)});},[]);
+  useEffect(()=>{api('/courses/').then(d=>{setCourses(d.data||d);setLoading(false)}).catch(e=>{setErr(e.message);setLoading(false)});},[]);
   return(<div className="page-body fade-up">
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem'}}>
       <div><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>All Courses</div><div style={{color:'var(--text2)',fontSize:'.855rem',marginTop:'.2rem'}}>{courses.length} courses in department</div></div>
@@ -930,7 +930,7 @@ function MarksPage({course}){
           <input type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>setFile(e.target.files[0])}/>
           <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>📊</div>
           <div style={{fontWeight:600,color:'var(--text)'}}>{file?file.name:'Click to select Excel file'}</div>
-          <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.25rem'}}>{file?`${(file.size/1024).toFixed(1)} KB · Ready to upload`:'.xlsx files only'}</div>
+          <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.25rem'}}>{file?`${(file.size/1024).toFixed(1)} KB | Ready to upload`:'.xlsx files only'}</div>
         </label>
       </div>
       <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
@@ -1013,7 +1013,7 @@ function HodPage(){
       <div className="card card-p" style={{marginBottom:'1.5rem'}}>
         <div className="section-head"><div className="section-title">PO Attainment Heatmap</div>
           <div style={{display:'flex',gap:'.5rem',fontSize:'.75rem'}}>
-            {[['hh','≥70%'],['hm','50–69%'],['hl','<50%']].map(([c,l])=><span key={c} className={`badge ${c==='hh'?'b-green':c==='hm'?'b-amber':'b-red'}`}>{l}</span>)}
+            {[['hh','≥70%'],['hm','50-69%'],['hl','<50%']].map(([c,l])=><span key={c} className={`badge ${c==='hh'?'b-green':c==='hm'?'b-amber':'b-red'}`}>{l}</span>)}
           </div>
         </div>
         <div style={{overflowX:'auto'}}><table className="htbl">
@@ -1501,7 +1501,7 @@ function UserMgmtPage({currentUser}){
               </div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:600,fontSize:'.9rem'}}>{u.full_name||u.username} <span style={{color:'var(--text3)',fontWeight:400}}>@{u.username}</span></div>
-                <div style={{fontSize:'.78rem',color:'var(--text2)'}}>{u.email||'--'} · {u.department||'All Departments'}</div>
+                <div style={{fontSize:'.78rem',color:'var(--text2)'}}>{u.email||'--'} | {u.department||'All Departments'}</div>
               </div>
               <span className={`badge ${roleColors[u.role]||'b-blue'}`}>{u.role}</span>
               {!u.is_active&&<span className="badge b-red">Inactive</span>}
