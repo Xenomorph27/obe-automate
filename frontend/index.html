@@ -748,58 +748,249 @@ function HomePage({go,setCourse}){
 // ── COURSES ────────────────────────────────────────────────────────────────
 // ── COURSE DETAIL ────────────────────────────────────────────────────────
 function CourseDetailPage({course,go}){
+  const [tab,setTab]=useState('overview');
+  const [attData,setAttData]=useState(null);
+  const [attLoading,setAttLoading]=useState(false);
   if(!course)return(<div className="page-body fade-up"><Alrt t="warning" msg="Select a course from the Courses page."/></div>);
   const cos=course.cos||[];
   const pos=course.pos||[];
   const matrix=course.co_po_matrix||{};
+  const evalCfg=course.evaluation_config||{};
+  const createdAt=course.created_at?new Date(course.created_at):null;
+  const bloomColor={Remember:'b-gray',Understand:'b-blue',Apply:'b-teal',Analyze:'b-purple',Analyse:'b-purple',Evaluate:'b-amber',Create:'b-pink'};
+  const matrixColor={3:'#dbeafe',2:'#dcfce7',1:'#fef9c3'};
+  const fetchAtt=async()=>{
+    if(attData)return;
+    setAttLoading(true);
+    try{const d=await api(`/attainment/calculate/${course.id}`);setAttData(d);}
+    catch{}
+    setAttLoading(false);
+  };
+  const quickActions=[
+    {icon:'📅',label:'Session Plan',page:'sessions',color:'var(--blue3)',tc:'var(--blue2)'},
+    {icon:'📋',label:'Evaluation Plan',page:'evaluation',color:'#f0fdf4',tc:'var(--green)'},
+    {icon:'📊',label:'Upload Marks',page:'marks',color:'var(--amber2)',tc:'#b45309'},
+    {icon:'🎯',label:'CO/PO Attainment',page:'attainment',color:'var(--purple2)',tc:'#7c3aed'},
+    {icon:'🏆',label:'NBA Report',page:'reports',color:'var(--teal2)',tc:'var(--teal)'},
+    {icon:'❓',label:'Question Bank',page:'qbank',color:'var(--pink2)',tc:'var(--pink)'},
+  ];
   return(<div className="page-body fade-up">
-    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>{course.course_name}</div>
-    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',marginBottom:'1.5rem'}}>
-      <div className="card card-p">
-        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Course Details</div>
-        {[['Course Code',course.course_code],['Credits',course.credits],['Total Hours',course.total_hours],['Faculty',course.faculty_name],['Department',course.department],['Semester',course.semester],['Academic Year',course.academic_year]].map(([k,v])=>v?<div key={k} style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)',fontSize:'.875rem'}}><span style={{color:'var(--text2)'}}>{k}</span><span style={{fontWeight:500}}>{v}</span></div>:null)}
-      </div>
-      <div className="card card-p">
-        <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>Course Outcomes</div>
-        {cos.map((co,i)=><div key={i} style={{padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.4rem',fontSize:'.855rem'}}><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong><span style={{fontSize:'.75rem',color:'var(--text2)',marginLeft:'.5rem',background:'#dbeafe',padding:'1px 6px',borderRadius:4}}>{co.bloom_level}</span><div style={{marginTop:'.25rem',color:'var(--text)'}}>{co.statement}</div></div>)}
+    {/* ── Header ── */}
+    <div style={{background:'linear-gradient(135deg,#1e3a5f 0%,#1d4ed8 100%)',borderRadius:14,padding:'1.5rem 1.75rem',marginBottom:'1.5rem',color:'#fff',position:'relative',overflow:'hidden'}}>
+      <div style={{position:'absolute',top:-30,right:-30,width:160,height:160,borderRadius:'50%',background:'rgba(255,255,255,.06)'}}></div>
+      <div style={{position:'absolute',bottom:-50,right:80,width:100,height:100,borderRadius:'50%',background:'rgba(255,255,255,.04)'}}></div>
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:'1rem'}}>
+        <div>
+          <div style={{fontSize:'.72rem',letterSpacing:'.1em',textTransform:'uppercase',color:'#93c5fd',marginBottom:'.3rem',fontWeight:600}}>Course Detail</div>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.7rem',lineHeight:1.2,marginBottom:'.4rem'}}>{course.course_name}</div>
+          <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',marginTop:'.5rem'}}>
+            <span style={{background:'rgba(255,255,255,.15)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem',fontWeight:600}}>{course.course_code}</span>
+            <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>{course.credits} Credits</span>
+            <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>{course.total_hours} Hours</span>
+            <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>Sem {course.semester}</span>
+          </div>
+        </div>
+        <div style={{textAlign:'right'}}>
+          <div style={{fontSize:'.78rem',color:'#93c5fd',marginBottom:'.2rem'}}>Faculty</div>
+          <div style={{fontWeight:700,fontSize:'1rem'}}>{course.faculty_name}</div>
+          <div style={{fontSize:'.78rem',color:'#bfdbfe',marginTop:'.2rem'}}>{course.department}</div>
+          {createdAt&&<div style={{fontSize:'.72rem',color:'#93c5fd',marginTop:'.4rem'}}>Created: {createdAt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} at {createdAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
+        </div>
       </div>
     </div>
-    <div className="card card-p" style={{marginBottom:'1.5rem'}}>
-      <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>CO-PO Matrix</div>
-      <div className="tbl-wrap"><table><thead><tr><th>CO</th>{pos.slice(0,12).map(p=><th key={p.po_id}>{p.po_id}</th>)}</tr></thead>
-      <tbody>{cos.map(co=><tr key={co.co_id}><td><strong>{co.co_id}</strong></td>{pos.slice(0,12).map(p=>{const v=(matrix[co.co_id]||{})[p.po_id]||0;return<td key={p.po_id} style={{textAlign:'center',background:v===3?'#dbeafe':v===2?'#dcfce7':v===1?'#fef9c3':'',color:v?'var(--text)':'var(--text2)',fontWeight:v?600:400}}>{v||'-'}</td>;})}</tr>)}</tbody></table></div>
+
+    {/* ── Quick Action Grid ── */}
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:'.75rem',marginBottom:'1.5rem'}}>
+      {quickActions.map(({icon,label,page,color,tc})=>(
+        <button key={page} onClick={()=>go(page)} style={{background:color,border:'1.5px solid var(--border)',borderRadius:12,padding:'1rem .75rem',cursor:'pointer',textAlign:'center',transition:'all .2s',fontFamily:'DM Sans,sans-serif'}}>
+          <div style={{fontSize:'1.5rem',marginBottom:'.35rem'}}>{icon}</div>
+          <div style={{fontSize:'.78rem',fontWeight:700,color:tc}}>{label}</div>
+        </button>
+      ))}
     </div>
-    <div className="card card-p">
-      <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Actions</div>
-      <div style={{display:'flex',gap:'.75rem',flexWrap:'wrap'}}>
-        {[['Session Plan','sessions'],['Evaluation Plan','evaluation'],['Upload Marks','marks'],['CO/PO Attainment','attainment'],['NBA Report','reports'],['Question Bank','qbank']].map(([label,page])=>(
-          <button key={page} className="btn btn-outline" onClick={()=>go(page)}>{label}</button>
+
+    {/* ── Tabs ── */}
+    <div className="tabs">
+      {[['overview','Overview'],['cos','Course Outcomes'],['matrix','CO-PO Matrix'],['evaluation','Eval Config']].map(([t,l])=>(
+        <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>{setTab(t);}}>{l}</div>
+      ))}
+    </div>
+
+    {/* ── Overview Tab ── */}
+    {tab==='overview'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📋 Course Info</div>
+        {[['Course Code',course.course_code],['Credits',course.credits],['Total Hours',course.total_hours],['Faculty Name',course.faculty_name],['Department',course.department],['Semester',course.semester],['Academic Year',course.academic_year],['Course ID',`#${course.id}`],['Created',createdAt?createdAt.toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—']].map(([k,v])=>(
+          <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.4rem 0',borderBottom:'1px solid var(--border)',fontSize:'.855rem'}}>
+            <span style={{color:'var(--text2)',fontWeight:500}}>{k}</span>
+            <span style={{fontWeight:600,color:'var(--text)',textAlign:'right',maxWidth:'55%'}}>{v||'—'}</span>
+          </div>
         ))}
       </div>
-    </div>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>🎯 Course Outcomes Summary</div>
+        {cos.map((co,i)=>{
+          const bc=bloomColor[co.bloom_level]||'b-gray';
+          return(<div key={i} style={{display:'flex',gap:'.65rem',alignItems:'flex-start',padding:'.5rem 0',borderBottom:'1px solid var(--border)'}}>
+            <span style={{fontWeight:700,color:'var(--blue2)',fontSize:'.855rem',minWidth:32,paddingTop:1}}>{co.co_id}</span>
+            <span className={`badge ${bc}`} style={{flexShrink:0,fontSize:'.68rem'}}>{co.bloom_level}</span>
+            <span style={{fontSize:'.82rem',color:'var(--text)',lineHeight:1.4}}>{co.statement}</span>
+          </div>);
+        })}
+      </div>
+    </div>}
+
+    {/* ── Course Outcomes Tab ── */}
+    {tab==='cos'&&<div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'1rem'}}>
+        {cos.map((co,i)=>{
+          const bc=bloomColor[co.bloom_level]||'b-gray';
+          const bloomList=['Remember','Understand','Apply','Analyze','Analyse','Evaluate','Create'];
+          const li=bloomList.indexOf(co.bloom_level);
+          const colors=['#6b7280','#3b82f6','#14b8a6','#8b5cf6','#8b5cf6','#f59e0b','#ec4899'];
+          const barColor=colors[li>=0?li:0]||'#3b82f6';
+          return(<div key={i} className="card card-p" style={{borderLeft:`4px solid ${barColor}`}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem'}}>
+              <span style={{fontWeight:700,fontSize:'1rem',color:'var(--blue2)'}}>{co.co_id}</span>
+              <span className={`badge ${bc}`}>{co.bloom_level}</span>
+            </div>
+            <div style={{fontSize:'.875rem',color:'var(--text)',lineHeight:1.6,marginBottom:'.75rem'}}>{co.statement}</div>
+            <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+              <span style={{fontSize:'.72rem',color:'var(--text3)'}}>Bloom Level</span>
+              <div style={{flex:1,height:5,background:'var(--bg2)',borderRadius:10,overflow:'hidden'}}>
+                <div style={{width:`${Math.round((li+1)/6*100)}%`,height:'100%',background:barColor,borderRadius:10}}/>
+              </div>
+              <span style={{fontSize:'.72rem',color:'var(--text2)',fontWeight:600}}>L{li+1}</span>
+            </div>
+          </div>);
+        })}
+      </div>
+    </div>}
+
+    {/* ── CO-PO Matrix Tab ── */}
+    {tab==='matrix'&&<div className="card card-p">
+      <div style={{marginBottom:'1rem'}}>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.3rem'}}>CO-PO Correlation Matrix</div>
+        <div style={{fontSize:'.78rem',color:'var(--text2)',display:'flex',gap:'1rem',flexWrap:'wrap'}}>
+          <span><span style={{display:'inline-block',width:12,height:12,background:'#dbeafe',borderRadius:2,marginRight:4}}/>3 — Strong</span>
+          <span><span style={{display:'inline-block',width:12,height:12,background:'#dcfce7',borderRadius:2,marginRight:4}}/>2 — Moderate</span>
+          <span><span style={{display:'inline-block',width:12,height:12,background:'#fef9c3',borderRadius:2,marginRight:4}}/>1 — Weak</span>
+          <span><span style={{display:'inline-block',width:12,height:12,background:'var(--bg2)',borderRadius:2,marginRight:4}}/>0 — None</span>
+        </div>
+      </div>
+      <div className="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th style={{minWidth:60}}>CO \ PO</th>
+            {pos.slice(0,12).map(p=><th key={p.po_id} style={{textAlign:'center',minWidth:48}}>{p.po_id}</th>)}
+            <th style={{textAlign:'center',minWidth:60}}>Avg</th>
+          </tr></thead>
+          <tbody>{cos.map(co=>{
+            const row=pos.slice(0,12).map(p=>(matrix[co.co_id]||{})[p.po_id]||0);
+            const nonzero=row.filter(v=>v>0);
+            const avg=nonzero.length?Math.round(nonzero.reduce((a,b)=>a+b,0)/nonzero.length*10)/10:0;
+            return(<tr key={co.co_id}>
+              <td><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong></td>
+              {row.map((v,i)=><td key={i} style={{textAlign:'center',background:matrixColor[v]||'',fontWeight:v?700:400,color:v?'var(--text)':'var(--text3)',fontSize:'.85rem'}}>{v||'—'}</td>)}
+              <td style={{textAlign:'center',fontWeight:700,color:'var(--teal)',background:'var(--teal2)'}}>{avg||'—'}</td>
+            </tr>);
+          })}</tbody>
+        </table>
+      </div>
+      <div style={{marginTop:'1rem',padding:'.75rem',background:'var(--bg)',borderRadius:8,fontSize:'.78rem',color:'var(--text2)'}}>
+        💡 This matrix shows how each Course Outcome maps to the 12 Program Outcomes. Used for NBA/NAAC attainment computation.
+      </div>
+    </div>}
+
+    {/* ── Evaluation Config Tab ── */}
+    {tab==='evaluation'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📝 Continuous Assessment (CA)</div>
+        <div style={{display:'flex',justifyContent:'space-between',padding:'.5rem 0',borderBottom:'2px solid var(--blue2)',marginBottom:'.5rem'}}>
+          <span style={{fontWeight:700}}>CA Total</span>
+          <span className="badge b-blue">{evalCfg.continuous_assessment_total||40} Marks</span>
+        </div>
+        {Object.entries(evalCfg.components||{}).map(([comp,marks])=>(
+          <div key={comp} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.4rem 0',borderBottom:'1px solid var(--border)',fontSize:'.875rem'}}>
+            <span style={{color:'var(--text)'}}>{comp}</span>
+            <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+              <div style={{width:60,height:5,background:'var(--bg2)',borderRadius:10,overflow:'hidden'}}>
+                <div style={{width:`${Math.round(marks/(evalCfg.continuous_assessment_total||40)*100)}%`,height:'100%',background:'var(--blue2)',borderRadius:10}}/>
+              </div>
+              <span style={{fontWeight:700,minWidth:28,textAlign:'right'}}>{marks}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📜 End Semester Exam (ESE)</div>
+        <div style={{textAlign:'center',padding:'2rem 0'}}>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'3rem',color:'var(--blue2)',lineHeight:1}}>{evalCfg.end_sem_total||60}</div>
+          <div style={{color:'var(--text2)',fontSize:'.875rem',marginTop:'.4rem'}}>Total Marks</div>
+        </div>
+        <div style={{padding:'.75rem',background:'var(--blue3)',borderRadius:8,fontSize:'.8rem',color:'var(--blue2)'}}>
+          Total: {(evalCfg.continuous_assessment_total||40)+(evalCfg.end_sem_total||60)} marks (CA + ESE)
+        </div>
+      </div>
+    </div>}
   </div>);
 }
 
 function CoursesPage({setCourse,go}){
-  const [courses,setCourses]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
+  const [courses,setCourses]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');const [search,setSearch]=useState('');
   useEffect(()=>{api('/courses/').then(d=>{setCourses(d.data||d);setLoading(false)}).catch(e=>{setErr(e.message);setLoading(false)});},[]);
+  const filtered=courses.filter(c=>!search||(c.course_name+c.course_code+c.faculty_name+c.department).toLowerCase().includes(search.toLowerCase()));
+  const openCourse=(c)=>{setCourse(c);go('courses_detail');};
   return(<div className="page-body fade-up">
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem'}}>
-      <div><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>All Courses</div><div style={{color:'var(--text2)',fontSize:'.855rem',marginTop:'.2rem'}}>{courses.length} courses in department</div></div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
+      <div>
+        <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>All Courses</div>
+        <div style={{color:'var(--text2)',fontSize:'.855rem',marginTop:'.2rem'}}>{courses.length} course{courses.length!==1?'s':''} in department</div>
+      </div>
       <button className="btn btn-primary" onClick={()=>go('syllabus')}>+ New Course</button>
     </div>
+    {courses.length>0&&<div className="fg" style={{marginBottom:'1.25rem',maxWidth:360}}>
+      <input className="fi" placeholder="🔍 Search by name, code, faculty..." value={search} onChange={e=>setSearch(e.target.value)}/>
+    </div>}
     <Alrt t="error" msg={err}/>
     {loading?<Skel/>:courses.length===0?<Alrt t="info" msg="No courses yet. Upload a syllabus to get started."/>:
-    <div className="tbl-wrap"><table>
-      <thead><tr><th>Code</th><th>Course Name</th><th>Faculty</th><th>Semester</th><th>Department</th><th>Action</th></tr></thead>
-      <tbody>{courses.map(c=><tr key={c.id}>
-        <td><span className="badge b-blue">{c.course_code}</span></td>
-        <td style={{fontWeight:500}}>{c.course_name}</td><td>{c.faculty_name}</td><td>{c.semester}</td><td>{c.department}</td>
-        <td><button className="btn btn-outline btn-sm" onClick={()=>{saveCourse(c);go('courses_detail')}}>Open </button></td>
-      </tr>)}</tbody>
-    </table></div>}
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:'1rem'}}>
+      {filtered.map(c=>{
+        const created=c.created_at?new Date(c.created_at):null;
+        return(<div key={c.id} className="card" style={{overflow:'hidden',transition:'box-shadow .2s,transform .2s'}} onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 8px 24px rgba(0,0,0,.1)';e.currentTarget.style.transform='translateY(-2px)'}} onMouseLeave={e=>{e.currentTarget.style.boxShadow='';e.currentTarget.style.transform=''}}>
+          <div style={{background:'linear-gradient(135deg,#1e40af,#3b82f6)',padding:'1rem 1.25rem',position:'relative',overflow:'hidden'}}>
+            <div style={{position:'absolute',top:-20,right:-20,width:80,height:80,borderRadius:'50%',background:'rgba(255,255,255,.1)'}}></div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+              <div>
+                <div style={{fontSize:'.7rem',color:'#93c5fd',letterSpacing:'.08em',textTransform:'uppercase',fontWeight:600}}>{c.course_code}</div>
+                <div style={{fontWeight:700,color:'#fff',fontSize:'.95rem',marginTop:'.2rem',lineHeight:1.3,maxWidth:200}}>{c.course_name}</div>
+              </div>
+              <div style={{background:'rgba(255,255,255,.2)',borderRadius:8,padding:'.3rem .6rem',fontSize:'.75rem',color:'#fff',fontWeight:700,flexShrink:0}}>{c.credits}cr</div>
+            </div>
+          </div>
+          <div style={{padding:'1rem 1.25rem'}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.4rem .75rem',marginBottom:'.875rem'}}>
+              {[['👤 Faculty',c.faculty_name],['🏛 Dept',c.department],['📅 Semester',c.semester],['📆 Year',c.academic_year]].map(([label,val])=>(
+                <div key={label}>
+                  <div style={{fontSize:'.68rem',color:'var(--text3)',fontWeight:600}}>{label}</div>
+                  <div style={{fontSize:'.8rem',color:'var(--text)',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{val||'—'}</div>
+                </div>
+              ))}
+            </div>
+            {created&&<div style={{fontSize:'.72rem',color:'var(--text3)',marginBottom:'.875rem',paddingTop:'.5rem',borderTop:'1px solid var(--border)'}}>🕐 Created {created.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} at {created.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={()=>openCourse(c)}>Open Course →</button>
+              <button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('sessions');}} title="Session Plan">📅</button>
+              <button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('evaluation');}} title="Evaluation Plan">📋</button>
+            </div>
+          </div>
+        </div>);
+      })}
+      {filtered.length===0&&search&&<div style={{gridColumn:'1/-1',textAlign:'center',padding:'2rem',color:'var(--text2)',fontSize:'.875rem'}}>No courses match "{search}"</div>}
+    </div>}
   </div>);
 }
+
 
 // ── SYLLABUS ───────────────────────────────────────────────────────────────
 function SyllabusPage({onExtracted}){
