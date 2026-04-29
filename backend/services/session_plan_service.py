@@ -246,7 +246,7 @@ Schema:
             doc.save(str(_p))
             _storage.save_from_path(_CATEGORY, _filename, _p)
         filepath = str(_storage.get_path(_CATEGORY, _filename))
-        logger.info(f"Session plan saved → {filepath}")
+        logger.info(f"Session plan saved -> {filepath}")
         return filepath
 
     # ------------------------------------------------------------------
