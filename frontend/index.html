@@ -908,7 +908,7 @@ function CourseSetupPage({setCourse,syllabusData}){
 function SessionPlanPage({course}){
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [plan,setPlan]=useState(null);
   const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
-    try{const d=await api(`/session-plan/generate/${course.id}`,{method:'POST'});setPlan(d);}
+    try{const d=await api(`/session-plan/generate/${course.id}`,{method:'POST'});setPlan(d.data||d);}
     catch(e){setErr(e.message);}setLoading(false);};
   const units=plan?.units||[];
   const allSessions=units.flatMap(u=>(u.sessions||[]).map(s=>({...s,unit_no:u.unit_number,unit_title:u.unit_title})));
@@ -942,7 +942,7 @@ function SessionPlanPage({course}){
 function EvalPlanPage({course}){
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [plan,setPlan]=useState(null);
   const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
-    try{const d=await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});setPlan(d);}
+    try{const d=await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});setPlan(d.data||d);}
     catch(e){setErr(e.message);}setLoading(false);};
   const components=plan?.evaluation_plan?.cie_plan||[];
   const ese=plan?.evaluation_plan?.see_plan||null;
