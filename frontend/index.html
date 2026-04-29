@@ -677,7 +677,7 @@ function HomePage({go,setCourse}){
                     <div style={{fontSize:'.855rem',fontWeight:600,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.course_name}</div>
                     <div style={{fontSize:'.75rem',color:'var(--text2)'}}>{c.course_code} | {c.department}</div>
                   </div>
-                  <button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('attainment');}}>Open</button>
+                  <button className="btn btn-outline btn-sm" onClick={()=>{saveCourse(c);go('courses_detail');}}>Open</button>
                 </div>))
             }
           </div>
@@ -746,6 +746,40 @@ function HomePage({go,setCourse}){
 }
 
 // ── COURSES ────────────────────────────────────────────────────────────────
+// ── COURSE DETAIL ────────────────────────────────────────────────────────
+function CourseDetailPage({course,go}){
+  if(!course)return(<div className="page-body fade-up"><Alrt t="warning" msg="Select a course from the Courses page."/></div>);
+  const cos=course.cos||[];
+  const pos=course.pos||[];
+  const matrix=course.co_po_matrix||{};
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>{course.course_name}</div>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',marginBottom:'1.5rem'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Course Details</div>
+        {[['Course Code',course.course_code],['Credits',course.credits],['Total Hours',course.total_hours],['Faculty',course.faculty_name],['Department',course.department],['Semester',course.semester],['Academic Year',course.academic_year]].map(([k,v])=>v?<div key={k} style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)',fontSize:'.875rem'}}><span style={{color:'var(--text2)'}}>{k}</span><span style={{fontWeight:500}}>{v}</span></div>:null)}
+      </div>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>Course Outcomes</div>
+        {cos.map((co,i)=><div key={i} style={{padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.4rem',fontSize:'.855rem'}}><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong><span style={{fontSize:'.75rem',color:'var(--text2)',marginLeft:'.5rem',background:'#dbeafe',padding:'1px 6px',borderRadius:4}}>{co.bloom_level}</span><div style={{marginTop:'.25rem',color:'var(--text)'}}>{co.statement}</div></div>)}
+      </div>
+    </div>
+    <div className="card card-p" style={{marginBottom:'1.5rem'}}>
+      <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>CO-PO Matrix</div>
+      <div className="tbl-wrap"><table><thead><tr><th>CO</th>{pos.slice(0,12).map(p=><th key={p.po_id}>{p.po_id}</th>)}</tr></thead>
+      <tbody>{cos.map(co=><tr key={co.co_id}><td><strong>{co.co_id}</strong></td>{pos.slice(0,12).map(p=>{const v=(matrix[co.co_id]||{})[p.po_id]||0;return<td key={p.po_id} style={{textAlign:'center',background:v===3?'#dbeafe':v===2?'#dcfce7':v===1?'#fef9c3':'',color:v?'var(--text)':'var(--text2)',fontWeight:v?600:400}}>{v||'-'}</td>;})}</tr>)}</tbody></table></div>
+    </div>
+    <div className="card card-p">
+      <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Actions</div>
+      <div style={{display:'flex',gap:'.75rem',flexWrap:'wrap'}}>
+        {[['Session Plan','sessions'],['Evaluation Plan','evaluation'],['Upload Marks','marks'],['CO/PO Attainment','attainment'],['NBA Report','reports'],['Question Bank','qbank']].map(([label,page])=>(
+          <button key={page} className="btn btn-outline" onClick={()=>go(page)}>{label}</button>
+        ))}
+      </div>
+    </div>
+  </div>);
+}
+
 function CoursesPage({setCourse,go}){
   const [courses,setCourses]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
   useEffect(()=>{api('/courses/').then(d=>{setCourses(d.data||d);setLoading(false)}).catch(e=>{setErr(e.message);setLoading(false)});},[]);
@@ -761,7 +795,7 @@ function CoursesPage({setCourse,go}){
       <tbody>{courses.map(c=><tr key={c.id}>
         <td><span className="badge b-blue">{c.course_code}</span></td>
         <td style={{fontWeight:500}}>{c.course_name}</td><td>{c.faculty_name}</td><td>{c.semester}</td><td>{c.department}</td>
-        <td><button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('attainment')}}>Open →</button></td>
+        <td><button className="btn btn-outline btn-sm" onClick={()=>{saveCourse(c);go('courses_detail')}}>Open </button></td>
       </tr>)}</tbody>
     </table></div>}
   </div>);
@@ -865,43 +899,83 @@ function CourseSetupPage({setCourse,syllabusData}){
     </div>
     <div className="card card-p" style={{maxWidth:980,marginTop:'1.5rem'}}>
       <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
-      <button className="btn btn-primary" onClick={sub} disabled={loading}>{loading?<><Spin/>Creating...</>:'Create Course >>'}</button>
+      <button className="btn btn-primary" onClick={sub} disabled={loading||!!ok}>{loading?<><Spin/>Creating...</>:ok?'Course Created':'Create Course >>'}</button>
     </div>
   </div>);
 }
 
 // ── SESSION PLAN ──────────────────────────────────────────────────────────
 function SessionPlanPage({course}){
-  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
-  const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');setOk('');
-    try{await api(`/session-plan/generate/${course.id}`,{method:'POST'});setOk('Session plan generated!');}
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [plan,setPlan]=useState(null);
+  const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
+    try{const d=await api(`/session-plan/generate/${course.id}`,{method:'POST'});setPlan(d);}
     catch(e){setErr(e.message);}setLoading(false);};
+  const units=plan?.units||[];
+  const allSessions=units.flatMap(u=>(u.sessions||[]).map(s=>({...s,unit_no:u.unit_number,unit_title:u.unit_title})));
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Session Plan</div>
     {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
     {course&&<Alrt t="info" msg={`Course: ${course.course_name} (${course.course_code})`}/>}
-    <div className="card card-p" style={{maxWidth:480,marginTop:'1rem'}}><Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
-      <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap'}}>
-        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating…</>:'🤖 Generate with AI'}</button>
-        {course&&<a href={`${API}/session-plan/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ Download .docx</a>}
+    <div className="card card-p" style={{marginTop:'1rem'}}><Alrt t="error" msg={err}/>
+      <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap',alignItems:'center'}}>
+        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating...</>:'Generate with AI'}</button>
+        {course&&<a href={`${API}/session-plan/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>Download .docx</a>}
       </div>
     </div>
+    {plan&&<div className="card card-p" style={{marginTop:'1.25rem'}}>
+      <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Generated Session Plan</div>
+      <div className="tbl-wrap"><table>
+        <thead><tr><th style={{width:60}}>Lect No</th><th style={{width:80}}>Unit</th><th>Topic</th><th style={{width:110}}>Type</th><th style={{width:60}}>CO</th></tr></thead>
+        <tbody>{allSessions.map((s,i)=><tr key={i}>
+          <td style={{textAlign:'center'}}>{s.session_number||i+1}</td>
+          <td style={{textAlign:'center',fontSize:'.8rem',color:'var(--text2)'}}>{s.unit_no}</td>
+          <td>{s.topic||s.points_to_cover||s.title||''}</td>
+          <td><span style={{fontSize:'.75rem',padding:'2px 8px',borderRadius:4,background:s.type==='Evaluation'?'#fef9c3':s.type==='Lab'?'#dcfce7':'#dbeafe',color:'var(--text)'}}>{s.type||'Lecture'}</span></td>
+          <td style={{textAlign:'center',fontWeight:600,color:'var(--blue2)',fontSize:'.85rem'}}>{s.co||s.co_id||''}</td>
+        </tr>)}</tbody>
+      </table></div>
+      <div style={{fontSize:'.8rem',color:'var(--text2)',marginTop:'.75rem'}}>{allSessions.length} sessions across {units.length} units</div>
+    </div>}
   </div>);
 }
 
 // ── EVALUATION PLAN ───────────────────────────────────────────────────────
 function EvalPlanPage({course}){
-  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
-  const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');setOk('');
-    try{await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});setOk('Evaluation plan generated!');}
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [plan,setPlan]=useState(null);
+  const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
+    try{const d=await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});setPlan(d);}
     catch(e){setErr(e.message);}setLoading(false);};
+  const components=plan?.evaluation_plan?.continuous_assessment?.components||plan?.components||[];
+  const ese=plan?.evaluation_plan?.end_semester||plan?.end_semester||null;
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Evaluation Plan</div>
     {!course&&<Alrt t="warning" msg="Select a course first."/>}
-    <div className="card card-p" style={{maxWidth:480,marginTop:'1rem'}}><Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+    {course&&<Alrt t="info" msg={`Course: ${course.course_name} (${course.course_code})`}/>}
+    <div className="card card-p" style={{marginTop:'1rem'}}><Alrt t="error" msg={err}/>
       <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap'}}>
-        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating…</>:'🤖 Generate CIE+SEE Plan'}</button>
-        {course&&<a href={`${API}/evaluation-plan/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ Download .docx</a>}
+        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating...</>:'Generate CIE+SEE Plan'}</button>
+        {course&&<a href={`${API}/evaluation-plan/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>Download .docx</a>}
       </div>
     </div>
+    {plan&&<div style={{marginTop:'1.25rem',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>Continuous Assessment (CA)</div>
+        {components.length>0&&<div className="tbl-wrap"><table>
+          <thead><tr><th>Component</th><th>Marks</th><th>Units</th><th>COs</th></tr></thead>
+          <tbody>{components.map((comp,i)=><tr key={i}>
+            <td>{comp.name||comp.component||''}</td>
+            <td style={{textAlign:'center',fontWeight:600}}>{comp.marks||comp.total_marks||''}</td>
+            <td style={{fontSize:'.8rem',color:'var(--text2)'}}>{(comp.units||[]).join(', ')||comp.unit_coverage||'--'}</td>
+            <td style={{fontSize:'.8rem',color:'var(--blue2)',fontWeight:600}}>{(comp.cos||comp.co_mapping||[]).join(', ')||'--'}</td>
+          </tr>)}</tbody>
+        </table></div>}
+        {components.length===0&&<div style={{color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No CA components found in plan.</div>}
+      </div>
+      {ese&&<div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>End Semester Exam (ESE)</div>
+        <div style={{fontSize:'.875rem'}}><div style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)'}}><span style={{color:'var(--text2)'}}>Total Marks</span><strong>{ese.total_marks||ese.marks||'--'}</strong></div>
+        {ese.duration&&<div style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)'}}><span style={{color:'var(--text2)'}}>Duration</span><strong>{ese.duration}</strong></div>}
+        {ese.description&&<div style={{marginTop:'.5rem',color:'var(--text2)',fontSize:'.8rem'}}>{ese.description}</div>}</div>
+      </div>}
+    </div>}
   </div>);
 }
 
@@ -1546,9 +1620,10 @@ function App(){
     }catch{sessionStorage.removeItem('obe_token');return null;}
   });
   const [page,setPage]=useState('home');
-  const [course,setCourse]=useState(null);
+  const [course,setCourse]=useState(()=>{try{const s=sessionStorage.getItem('obe_course');return s?JSON.parse(s):null;}catch{return null;}});
   const [open,setOpen]=useState(false);
   const [syllabusData,setSyllabusData]=useState(null);
+  const saveCourse=(c)=>{setCourse(c);if(c)sessionStorage.setItem('obe_course',JSON.stringify(c));else sessionStorage.removeItem('obe_course');};
 
   if(!user)return<Login onLogin={setUser}/>;
 
@@ -1556,9 +1631,10 @@ function App(){
 
   const pages={
     home:<HomePage go={setPage} setCourse={setCourse}/>,
-    courses:<CoursesPage setCourse={setCourse} go={setPage}/>,
+    courses:<CoursesPage setCourse={saveCourse} go={setPage}/>,
+    courses_detail:<CourseDetailPage course={course} go={setPage}/>,
     syllabus:<SyllabusPage onExtracted={d=>{setSyllabusData(d);setPage('setup');}}/>,
-    setup:<CourseSetupPage setCourse={setCourse} syllabusData={syllabusData}/>,
+    setup:<CourseSetupPage setCourse={saveCourse} syllabusData={syllabusData}/>,
     sessions:<SessionPlanPage course={course}/>,
     evaluation:<EvalPlanPage course={course}/>,
     marks:<MarksPage course={course}/>,
@@ -1571,12 +1647,12 @@ function App(){
     qclassify:<ClassifyPage course={course}/>,
     qmanipulate:<ManipulatePage course={course}/>,
     usermgmt:<UserMgmtPage currentUser={user}/>,
-    profile:<ProfilePage user={user} logout={()=>{setToken('');setUser(null);setPage('home');setCourse(null);}}/>,
+    profile:<ProfilePage user={user} logout={()=>{setToken('');setUser(null);setPage('home');saveCourse(null);}}/>,
   };
 
   return(<div className="shell">
     <div className={`overlay ${open?'show':''}`} onClick={()=>setOpen(false)}/>
-    <Sidebar page={page} go={setPage} course={course} user={user} logout={()=>{setToken('');setUser(null);setPage('home');setCourse(null);}} open={open} close={()=>setOpen(false)}/>
+    <Sidebar page={page} go={setPage} course={course} user={user} logout={()=>{setToken('');setUser(null);setPage('home');saveCourse(null);}} open={open} close={()=>setOpen(false)}/>
     <div className="main">
       <div className="top-banner">
         <div className="top-banner-dot"/>
