@@ -235,7 +235,7 @@ tbody tr:hover{background:var(--bg)}
 .event-body{flex:1}
 .event-title{font-size:.855rem;font-weight:600;color:var(--text)}
 .event-sub{font-size:.78rem;color:var(--text2);margin-top:.15rem}
-.quick-action{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .2s;text-align:center;box-shadow:var(--shadow)}
+.quick-action{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .2s;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.10),0 1px 3px rgba(0,0,0,.08)}
 .quick-action:hover{border-color:var(--blue2);box-shadow:var(--shadow-md);transform:translateY(-2px)}
 .qa-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.25rem}
 .qa-label{font-size:.78rem;font-weight:600;color:var(--text2)}
@@ -335,12 +335,12 @@ tbody tr:hover{background:var(--bg)}
   background:#1d4ed8 !important;
   color:#fff !important;
   border-color:#1d4ed8 !important;
-  box-shadow:0 4px 14px rgba(29,78,216,.4) !important;
+  box-shadow:0 4px 14px rgba(17,24,39,.35) !important;
 }
 .main .quick-action:hover{
-  background:#1d4ed8 !important;
-  border-color:#1d4ed8 !important;
-  box-shadow:0 6px 20px rgba(29,78,216,.35) !important;
+  background:#111827 !important;
+  border-color:#111827 !important;
+  box-shadow:0 6px 20px rgba(17,24,39,.30) !important;
   transform:translateY(-2px);
 }
 .main .quick-action:hover .qa-label{
@@ -1815,13 +1815,30 @@ function App(){
   const [open,setOpen]=useState(false);
   const [syllabusData,setSyllabusData]=useState(null);
   const saveCourse=(c)=>{setCourse(c);if(c)sessionStorage.setItem('obe_course',JSON.stringify(c));else sessionStorage.removeItem('obe_course');};
+  // Auto-rehydrate: if sessionStorage has a course, verify it exists in DB and refresh its data
+  useEffect(()=>{
+    const stored=sessionStorage.getItem('obe_course');
+    if(!stored)return;
+    try{
+      const c=JSON.parse(stored);
+      if(!c||!c.id)return;
+      api(`/courses/${c.id}`).then(d=>{
+        const fresh=d.data||d;
+        saveCourse(fresh);
+      }).catch(()=>{
+        // Course no longer exists in DB — clear stale sessionStorage
+        sessionStorage.removeItem('obe_course');
+        setCourse(null);
+      });
+    }catch{sessionStorage.removeItem('obe_course');setCourse(null);}
+  },[]);
 
   if(!user)return<Login onLogin={setUser}/>;
 
   const titles={home:'Dashboard',courses:'Courses',usermgmt:'User Management',profile:'My Profile',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Level'};
 
   const pages={
-    home:<HomePage go={setPage} setCourse={setCourse}/>,
+    home:<HomePage go={setPage} setCourse={saveCourse}/>,
     courses:<CoursesPage setCourse={saveCourse} go={setPage}/>,
     courses_detail:<CourseDetailPage course={course} go={setPage}/>,
     syllabus:<SyllabusPage onExtracted={d=>{setSyllabusData(d);setPage('setup');}}/>,
