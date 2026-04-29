@@ -80,6 +80,7 @@ class EvaluationPlanService:
             "download_url": f"/evaluation-plan/download/{course_id}",
             "cie_total": eval_cfg.get("continuous_assessment_total", 30),
             "see_total": eval_cfg.get("end_sem_total", 60),
+            "evaluation_plan": plan,
         }
 
     # ------------------------------------------------------------------
@@ -339,7 +340,7 @@ Schema:
             doc.save(str(_p))
             _storage.save_from_path(_CATEGORY, _filename, _p)
         filepath = str(_storage.get_path(_CATEGORY, _filename))
-        logger.info(f"Evaluation plan saved: {filepath}")
+        logger.info(f"Evaluation plan saved → {filepath}")
         return filepath
 
     # ------------------------------------------------------------------

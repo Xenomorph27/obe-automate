@@ -929,8 +929,8 @@ function SessionPlanPage({course}){
           <td style={{textAlign:'center'}}>{s.session_number||i+1}</td>
           <td style={{textAlign:'center',fontSize:'.8rem',color:'var(--text2)'}}>{s.unit_no}</td>
           <td>{s.topic||s.points_to_cover||s.title||''}</td>
-          <td><span style={{fontSize:'.75rem',padding:'2px 8px',borderRadius:4,background:s.type==='Evaluation'?'#fef9c3':s.type==='Lab'?'#dcfce7':'#dbeafe',color:'var(--text)'}}>{s.type||'Lecture'}</span></td>
-          <td style={{textAlign:'center',fontWeight:600,color:'var(--blue2)',fontSize:'.85rem'}}>{s.co||s.co_id||''}</td>
+          <td><span style={{fontSize:'.75rem',padding:'2px 8px',borderRadius:4,background:s.teaching_method==='Evaluation'?'#fef9c3':s.teaching_method==='Lab'?'#dcfce7':'#dbeafe',color:'var(--text)'}}>{s.teaching_method||'Lecture'}</span></td>
+          <td style={{textAlign:'center',fontWeight:600,color:'var(--blue2)',fontSize:'.85rem'}}>{(s.co_mapped||[s.co]||[]).join(', ')||s.co_id||''}</td>
         </tr>)}</tbody>
       </table></div>
       <div style={{fontSize:'.8rem',color:'var(--text2)',marginTop:'.75rem'}}>{allSessions.length} sessions across {units.length} units</div>
@@ -944,8 +944,8 @@ function EvalPlanPage({course}){
   const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
     try{const d=await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});setPlan(d);}
     catch(e){setErr(e.message);}setLoading(false);};
-  const components=plan?.evaluation_plan?.continuous_assessment?.components||plan?.components||[];
-  const ese=plan?.evaluation_plan?.end_semester||plan?.end_semester||null;
+  const components=plan?.evaluation_plan?.cie_plan||[];
+  const ese=plan?.evaluation_plan?.see_plan||null;
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Evaluation Plan</div>
     {!course&&<Alrt t="warning" msg="Select a course first."/>}
     {course&&<Alrt t="info" msg={`Course: ${course.course_name} (${course.course_code})`}/>}
@@ -961,9 +961,9 @@ function EvalPlanPage({course}){
         {components.length>0&&<div className="tbl-wrap"><table>
           <thead><tr><th>Component</th><th>Marks</th><th>Units</th><th>COs</th></tr></thead>
           <tbody>{components.map((comp,i)=><tr key={i}>
-            <td>{comp.name||comp.component||''}</td>
+            <td>{comp.component||comp.name||''}</td>
             <td style={{textAlign:'center',fontWeight:600}}>{comp.marks||comp.total_marks||''}</td>
-            <td style={{fontSize:'.8rem',color:'var(--text2)'}}>{(comp.units||[]).join(', ')||comp.unit_coverage||'--'}</td>
+            <td style={{fontSize:'.8rem',color:'var(--text2)'}}>{(comp.cos_assessed||comp.units||[]).join(', ')||'--'}</td>
             <td style={{fontSize:'.8rem',color:'var(--blue2)',fontWeight:600}}>{(comp.cos||comp.co_mapping||[]).join(', ')||'--'}</td>
           </tr>)}</tbody>
         </table></div>}
@@ -971,9 +971,9 @@ function EvalPlanPage({course}){
       </div>
       {ese&&<div className="card card-p">
         <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>End Semester Exam (ESE)</div>
-        <div style={{fontSize:'.875rem'}}><div style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)'}}><span style={{color:'var(--text2)'}}>Total Marks</span><strong>{ese.total_marks||ese.marks||'--'}</strong></div>
-        {ese.duration&&<div style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)'}}><span style={{color:'var(--text2)'}}>Duration</span><strong>{ese.duration}</strong></div>}
-        {ese.description&&<div style={{marginTop:'.5rem',color:'var(--text2)',fontSize:'.8rem'}}>{ese.description}</div>}</div>
+        <div style={{fontSize:'.875rem'}}><div style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)'}}><span style={{color:'var(--text2)'}}>Total Marks</span><strong>{ese.total_marks||'--'}</strong></div>
+        {ese.duration&&<div style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)'}}><span style={{color:'var(--text2)'}}>Duration</span><strong>{ese.duration_hours ? ese.duration_hours+' hours' : '--'}</strong></div>}
+        {ese.description&&<div style={{marginTop:'.5rem',color:'var(--text2)',fontSize:'.8rem'}}>{ese.pattern||ese.description||''}</div>}</div>
       </div>}
     </div>}
   </div>);
