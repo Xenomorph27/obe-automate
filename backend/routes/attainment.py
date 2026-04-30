@@ -63,7 +63,12 @@ def parse_marks_xlsx(file_bytes: bytes) -> List[dict]:
             # Find CO columns (D onward)
             for j, val in enumerate(row):
                 if val and str(val).strip().upper().startswith('CO'):
-                    co_columns[j] = str(val).strip().upper()
+                    # Normalize: "CO1\n(Quiz /10)" -> "CO1"
+                    import re as _re
+                    raw = str(val).strip().upper().split('\n')[0].strip()
+                    co_name = _re.match(r'(CO\d+)', raw)
+                    if co_name:
+                        co_columns[j] = co_name.group(1)
             break
 
     if header_row_idx is None:
@@ -76,12 +81,21 @@ def parse_marks_xlsx(file_bytes: bytes) -> List[dict]:
         prn = row[1]   # Column B
         name = row[2]  # Column C
 
-        # Skip section headers, empty rows, formula-only rows
+        # Skip section headers, empty rows, formula-only rows, max-marks rows
         if not prn or not name:
             continue
-        if isinstance(prn, str) and not prn.strip().isdigit():
+        prn_str = str(prn).strip()
+        # Skip non-PRN rows (headers, "Max →", section markers, class average)
+        if isinstance(prn, str) and not prn_str.replace('.','').isdigit():
             continue
-        if isinstance(name, str) and ('section' in name.lower() or not name.strip()):
+        if isinstance(name, str) and any(x in name.lower() for x in ['section','max','average','class avg']):
+            continue
+        # PRN must be a long number (SIT PRNs are 11 digits starting with 24)
+        try:
+            prn_int = int(float(prn_str))
+            if prn_int < 1000000000:  # not a valid PRN
+                continue
+        except (ValueError, TypeError):
             continue
 
         student_id = str(int(float(str(prn)))).strip()
