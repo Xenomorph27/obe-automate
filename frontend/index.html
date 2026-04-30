@@ -41,9 +41,10 @@
   --pink2:#fce7f3;
   --sidebar-w:250px;
   --radius:12px;
-  --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05);
-  --shadow-md:0 4px 6px -1px rgba(0,0,0,.07),0 2px 4px -1px rgba(0,0,0,.05);
-  --shadow-lg:0 10px 15px -3px rgba(0,0,0,.08),0 4px 6px -2px rgba(0,0,0,.04);
+  --shadow:0 4px 12px rgba(0,0,0,.10),0 1px 4px rgba(0,0,0,.07);
+  --shadow-md:0 8px 24px rgba(0,0,0,.13),0 2px 6px rgba(0,0,0,.08);
+  --shadow-lg:0 16px 40px rgba(0,0,0,.15),0 4px 10px rgba(0,0,0,.09);
+  --shadow-hover:0 12px 32px rgba(0,0,0,.16),0 3px 8px rgba(0,0,0,.10);
 }
 html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text)}
 ::-webkit-scrollbar{width:5px;height:5px}
@@ -115,12 +116,12 @@ html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg
 .page-body{padding:1.75rem 2rem;flex:1}
 
 /* ── CARDS ── */
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);transition:box-shadow .2s,transform .2s}.card:hover{box-shadow:var(--shadow-hover);transform:translateY(-2px)}
 .card-p{padding:1.25rem}
 
 /* ── STAT CARDS ── */
 .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem}
-.stat-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.stat-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow);position:relative;overflow:hidden;transition:box-shadow .2s,transform .2s}.stat-card:hover{box-shadow:var(--shadow-hover);transform:translateY(-2px)}
 .stat-card::before{content:'';position:absolute;top:0;right:0;width:80px;height:80px;border-radius:50%;opacity:.08;transform:translate(20px,-20px)}
 .stat-card.blue::before{background:var(--blue)}
 .stat-card.green::before{background:var(--green)}
@@ -208,8 +209,7 @@ tbody tr:hover{background:var(--bg)}
 .bl6{background:#fdf2f8;color:#9d174d}
 
 /* ── QUESTION CARD ── */
-.qcard{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:.75rem;box-shadow:var(--shadow);transition:box-shadow .2s}
-.qcard:hover{box-shadow:var(--shadow-md)}
+.qcard{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:.75rem;box-shadow:var(--shadow);transition:box-shadow .2s,transform .2s}.qcard:hover{box-shadow:var(--shadow-hover);transform:translateY(-2px)}
 
 /* ── DASHBOARD SPECIFIC ── */
 .dash-grid{display:grid;grid-template-columns:1fr 320px;gap:1.5rem}
@@ -236,7 +236,7 @@ tbody tr:hover{background:var(--bg)}
 .event-title{font-size:.855rem;font-weight:600;color:var(--text)}
 .event-sub{font-size:.78rem;color:var(--text2);margin-top:.15rem}
 .quick-action{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .2s;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.10),0 1px 3px rgba(0,0,0,.08)}
-.quick-action:hover{border-color:var(--blue2);box-shadow:var(--shadow-md);transform:translateY(-2px)}
+.quick-action:hover{border-color:var(--blue2);box-shadow:var(--shadow-hover);transform:translateY(-3px)}
 .qa-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.25rem}
 .qa-label{font-size:.78rem;font-weight:600;color:var(--text2)}
 .activity-item{display:flex;align-items:center;gap:.875rem;padding:.75rem 0;border-bottom:1px solid var(--border)}
@@ -349,6 +349,24 @@ tbody tr:hover{background:var(--bg)}
 .main .quick-action:hover .qa-icon,
 .main .quick-action:hover .stat-icon{
   background:rgba(255,255,255,.2) !important;
+}
+/* Global card hover — dark bg matching sidebar */
+.main .card:hover,.main .stat-card:hover,.main .qcard:hover{
+  background:#111827 !important;
+  color:#f9fafb !important;
+  border-color:#111827 !important;
+}
+.main .card:hover .stat-val,.main .card:hover .stat-label,
+.main .stat-card:hover .stat-val,.main .stat-card:hover .stat-label,
+.main .card:hover *,.main .stat-card:hover *,.main .qcard:hover *{
+  color:#f9fafb !important;
+}
+.main .card:hover .badge,.main .stat-card:hover .badge{
+  background:rgba(255,255,255,.15) !important;
+  color:#f9fafb !important;
+}
+.main .card:hover .stat-icon,.main .stat-card:hover .stat-icon{
+  background:rgba(255,255,255,.12) !important;
 }
 </style>
 </head>
@@ -1319,73 +1337,334 @@ function StudyMaterialsPage({course}){
 }
 
 function MarksPage({course}){
-  const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');const [preview,setPreview]=useState(null);
-  const upload=async()=>{if(!course){setErr('Select a course.');return;}if(!file){setErr('Select an xlsx file.');return;}
-    setLoading(true);setErr('');setOk('');setPreview(null);
-    try{const fd=new FormData();fd.append('file',file);
+  const [tab,setTab]=useState('upload');
+  const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const [students,setStudents]=useState([]);const [fetching,setFetching]=useState(false);
+  // manual entry state
+  const [manualStudents,setManualStudents]=useState([]);const [saving,setSaving]=useState(false);
+  const cos=course?.cos||[];
+  const components=Object.keys(course?.evaluation_config?.components||{});
+  const maxMarks=course?.evaluation_config?.components||{};
+
+  const fetchMarksPreview=async()=>{
+    if(!course)return;
+    setFetching(true);
+    try{
+      const d=await api(`/attainment/calculate/${course.id}`);
+      const rows=Object.values(d.co_attainment||{});
+      setStudents(rows);
+    }catch{}
+    setFetching(false);
+  };
+
+  const uploadXlsx=async()=>{
+    if(!course){setErr('Select a course.');return;}
+    if(!file){setErr('Select an xlsx file.');return;}
+    setLoading(true);setErr('');setOk('');
+    try{
+      const fd=new FormData();fd.append('file',file);
       const r=await fetch(API+`/attainment/marks/${course.id}/xlsx`,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
       if(!r.ok){const e=await r.json();throw new Error(e.detail||'Upload failed');}
       const d=await r.json();
-      setOk(`✓ Uploaded successfully — ${d.parsed_students} students saved.`);
-      setPreview(d.data);
-    }catch(e){setErr(e.message);}setLoading(false);};
-  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Upload Student Marks</div>
+      setOk(`✓ Uploaded ${d.parsed_students} students. Switch to "CO Summary" to see results.`);
+      setFile(null);
+      fetchMarksPreview();
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const initManual=()=>{
+    if(!course)return;
+    const rows=(course.cos||[]).map(co=>({
+      co_id:co.co_id,
+      ...Object.fromEntries(components.map(c=>[c,'']))
+    }));
+    setManualStudents(rows);
+    setTab('manual');
+  };
+
+  const saveManual=async()=>{
+    if(!course)return;
+    setSaving(true);setErr('');setOk('');
+    try{
+      // Build a single "aggregate" student entry from manual CO-component marks
+      const marksObj={};
+      manualStudents.forEach(row=>{
+        marksObj[row.co_id]={};
+        components.forEach(c=>{ marksObj[row.co_id][c]=parseFloat(row[c])||0; });
+      });
+      const payload={students:[{student_id:'AGG_001',student_name:'Class Average',marks:marksObj}]};
+      await api(`/attainment/marks/${course.id}`,{method:'POST',body:JSON.stringify(payload)});
+      setOk('✓ Marks saved. Go to Attainment to calculate results.');
+    }catch(e){setErr(e.message);}
+    setSaving(false);
+  };
+
+  useEffect(()=>{if(tab==='summary')fetchMarksPreview();},[tab,course]);
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.25rem'}}>Upload Student Marks</div>
     {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
-    <div className="card card-p" style={{maxWidth:600}}>
-      <div style={{marginBottom:'1rem'}}>
-        <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem',lineHeight:1.6}}>
-          Upload the student marks Excel file as provided by the institute.<br/>
-          <strong>Format:</strong> Column B = PRN, Column C = Student Name, Column D+ = CO marks.<br/>
-          Header rows, section separators (Section A/B/C), and formula cells are handled automatically.
-        </div>
-        <label style={{display:'block',border:'2px dashed var(--border)',borderRadius:10,padding:'2rem',textAlign:'center',cursor:'pointer',background:file?'#f0fdf4':'var(--bg)',transition:'all .2s'}}>
-          <input type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>setFile(e.target.files[0])}/>
-          <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>📊</div>
-          <div style={{fontWeight:600,color:'var(--text)'}}>{file?file.name:'Click to select Excel file'}</div>
-          <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.25rem'}}>{file?`${(file.size/1024).toFixed(1)} KB | Ready to upload`:'.xlsx files only'}</div>
-        </label>
+
+    <div className="tabs" style={{marginBottom:'1.25rem'}}>
+      {[['upload','📤 Upload xlsx'],['manual','✏️ Manual Entry'],['summary','📊 CO Summary']].map(([t,l])=>(
+        <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{l}</div>
+      ))}
+    </div>
+
+    {/* ── Upload Tab ── */}
+    {tab==='upload'&&<div className="card card-p" style={{maxWidth:600}}>
+      <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.9rem'}}>📤 Upload Marks xlsx</div>
+      <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.875rem',lineHeight:1.7,padding:'.75rem',background:'var(--blue3)',borderRadius:8}}>
+        <strong>Expected format:</strong> Column B = PRN, Column C = Student Name, Column D+ = CO-wise marks.<br/>
+        Section headers (Section A/B/C), formula cells and blank rows are auto-skipped.
       </div>
+      <label style={{display:'block',border:'2px dashed var(--border)',borderRadius:10,padding:'2rem',textAlign:'center',cursor:'pointer',background:file?'#f0fdf4':'var(--bg)',transition:'all .2s',marginBottom:'.875rem'}}>
+        <input type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>setFile(e.target.files[0])}/>
+        <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>📊</div>
+        <div style={{fontWeight:600,color:'var(--text)'}}>{file?file.name:'Click to select marks xlsx'}</div>
+        <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.25rem'}}>{file?`${(file.size/1024).toFixed(1)} KB — ready`:'.xlsx files only'}</div>
+      </label>
       <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
-      <button className="btn btn-primary" onClick={upload} disabled={loading||!course||!file} style={{width:'100%'}}>
+      <button className="btn btn-primary" onClick={uploadXlsx} disabled={loading||!course||!file} style={{width:'100%'}}>
         {loading?<><Spin/>Parsing & uploading…</>:'↑ Upload Marks'}
       </button>
-    </div>
-    {preview&&<div className="card card-p" style={{marginTop:'1.25rem'}}>
-      <div className="section-head"><div className="section-title">Preview — First 10 Students</div></div>
-      <div className="tbl-wrap"><table><thead><tr><th>PRN</th><th>Name</th><th>Marks</th></tr></thead>
-      <tbody>{Object.entries(preview).slice(0,10).map(([_,s],i)=><tr key={i}>
-        <td><span className="badge b-blue">{s.student_id}</span></td>
-        <td>{s.student_name}</td>
-        <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{Object.entries(s.marks).map(([co,m])=>`${co}: ${Object.values(m)[0]}`).join(' | ')}</td>
-      </tr>)}</tbody></table></div>
+    </div>}
+
+    {/* ── Manual Entry Tab ── */}
+    {tab==='manual'&&<div>
+      <div className="card card-p" style={{marginBottom:'1rem'}}>
+        <div style={{fontWeight:700,marginBottom:'.5rem',fontSize:'.9rem'}}>✏️ Enter Class-Average Marks per CO</div>
+        <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem'}}>
+          Enter the average marks scored by the class for each CO and evaluation component. This is useful when you have aggregate data rather than individual student marks.
+        </div>
+        {cos.length===0?<Alrt t="warning" msg="No COs found for this course. Complete Course Setup first."/>:
+        <div className="tbl-wrap"><table>
+          <thead><tr><th>CO</th><th style={{fontSize:'.78rem',maxWidth:200}}>Statement</th>
+            {components.map(c=><th key={c} style={{textAlign:'center'}}>{c}<div style={{fontSize:'.7rem',color:'var(--text3)',fontWeight:400}}>/{maxMarks[c]||10}</div></th>)}
+          </tr></thead>
+          <tbody>{(manualStudents.length?manualStudents:cos.map(co=>({co_id:co.co_id,...Object.fromEntries(components.map(c=>[c,'']))}))).map((row,i)=>(
+            <tr key={row.co_id}>
+              <td><strong style={{color:'var(--blue2)'}}>{row.co_id}</strong></td>
+              <td style={{fontSize:'.78rem',color:'var(--text2)',maxWidth:200}}>{cos.find(c=>c.co_id===row.co_id)?.statement||''}</td>
+              {components.map(c=>(
+                <td key={c} style={{textAlign:'center'}}>
+                  <input type="number" min="0" max={maxMarks[c]||100} value={row[c]||''} style={{width:60,textAlign:'center',border:'1px solid var(--border)',borderRadius:6,padding:'4px',fontSize:'.855rem'}}
+                    onChange={e=>{const nr=[...(manualStudents.length?manualStudents:cos.map(co=>({co_id:co.co_id,...Object.fromEntries(components.map(c=>[c,'']))})))];nr[i]={...nr[i],[c]:e.target.value};setManualStudents(nr);}}/>
+                </td>
+              ))}
+            </tr>
+          ))}</tbody>
+        </table></div>}
+        <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+        {cos.length>0&&<button className="btn btn-primary" style={{marginTop:'1rem'}} onClick={saveManual} disabled={saving||!course}>
+          {saving?<><Spin/>Saving…</>:'💾 Save Marks'}
+        </button>}
+      </div>
+    </div>}
+
+    {/* ── CO Summary Tab ── */}
+    {tab==='summary'&&<div>
+      {fetching?<Skel/>:students.length===0?
+        <Alrt t="info" msg="No marks uploaded yet. Upload xlsx or enter marks manually first."/>:
+        <div className="card card-p">
+          <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.9rem'}}>📊 CO-wise Marks Summary</div>
+          <div className="tbl-wrap"><table>
+            <thead><tr><th>CO</th><th>Bloom Level</th><th>Avg Marks</th><th>Max Marks</th><th>Students ≥ 60%</th><th>Attainment %</th><th>Status</th></tr></thead>
+            <tbody>{students.map(co=>(
+              <tr key={co.co_id}>
+                <td><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong></td>
+                <td><span className="badge b-blue">{co.bloom_level}</span></td>
+                <td style={{fontWeight:600}}>{co.avg_marks_scored}</td>
+                <td style={{color:'var(--text3)'}}>{co.max_marks}</td>
+                <td>{co.students_passed_threshold} / {co.total_students}</td>
+                <td style={{minWidth:160}}><PBar pct={co.attainment_percentage}/></td>
+                <td><LvlB l={co.attainment_level}/></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </div>
+      }
     </div>}
   </div>);
 }
 
 // ── ATTAINMENT ────────────────────────────────────────────────────────────
 function AttainmentPage({course}){
-  const [data,setData]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [tab,setTab]=useState('co');
-  const calc=async()=>{if(!course){setErr('Select a course.');return;}setLoading(true);setErr('');
-    try{setData(await api(`/attainment/calculate/${course.id}`));}catch(e){setErr(e.message);}setLoading(false);};
-  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>CO/PO Attainment</div>
+  const [data,setData]=useState(null);const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');const [tab,setTab]=useState('co');
+  const [genLoading,setGenLoading]=useState(false);const [genOk,setGenOk]=useState('');
+
+  const calc=async()=>{
+    if(!course){setErr('Select a course.');return;}
+    setLoading(true);setErr('');
+    try{const d=await api(`/attainment/calculate/${course.id}`);setData(d);}
+    catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const generateReport=async()=>{
+    if(!course||!data)return;
+    setGenLoading(true);setGenOk('');setErr('');
+    try{
+      await api(`/attainment/report/${course.id}`,{method:'POST'});
+      setGenOk('Report generated!');
+    }catch(e){setErr(e.message);}
+    setGenLoading(false);
+  };
+
+  useEffect(()=>{if(course)calc();},[course]);
+
+  const coList=data?Object.values(data.co_attainment):[];
+  const poList=data?Object.values(data.po_attainment):[];
+  const attainedCOs=coList.filter(c=>c.target_met).length;
+
+  return(<div className="page-body fade-up">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
+      <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>CO / PO Attainment</div>
+      <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+        <button className="btn btn-outline btn-sm" onClick={calc} disabled={loading||!course}>{loading?<><Spin/>Calculating…</>:'🔄 Recalculate'}</button>
+        {data&&<button className="btn btn-outline btn-sm" onClick={generateReport} disabled={genLoading}>{genLoading?<><Spin/>Generating…</>:'📄 Generate Report'}</button>}
+        {data&&<a href={`${API}/attainment/download/${course.id}`} className="btn btn-primary btn-sm" style={{textDecoration:'none'}}>⬇ Download docx</a>}
+      </div>
+    </div>
     {!course&&<Alrt t="warning" msg="Select a course first."/>}
-    <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap',marginBottom:'1.25rem'}}>
-      <button className="btn btn-primary" onClick={calc} disabled={loading||!course}>{loading?<><Spin/>Calculating…</>:'📊 Calculate Attainment'}</button>
-      {data&&<><button className="btn btn-outline" onClick={()=>api(`/attainment/report/${course.id}`,{method:'POST'})}>📄 Generate Report</button>
-        <a href={`${API}/attainment/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ Download</a></>}
-    </div>
     <Alrt t="error" msg={err}/>
-    {data&&<><div className="stat-row">
-      {[{i:'📊',ic:'blue',v:data.overall_co_attainment+'%',l:'Overall CO Attainment'},{i:'👥',ic:'green',v:data.total_students,l:'Students'},{i:'🎯',ic:'amber',v:data.threshold_percentage+'%',l:'Threshold'}].map((s,i)=>(
-        <div key={i} className={`stat-card ${s.ic}`}><div className={`stat-icon ${s.ic}`}>{s.i}</div><div className="stat-val">{s.v}</div><div className="stat-label">{s.l}</div></div>))}
-    </div>
-    <div className="tabs">{['co','po'].map(t=><div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{t.toUpperCase()} Attainment</div>)}</div>
-    {tab==='co'&&<div className="tbl-wrap"><table><thead><tr><th>CO</th><th>Bloom</th><th>Score</th><th>Attainment</th><th>Level</th></tr></thead>
-    <tbody>{Object.values(data.co_attainment).map(co=><tr key={co.co_id}><td style={{fontWeight:600}}>{co.co_id}</td><td><span className="badge b-blue">{co.bloom_level}</span></td>
-    <td>{co.avg_marks_scored}/{co.max_marks}</td><td style={{minWidth:160}}><PBar pct={co.attainment_percentage}/></td><td><LvlB l={co.attainment_level}/></td></tr>)}</tbody></table></div>}
-    {tab==='po'&&<div className="tbl-wrap"><table><thead><tr><th>PO</th><th>Statement</th><th>Attainment</th><th>Level</th></tr></thead>
-    <tbody>{Object.values(data.po_attainment).map(po=><tr key={po.po_id}><td style={{fontWeight:600}}>{po.po_id}</td><td>{po.statement}</td>
-    <td style={{minWidth:180}}><PBar pct={po.attainment_percentage}/></td><td><LvlB l={po.attainment_level}/></td></tr>)}</tbody></table></div>}</>}
+    {genOk&&<Alrt t="success" msg={genOk}/>}
+
+    {loading&&!data&&<Skel/>}
+
+    {data&&<>
+      {/* ── Stats Row ── */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:'1rem',marginBottom:'1.5rem'}}>
+        {[
+          {icon:'📊',label:'Overall CO Attainment',value:data.overall_co_attainment+'%',color:'var(--blue3)',tc:'var(--blue2)',big:true},
+          {icon:'✅',label:'COs Meeting Target',value:`${attainedCOs} / ${coList.length}`,color:'#f0fdf4',tc:'var(--green)'},
+          {icon:'👥',label:'Total Students',value:data.total_students,color:'var(--purple2)',tc:'#7c3aed'},
+          {icon:'🎯',label:'Threshold',value:data.threshold_percentage+'%',color:'var(--amber2)',tc:'#b45309'},
+        ].map((s,i)=>(
+          <div key={i} style={{background:s.color,border:'1.5px solid var(--border)',borderRadius:12,padding:'1rem',boxShadow:'0 2px 8px rgba(0,0,0,.06)'}}>
+            <div style={{fontSize:'1.4rem',marginBottom:'.3rem'}}>{s.icon}</div>
+            <div style={{fontFamily:'DM Serif Display,serif',fontSize:s.big?'1.75rem':'1.4rem',color:s.tc,lineHeight:1}}>{s.value}</div>
+            <div style={{fontSize:'.75rem',color:'var(--text2)',marginTop:'.3rem'}}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── CO Attainment Visual Bars ── */}
+      <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📈 CO Attainment at a Glance</div>
+        {coList.map(co=>{
+          const pct=co.attainment_percentage;
+          const color=pct>=70?'#16a34a':pct>=50?'#d97706':'#dc2626';
+          return(<div key={co.co_id} style={{marginBottom:'1rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.35rem'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+                <span style={{fontWeight:700,color:'var(--blue2)',minWidth:36}}>{co.co_id}</span>
+                <span style={{fontSize:'.78rem',color:'var(--text2)',maxWidth:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{co.statement}</span>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem',flexShrink:0}}>
+                <span style={{fontSize:'.82rem',fontWeight:700,color:color}}>{pct}%</span>
+                <LvlB l={co.attainment_level}/>
+              </div>
+            </div>
+            <div style={{height:10,background:'var(--bg2)',borderRadius:10,overflow:'hidden',position:'relative'}}>
+              <div style={{width:`${Math.min(pct,100)}%`,height:'100%',background:color,borderRadius:10,transition:'width .6s ease'}}/>
+              {/* target line at 60% */}
+              <div style={{position:'absolute',top:0,left:'60%',width:2,height:'100%',background:'#94a3b8'}}/>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:'.68rem',color:'var(--text3)',marginTop:'.2rem'}}>
+              <span>Avg: {co.avg_marks_scored}/{co.max_marks} marks</span>
+              <span>{co.students_passed_threshold}/{co.total_students} students ≥ threshold</span>
+            </div>
+          </div>);
+        })}
+        <div style={{fontSize:'.72rem',color:'var(--text3)',marginTop:'.5rem',paddingTop:'.5rem',borderTop:'1px solid var(--border)'}}>
+          ▎ Grey line = 60% target threshold
+        </div>
+      </div>
+
+      {/* ── Tabs for detailed tables ── */}
+      <div className="tabs">
+        {[['co','CO Details'],['po','PO Attainment'],['gap','Gap Analysis']].map(([t,l])=>(
+          <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{l}</div>
+        ))}
+      </div>
+
+      {tab==='co'&&<div className="card card-p">
+        <div className="tbl-wrap"><table>
+          <thead><tr><th>CO</th><th>Bloom</th><th>Statement</th><th>Avg Score</th><th>Max</th><th>Passed</th><th>Attainment</th><th>Level</th></tr></thead>
+          <tbody>{coList.map(co=>(
+            <tr key={co.co_id}>
+              <td><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong></td>
+              <td><span className="badge b-blue">{co.bloom_level}</span></td>
+              <td style={{fontSize:'.82rem',maxWidth:280}}>{co.statement}</td>
+              <td style={{fontWeight:600,textAlign:'center'}}>{co.avg_marks_scored}</td>
+              <td style={{textAlign:'center',color:'var(--text3)'}}>{co.max_marks}</td>
+              <td style={{textAlign:'center'}}>{co.students_passed_threshold}/{co.total_students}</td>
+              <td style={{minWidth:140}}><PBar pct={co.attainment_percentage}/></td>
+              <td><LvlB l={co.attainment_level}/></td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      </div>}
+
+      {tab==='po'&&<div className="card card-p">
+        <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.875rem',padding:'.6rem',background:'var(--bg)',borderRadius:8}}>
+          💡 PO attainment is calculated as a weighted average of CO attainments using the CO-PO correlation matrix.
+        </div>
+        <div className="tbl-wrap"><table>
+          <thead><tr><th>PO</th><th>Statement</th><th>Attainment</th><th>Level</th></tr></thead>
+          <tbody>{poList.map(po=>(
+            <tr key={po.po_id}>
+              <td><strong style={{color:'var(--blue2)'}}>{po.po_id}</strong></td>
+              <td style={{fontSize:'.82rem'}}>{po.statement}</td>
+              <td style={{minWidth:160}}><PBar pct={po.attainment_percentage}/></td>
+              <td><LvlB l={po.attainment_level}/></td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      </div>}
+
+      {tab==='gap'&&<div>
+        <div className="card card-p" style={{marginBottom:'1rem'}}>
+          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>⚠️ COs Below Target ({"<"}60%)</div>
+          {coList.filter(c=>!c.target_met).length===0
+            ?<div style={{textAlign:'center',padding:'1.5rem',color:'var(--green)',fontWeight:600}}>🎉 All COs meeting the 60% target!</div>
+            :coList.filter(c=>!c.target_met).map(co=>(
+              <div key={co.co_id} style={{padding:'.75rem',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,marginBottom:'.5rem'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div>
+                    <span style={{fontWeight:700,color:'#dc2626'}}>{co.co_id}</span>
+                    <span style={{fontSize:'.82rem',color:'var(--text)',marginLeft:'.5rem'}}>{co.statement}</span>
+                  </div>
+                  <span style={{fontWeight:700,color:'#dc2626',flexShrink:0}}>{co.attainment_percentage}%</span>
+                </div>
+                <div style={{fontSize:'.78rem',color:'#b91c1c',marginTop:'.3rem'}}>
+                  Gap: {(60-co.attainment_percentage).toFixed(1)}% below target. Only {co.students_passed_threshold}/{co.total_students} students passed the threshold.
+                </div>
+              </div>
+            ))
+          }
+        </div>
+        <div className="card card-p">
+          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>⚠️ POs Below Target</div>
+          {poList.filter(p=>p.attainment_percentage<60).length===0
+            ?<div style={{textAlign:'center',padding:'1.5rem',color:'var(--green)',fontWeight:600}}>🎉 All POs meeting the 60% target!</div>
+            :poList.filter(p=>p.attainment_percentage<60).map(po=>(
+              <div key={po.po_id} style={{padding:'.75rem',background:'#fffbeb',border:'1px solid #fed7aa',borderRadius:8,marginBottom:'.5rem'}}>
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span style={{fontWeight:700,color:'#b45309'}}>{po.po_id}</span>
+                  <span style={{fontWeight:700,color:'#b45309'}}>{po.attainment_percentage}%</span>
+                </div>
+                <div style={{fontSize:'.78rem',color:'#92400e',marginTop:'.2rem'}}>{po.statement}</div>
+              </div>
+            ))
+          }
+        </div>
+      </div>}
+    </>}
   </div>);
 }
 
