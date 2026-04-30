@@ -1,44 +1,32 @@
 # backend/services/evaluation_plan_service.py
 """
-EvaluationPlanService
-----------------------
-Generates a full CIE + SEE evaluation plan using the LLM fallback chain
-(Gemini → Groq → OpenAI), then writes a formatted Word document.
-
-Output folder : generated_docs/evaluation_plans/
-Filename      : evaluation_plan_<course_id>.docx
+Generates evaluation plan matching the exact SIT format:
+Table: Sr.No | Component | Unit Syllabus | CO | Marks | Weightage | Tentative Date
 """
-
-import json
-import os
+import json, os
 from pathlib import Path
-
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.core.exceptions import LLMError, OBEException
+from backend.core.exceptions import LLMError
 from backend.core.llm import get_llm_response
 from backend.core.logger import get_logger
 from backend.services.course_service import CourseService
 
 logger = get_logger(__name__)
-
 from backend.core.storage import get_storage
 _CATEGORY = "evaluation_plans"
 
+_NAVY  = "1F3864"
+_LIGHT = "D6DCE4"
+_WHITE = RGBColor(0xFF,0xFF,0xFF)
 
 class EvaluationPlanService:
-
     def __init__(self, db: AsyncSession):
         self.db = db
-
-    # ------------------------------------------------------------------
-    # Static helper — used by route for file-existence check
-    # ------------------------------------------------------------------
 
     @staticmethod
     def get_filepath(course_id: int) -> str:
@@ -46,329 +34,161 @@ class EvaluationPlanService:
         p = storage.get_path(_CATEGORY, f"evaluation_plan_{course_id}.docx")
         return str(p) if p else str(get_storage()._dir(_CATEGORY) / f"evaluation_plan_{course_id}.docx")
 
-    # ------------------------------------------------------------------
-    # Main entry point
-    # ------------------------------------------------------------------
-
     async def generate(self, course_id: int) -> dict:
-        # 1. Load course (raises OBEException 404 if missing)
         course_svc = CourseService(self.db)
         course = await course_svc.get_course(course_id)
-
-        course_name = course.course_name
-        course_code = course.course_code
-        cos = course.cos            # list of {co_id, statement, bloom_level}
-        eval_cfg = course.evaluation_config  # {continuous_assessment_total, components, end_sem_total}
-
-        logger.info(
-            f"Generating evaluation plan for '{course_name}' ({course_code})"
-        )
-
-        # 2. Build prompt and call LLM fallback chain
+        course_name   = course.course_name
+        course_code   = course.course_code
+        faculty_name  = course.faculty_name
+        department    = course.department
+        semester      = course.semester
+        academic_year = course.academic_year
+        cos           = course.cos
+        eval_cfg      = course.evaluation_config
+        logger.info(f"Generating evaluation plan for '{course_name}' ({course_code})")
         prompt = self._build_prompt(course_name, course_code, cos, eval_cfg)
-        plan = await self._call_llm(prompt)
-
-        # 3. Write Word doc
-        _storage = get_storage()
+        plan   = await self._call_llm(prompt)
+        _storage  = get_storage()
         _filename = f"evaluation_plan_{course_id}.docx"
-        filepath = self._build_docx(course_name, course_code, cos, eval_cfg, plan, _storage, _filename)
-
+        filepath  = self._build_docx(
+            course_name, course_code, faculty_name, department,
+            semester, academic_year, cos, eval_cfg, plan, _storage, _filename
+        )
         return {
-            "course_id": course_id,
-            "course_name": course_name,
-            "filename": os.path.basename(filepath),
-            "download_url": f"/evaluation-plan/download/{course_id}",
-            "cie_total": eval_cfg.get("continuous_assessment_total", 30),
-            "see_total": eval_cfg.get("end_sem_total", 60),
+            "course_id":       course_id,
+            "course_name":     course_name,
+            "filename":        os.path.basename(filepath),
+            "download_url":    f"/evaluation-plan/download/{course_id}",
+            "cie_total":       eval_cfg.get("continuous_assessment_total", 30),
+            "see_total":       eval_cfg.get("end_sem_total", 60),
             "evaluation_plan": plan,
         }
 
-    # ------------------------------------------------------------------
-    # Prompt builder
-    # ------------------------------------------------------------------
-
-    def _build_prompt(
-        self,
-        course_name: str,
-        course_code: str,
-        cos: list,
-        eval_cfg: dict,
-    ) -> str:
-        cos_text = "\n".join(
-            f"  {co['co_id']}: {co['statement']} [Bloom: {co['bloom_level']}]"
-            for co in cos
-        )
+    def _build_prompt(self, course_name, course_code, cos, eval_cfg):
+        cos_text = "\n".join(f"  {c['co_id']}: {c['statement']}" for c in cos)
+        co_ids   = [c["co_id"] for c in cos]
         components = eval_cfg.get("components", {})
-        components_text = "\n".join(
-            f"  - {name}: {marks} marks" for name, marks in components.items()
-        )
-        cie_total = eval_cfg.get("continuous_assessment_total", 30)
-        see_total = eval_cfg.get("end_sem_total", 60)
-        co_ids = [co["co_id"] for co in cos]
+        comp_text  = "\n".join(f"  - {k}: {v} marks" for k,v in components.items())
+        cie_total  = eval_cfg.get("continuous_assessment_total", 30)
+        num_units  = len(cos)
 
-        return f"""You are an expert in Outcome-Based Education (OBE) evaluation design for engineering colleges.
+        return f"""You are an OBE evaluation expert for engineering colleges.
 
-Course : {course_name} ({course_code})
-
-Course Outcomes:
+Course: {course_name} ({course_code})
+Course Outcomes: {co_ids}
 {cos_text}
 
-Evaluation Structure:
-  CIE (Continuous Internal Evaluation) — Total: {cie_total} marks
-  Components:
-{components_text}
+CIE Total: {cie_total} marks
+Components:
+{comp_text}
 
-  SEE (Semester End Exam) — Total: {see_total} marks
+Generate an EVALUATION PLAN with exactly these CA components (CA1, CA2, CA3...) mapped to units and COs.
+Each component must specify: which units it covers, which COs, marks, weightage %, and a tentative date (month 2026).
 
-Task: Generate a detailed EVALUATION PLAN.
-
-Rules:
-- For each CIE component, specify: which COs it assesses, Bloom's level targeted, and suggested question types.
-- For SEE, provide a mark distribution across COs and a recommended question paper pattern.
-- CO attainment targets: suggest a threshold percentage (e.g. 60%) for each CO.
-- Return ONLY valid JSON — no markdown, no extra text.
-
-Schema:
-{{
-  "cie_plan": [
-    {{
-      "component": "string",
-      "marks": 10,
-      "cos_assessed": ["CO1", "CO2"],
-      "bloom_levels": ["Apply", "Analyze"],
-      "question_types": ["Short Answer", "Problem Solving"],
-      "description": "string describing what to assess"
-    }}
-  ],
-  "see_plan": {{
-    "total_marks": {see_total},
-    "duration_hours": 3,
-    "pattern": "string (e.g. 5 units x 2 questions, attempt any 1)",
-    "co_mark_distribution": {{
-      "CO1": 20,
-      "CO2": 20
-    }},
-    "bloom_distribution": {{
-      "Remember": 10,
-      "Understand": 20,
-      "Apply": 30
-    }}
-  }},
-  "co_attainment_targets": [
-    {{
-      "co_id": "CO1",
-      "threshold_percentage": 60,
-      "measurement_method": "string"
-    }}
-  ]
-}}"""
-
-    # ------------------------------------------------------------------
-    # LLM call with fallback
-    # ------------------------------------------------------------------
+Return ONLY valid JSON, no markdown:
+{{"ca_components":[{{"sr_no":"CA1","component":"Experiential Learning","unit_syllabus":"Unit 1, Unit 2","co_mapped":"CO1, CO2","marks":10,"weightage":"33%","tentative_date":"February 2026"}}]}}"""
 
     async def _call_llm(self, prompt: str) -> dict:
-        logger.info("Calling LLM for evaluation plan")
         raw = await get_llm_response(prompt)
-
-        # Strip markdown fences — Critical Pattern (never break)
         if raw.startswith("```"):
-            lines = raw.split("\n")
-            raw = "\n".join(lines[1:-1])
+            raw = "\n".join(raw.split("\n")[1:-1])
         raw = raw.strip()
-
         try:
             return json.loads(raw)
         except json.JSONDecodeError as e:
-            logger.error(f"LLM JSON parse error: {e} | raw[:300]={raw[:300]}")
+            logger.error(f"LLM JSON parse error: {e}")
             raise LLMError("LLM returned invalid JSON for evaluation plan")
 
-    # ------------------------------------------------------------------
-    # Word document builder
-    # ------------------------------------------------------------------
-
-    def _build_docx(
-        self,
-        course_name: str,
-        course_code: str,
-        cos: list,
-        eval_cfg: dict,
-        data: dict,
-        _storage,
-        _filename: str,
-    ) -> str:
+    def _build_docx(self, course_name, course_code, faculty_name, department,
+                    semester, academic_year, cos, eval_cfg, data, _storage, _filename) -> str:
         doc = Document()
+        for sec in doc.sections:
+            sec.top_margin = sec.bottom_margin = Inches(0.6)
+            sec.left_margin = sec.right_margin = Inches(0.7)
 
-        for section in doc.sections:
-            section.top_margin = Inches(1)
-            section.bottom_margin = Inches(1)
-            section.left_margin = Inches(1)
-            section.right_margin = Inches(1)
+        # ── HEADER ────────────────────────────────────────────────────
+        def _hdr_row(tbl, text, size=12, bold=True):
+            row = tbl.add_row()
+            c = row.cells[0]
+            for other in row.cells[1:]: c = c.merge(other)
+            self._shade(c, _NAVY)
+            p = c.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(text); r.bold=bold; r.font.size=Pt(size); r.font.color.rgb=_WHITE
 
-        # ── Title block
-        title = doc.add_paragraph()
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = title.add_run("EVALUATION PLAN")
-        run.bold = True
-        run.font.size = Pt(18)
-        run.font.color.rgb = RGBColor(0x1F, 0x49, 0x7D)
-
-        subtitle = doc.add_paragraph()
-        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        srun = subtitle.add_run(f"{course_name}   |   {course_code}")
-        srun.bold = True
-        srun.font.size = Pt(12)
-
-        doc.add_paragraph()
-
-        # ── CO Reference
-        self._section_heading(doc, "Course Outcomes (CO) Reference")
-        co_tbl = doc.add_table(rows=1, cols=3)
-        co_tbl.style = "Table Grid"
-        for cell, text in zip(co_tbl.rows[0].cells, ["CO ID", "Statement", "Bloom's Level"]):
-            self._header_cell(cell, text)
-        for co in cos:
-            row = co_tbl.add_row().cells
-            row[0].text = co.get("co_id", "")
-            row[1].text = co.get("statement", "")
-            row[2].text = co.get("bloom_level", "")
-            for c in row:
-                c.paragraphs[0].runs[0].font.size = Pt(9)
+        hdr = doc.add_table(rows=0, cols=7)
+        hdr.style = "Table Grid"
+        _hdr_row(hdr, "Symbiosis Institute of Technology, Pune", size=13)
+        _hdr_row(hdr, f"Department of {department}", size=11)
+        _hdr_row(hdr, "Evaluation Plan", size=12)
+        _hdr_row(hdr, f"Course: {course_name} ({course_code})  |  Faculty: {faculty_name}  |  Semester: {semester}  |  AY: {academic_year}", size=9, bold=False)
 
         doc.add_paragraph()
 
-        # ── CIE Plan
-        cie_total = eval_cfg.get("continuous_assessment_total", 30)
-        self._section_heading(doc, f"Continuous Internal Evaluation (CIE) — {cie_total} Marks")
+        # ── EVALUATION TABLE ──────────────────────────────────────────
+        col_headers = ["Sr. No.","Component","Unit Syllabus","CO","Marks","Weightage","Tentative Date"]
+        col_widths  = [Inches(0.5),Inches(1.5),Inches(1.8),Inches(1.0),Inches(0.55),Inches(0.75),Inches(1.4)]
 
-        cie_tbl = doc.add_table(rows=1, cols=5)
-        cie_tbl.style = "Table Grid"
-        cie_headers = ["Component", "Marks", "COs Assessed", "Bloom's Levels", "Question Types"]
-        for cell, text in zip(cie_tbl.rows[0].cells, cie_headers):
-            self._header_cell(cell, text, color="375623")
+        tbl = doc.add_table(rows=1, cols=7)
+        tbl.style = "Table Grid"
+        for i,(cell,text) in enumerate(zip(tbl.rows[0].cells, col_headers)):
+            self._shade(cell, _NAVY)
+            p = cell.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(text); r.bold=True; r.font.size=Pt(9); r.font.color.rgb=_WHITE
+            cell.width = col_widths[i]
 
-        for comp in data.get("cie_plan", []):
-            row = cie_tbl.add_row().cells
-            row[0].text = comp.get("component", "")
-            row[1].text = str(comp.get("marks", ""))
-            row[2].text = ", ".join(comp.get("cos_assessed", []))
-            row[3].text = ", ".join(comp.get("bloom_levels", []))
-            row[4].text = ", ".join(comp.get("question_types", []))
-            for c in row:
-                c.paragraphs[0].runs[0].font.size = Pt(9)
+        components = data.get("ca_components", [])
+        for i, comp in enumerate(components):
+            row = tbl.add_row().cells
+            if i % 2 == 1:
+                for c in row: self._shade(c, _LIGHT)
+            values = [
+                comp.get("sr_no",""),
+                comp.get("component",""),
+                comp.get("unit_syllabus",""),
+                comp.get("co_mapped",""),
+                str(comp.get("marks","")),
+                comp.get("weightage",""),
+                comp.get("tentative_date",""),
+            ]
+            for j,(c,v) in enumerate(zip(row, values)):
+                p = c.paragraphs[0]; p.clear()
+                r = p.add_run(v); r.font.size=Pt(9)
+                if j in (0,4,5): p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                c.width = col_widths[j]
 
-            desc = comp.get("description", "")
-            if desc:
-                note = doc.add_paragraph()
-                note_run = note.add_run(f"  ↳ {comp.get('component','')}: {desc}")
-                note_run.italic = True
-                note_run.font.size = Pt(9)
+        # ── TOTAL ROW ─────────────────────────────────────────────────
+        total_row = tbl.add_row().cells
+        self._shade(total_row[0], _NAVY)
+        tc = total_row[0].merge(total_row[3])
+        self._shade(tc, _NAVY)
+        p = tc.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run("Total"); r.bold=True; r.font.size=Pt(9); r.font.color.rgb=_WHITE
 
-        doc.add_paragraph()
-
-        # ── SEE Plan
-        see_data = data.get("see_plan", {})
-        see_total = eval_cfg.get("end_sem_total", 60)
-        self._section_heading(
-            doc,
-            f"Semester End Exam (SEE) — {see_total} Marks  |  "
-            f"Duration: {see_data.get('duration_hours', 3)} hrs",
-        )
-
-        pattern_para = doc.add_paragraph()
-        pattern_run = pattern_para.add_run(
-            f"Pattern: {see_data.get('pattern', 'N/A')}"
-        )
-        pattern_run.font.size = Pt(10)
-
-        doc.add_paragraph()
-
-        # CO mark distribution
-        self._section_heading(doc, "SEE — CO-wise Mark Distribution", sub=True)
-        co_dist = see_data.get("co_mark_distribution", {})
-        if co_dist:
-            see_co_tbl = doc.add_table(rows=1, cols=2)
-            see_co_tbl.style = "Table Grid"
-            for cell, text in zip(see_co_tbl.rows[0].cells, ["CO", "Marks Allocated"]):
-                self._header_cell(cell, text, color="7F3F98")
-            for co_id, marks in co_dist.items():
-                row = see_co_tbl.add_row().cells
-                row[0].text = co_id
-                row[1].text = str(marks)
-                for c in row:
-                    c.paragraphs[0].runs[0].font.size = Pt(9)
+        marks_c = total_row[4]
+        self._shade(marks_c, _NAVY)
+        p2 = marks_c.paragraphs[0]; p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r2 = p2.add_run(str(eval_cfg.get("continuous_assessment_total",30)))
+        r2.bold=True; r2.font.size=Pt(9); r2.font.color.rgb=_WHITE
 
         doc.add_paragraph()
 
-        bloom_dist = see_data.get("bloom_distribution", {})
-        if bloom_dist:
-            self._section_heading(doc, "SEE — Bloom's Level Distribution", sub=True)
-            bloom_tbl = doc.add_table(rows=1, cols=2)
-            bloom_tbl.style = "Table Grid"
-            for cell, text in zip(bloom_tbl.rows[0].cells, ["Bloom's Level", "Marks"]):
-                self._header_cell(cell, text, color="7F3F98")
-            for level, marks in bloom_dist.items():
-                row = bloom_tbl.add_row().cells
-                row[0].text = level
-                row[1].text = str(marks)
-                for c in row:
-                    c.paragraphs[0].runs[0].font.size = Pt(9)
-
-        doc.add_paragraph()
-
-        # ── CO Attainment Targets
-        self._section_heading(doc, "CO Attainment Targets")
-        att_tbl = doc.add_table(rows=1, cols=3)
-        att_tbl.style = "Table Grid"
-        for cell, text in zip(
-            att_tbl.rows[0].cells, ["CO ID", "Threshold %", "Measurement Method"]
-        ):
-            self._header_cell(cell, text, color="C55A11")
-
-        for target in data.get("co_attainment_targets", []):
-            row = att_tbl.add_row().cells
-            row[0].text = target.get("co_id", "")
-            row[1].text = f"{target.get('threshold_percentage', 60)}%"
-            row[2].text = target.get("measurement_method", "")
-            for c in row:
-                c.paragraphs[0].runs[0].font.size = Pt(9)
+        # ── CO ATTAINMENT NOTE ────────────────────────────────────────
+        note_p = doc.add_paragraph()
+        nr = note_p.add_run("CO Attainment Target: 60% of students should score ≥60% marks in each assessment component.")
+        nr.italic=True; nr.font.size=Pt(9)
 
         import tempfile as _tmp
-        from pathlib import Path as _Path
         with _tmp.TemporaryDirectory() as _t:
-            _p = _Path(_t) / _filename
+            _p = Path(_t) / _filename
             doc.save(str(_p))
             _storage.save_from_path(_CATEGORY, _filename, _p)
         filepath = str(_storage.get_path(_CATEGORY, _filename))
         logger.info(f"Evaluation plan saved -> {filepath}")
         return filepath
 
-    # ------------------------------------------------------------------
-    # Small helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
-    def _section_heading(doc: Document, text: str, sub: bool = False):
-        p = doc.add_paragraph()
-        run = p.add_run(text)
-        run.bold = True
-        run.font.size = Pt(10 if sub else 11)
-        run.font.color.rgb = RGBColor(0x1F, 0x49, 0x7D)
-        p.paragraph_format.space_before = Pt(8)
-        p.paragraph_format.space_after = Pt(4)
-
-    @staticmethod
-    def _header_cell(cell, text: str, color: str = "1F497D"):
-        p = cell.paragraphs[0]
-        run = p.add_run(text)
-        run.bold = True
-        run.font.size = Pt(9)
-        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-
-        tc = cell._tc
-        tcPr = tc.get_or_add_tcPr()
+    def _shade(cell, hex_color):
+        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
         shd = OxmlElement("w:shd")
-        shd.set(qn("w:val"), "clear")
-        shd.set(qn("w:color"), "auto")
-        shd.set(qn("w:fill"), color)
+        shd.set(qn("w:val"),"clear"); shd.set(qn("w:color"),"auto"); shd.set(qn("w:fill"),hex_color)
         tcPr.append(shd)

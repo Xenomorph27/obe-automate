@@ -1171,6 +1171,153 @@ function EvalPlanPage({course}){
 }
 
 // ── MARKS ─────────────────────────────────────────────────────────────────
+// ── STUDENTS ─────────────────────────────────────────────────────────────
+function StudentsPage({course}){
+  const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const [students,setStudents]=useState([]);const [fetching,setFetching]=useState(false);
+  const [section,setSection]=useState('All');
+
+  const fetchStudents=async()=>{
+    if(!course)return;
+    setFetching(true);
+    try{const d=await api(`/students/${course.id}`);setStudents(d.data||[]);}
+    catch(e){setErr(e.message);}
+    setFetching(false);
+  };
+  useEffect(()=>{fetchStudents();},[course]);
+
+  const importFile=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    if(!file){setErr('Select an xlsx file.');return;}
+    setLoading(true);setErr('');setOk('');
+    try{
+      const fd=new FormData();fd.append('file',file);
+      const r=await fetch(API+`/students/import/${course.id}`,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+      if(!r.ok){const e=await r.json();throw new Error(e.detail||'Import failed');}
+      const d=await r.json();
+      setOk(`✓ Imported ${d.data.imported} students across sections: ${d.data.sections.join(', ')}`);
+      setFile(null);
+      fetchStudents();
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const sections=['All',...new Set(students.map(s=>s.section))].sort();
+  const filtered=section==='All'?students:students.filter(s=>s.section===section);
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.25rem'}}>Student Roster</div>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+
+    <div className="card card-p" style={{maxWidth:600,marginBottom:'1.25rem'}}>
+      <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.9rem'}}>📥 Import from SIT Roster (xlsx)</div>
+      <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem',lineHeight:1.6}}>
+        Upload the official SIT student list xlsx. All 3 sections (A/B/C) are parsed automatically.<br/>
+        <strong>Format:</strong> PRN in column B, Name in column C, section markers auto-detected.
+      </div>
+      <label style={{display:'block',border:'2px dashed var(--border)',borderRadius:10,padding:'1.5rem',textAlign:'center',cursor:'pointer',background:file?'#f0fdf4':'var(--bg)',transition:'all .2s',marginBottom:'.75rem'}}>
+        <input type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>setFile(e.target.files[0])}/>
+        <div style={{fontSize:'1.75rem',marginBottom:'.35rem'}}>👥</div>
+        <div style={{fontWeight:600,color:'var(--text)'}}>{file?file.name:'Click to select roster xlsx'}</div>
+        <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.2rem'}}>{file?`${(file.size/1024).toFixed(1)} KB — ready`:'.xlsx files only'}</div>
+      </label>
+      <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+      <button className="btn btn-primary" style={{width:'100%'}} onClick={importFile} disabled={loading||!course||!file}>
+        {loading?<><Spin/>Importing…</>:'↑ Import Students'}
+      </button>
+    </div>
+
+    {students.length>0&&<div className="card card-p">
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
+        <div style={{fontWeight:700,fontSize:'.9rem'}}>👤 {students.length} Students Enrolled</div>
+        <div style={{display:'flex',gap:'.4rem'}}>
+          {sections.map(s=><button key={s} className={`btn btn-sm ${section===s?'btn-primary':'btn-outline'}`} onClick={()=>setSection(s)}>{s}</button>)}
+        </div>
+      </div>
+      <div className="tbl-wrap"><table>
+        <thead><tr><th>#</th><th>PRN</th><th>Name</th><th>Section</th></tr></thead>
+        <tbody>{filtered.map((s,i)=><tr key={s.prn}>
+          <td style={{color:'var(--text3)',fontSize:'.8rem'}}>{i+1}</td>
+          <td><span className="badge b-blue">{s.prn}</span></td>
+          <td style={{fontWeight:500}}>{s.name}</td>
+          <td><span className={`badge ${s.section==='A'?'b-teal':s.section==='B'?'b-purple':'b-amber'}`}>Sec {s.section}</span></td>
+        </tr>)}</tbody>
+      </table></div>
+    </div>}
+    {fetching&&<Skel/>}
+  </div>);
+}
+
+// ── STUDY MATERIALS ───────────────────────────────────────────────────────
+function StudyMaterialsPage({course}){
+  const textbooks=[
+    {title:"Machine Learning: A Probabilistic Perspective",author:"Kevin P Murphy",publisher:"MIT Press, August 2012"},
+    {title:"Machine Learning: The Art and Science of Algorithms that Make Sense of Data",author:"Peter Flach",publisher:"Cambridge University Press, Edition 2012"},
+  ];
+  const webLinks=[
+    {sr:1,link:"Pattern Recognition and Machine Learning — Christopher M. Bishop",module:"Fundamental concepts",url:""},
+    {sr:2,link:"Hands-On Unsupervised Learning Using Python — Ankur A. Patel",module:"Unit 3, 4",url:""},
+    {sr:3,link:"The Elements of Statistical Learning — Hastie, Tibshirani, Friedman",module:"Unit 2, 3, 4",url:""},
+    {sr:4,link:"NPTEL – Introduction to Machine Learning (IIT Madras)",module:"Overall curriculum",url:"https://nptel.ac.in/courses/106106139"},
+    {sr:5,link:"NPTEL – Machine Learning (IIT Kharagpur)",module:"Overall curriculum",url:"https://nptel.ac.in/courses/106105152"},
+    {sr:6,link:"YouTube – StatQuest with Josh Starmer (PCA, Clustering)",module:"All units",url:"https://www.youtube.com/@statquest"},
+    {sr:7,link:"Towards Data Science – Unsupervised Learning",module:"All units",url:"https://towardsdatascience.com/tagged/unsupervised-learning"},
+  ];
+  const journals=[
+    {sr:1,title:"Towards Data Science Articles on clustering, dimensionality reduction",url:"https://medium.com/data-science/a-dive-into-unsupervised-learning-bf1d6b5f02a7"},
+    {sr:2,title:"Analytics Vidhya — Practical unsupervised learning examples",url:"https://www.analyticsvidhya.com/blog/category/unsupervised/"},
+    {sr:3,title:"Goodfellow et al. — Generative Adversarial Nets",url:"https://arxiv.org/abs/1406.2661"},
+    {sr:4,title:"Kingma & Welling — Auto-Encoding Variational Bayes",url:"https://arxiv.org/abs/1312.6114"},
+  ];
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.25rem'}}>Study Materials</div>
+    {course&&<div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1.25rem'}}>For: {course.course_name} ({course.course_code})</div>}
+
+    {/* Textbooks */}
+    <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+      <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📚 Textbooks & Reference Books</div>
+      <div className="tbl-wrap"><table>
+        <thead><tr><th>#</th><th>Title</th><th>Author</th><th>Publisher</th></tr></thead>
+        <tbody>{textbooks.map((b,i)=><tr key={i}>
+          <td style={{color:'var(--text3)'}}>{i+1}</td>
+          <td style={{fontWeight:600}}>{b.title}</td>
+          <td>{b.author}</td>
+          <td style={{color:'var(--text2)',fontSize:'.82rem'}}>{b.publisher}</td>
+        </tr>)}</tbody>
+      </table></div>
+    </div>
+
+    {/* Web Links */}
+    <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+      <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>🔗 Web Links / NPTEL / YouTube</div>
+      <div className="tbl-wrap"><table>
+        <thead><tr><th>Sr.</th><th>Resource</th><th>Module</th><th>Link</th></tr></thead>
+        <tbody>{webLinks.map((w)=><tr key={w.sr}>
+          <td style={{color:'var(--text3)'}}>{w.sr}</td>
+          <td style={{fontWeight:500,fontSize:'.855rem'}}>{w.link}</td>
+          <td style={{fontSize:'.82rem',color:'var(--text2)'}}>{w.module}</td>
+          <td>{w.url?<a href={w.url} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
+        </tr>)}</tbody>
+      </table></div>
+    </div>
+
+    {/* Journals */}
+    <div className="card card-p">
+      <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📰 Journals & Research Papers</div>
+      <div className="tbl-wrap"><table>
+        <thead><tr><th>Sr.</th><th>Title</th><th>Link</th></tr></thead>
+        <tbody>{journals.map((j)=><tr key={j.sr}>
+          <td style={{color:'var(--text3)'}}>{j.sr}</td>
+          <td style={{fontWeight:500,fontSize:'.855rem'}}>{j.title}</td>
+          <td><a href={j.url} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a></td>
+        </tr>)}</tbody>
+      </table></div>
+    </div>
+  </div>);
+}
+
 function MarksPage({course}){
   const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');const [preview,setPreview]=useState(null);
   const upload=async()=>{if(!course){setErr('Select a course.');return;}if(!file){setErr('Select an xlsx file.');return;}
@@ -1846,6 +1993,8 @@ function App(){
     sessions:<SessionPlanPage course={course}/>,
     evaluation:<EvalPlanPage course={course}/>,
     marks:<MarksPage course={course}/>,
+    students:<StudentsPage course={course}/>,
+    materials:<StudyMaterialsPage course={course}/>,
     attainment:<AttainmentPage course={course}/>,
     reports:<ReportsPage course={course}/>,
     hod:<HodPage/>,

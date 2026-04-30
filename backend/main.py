@@ -13,6 +13,7 @@ from backend.routes.attainment import router as attainment_router
 from backend.routes.dashboard import router as dashboard_router
 from backend.routes.questions import router as questions_router
 from backend.routes.auth import router as auth_router
+from backend.routes.students import router as students_router
 from backend.database.connection import init_db
 from backend.core.config import APP_NAME, APP_VERSION, STORAGE_PATH
 from backend.core.logger import get_logger
@@ -45,6 +46,7 @@ app.include_router(attainment_router)
 app.include_router(dashboard_router)
 app.include_router(questions_router)
 app.include_router(auth_router)
+app.include_router(students_router)
 
 @app.get("/health")
 def health_check():
