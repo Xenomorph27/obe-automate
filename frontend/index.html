@@ -1335,9 +1335,13 @@ function MarksPage({course}){
     setFetching(true);
     try{
       const d=await api(`/attainment/calculate/${course.id}`);
-      const rows=Object.values(d.co_attainment||{});
+      const result=d.data||d;
+      const rows=Object.values(result.co_attainment||{});
       setStudents(rows);
-    }catch{}
+    }catch(e){
+      if(e.message&&e.message.includes('No student marks'))setStudents([]);
+      else setErr(e.message);
+    }
     setFetching(false);
   };
 
@@ -1350,7 +1354,8 @@ function MarksPage({course}){
       const r=await fetch(API+`/attainment/marks/${course.id}/xlsx`,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
       if(!r.ok){const e=await r.json();throw new Error(e.detail||'Upload failed');}
       const d=await r.json();
-      setOk(`✓ Uploaded ${d.parsed_students} students. Switch to "CO Summary" to see results.`);
+      const ud=d.data||d;
+      setOk(`✓ Uploaded ${ud.parsed_students||d.parsed_students||'all'} students. Switch to "CO Summary" to see results.`);
       setFile(null);
       fetchMarksPreview();
     }catch(e){setErr(e.message);}
@@ -1488,7 +1493,7 @@ function AttainmentPage({course}){
   const calc=async()=>{
     if(!course){setErr('Select a course.');return;}
     setLoading(true);setErr('');
-    try{const d=await api(`/attainment/calculate/${course.id}`);setData(d);}
+    try{const d=await api(`/attainment/calculate/${course.id}`);setData(d.data||d);}
     catch(e){setErr(e.message);}
     setLoading(false);
   };
