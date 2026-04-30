@@ -350,23 +350,10 @@ tbody tr:hover{background:var(--bg)}
 .main .quick-action:hover .stat-icon{
   background:rgba(255,255,255,.2) !important;
 }
-/* Global card hover — dark bg matching sidebar */
-.main .card:hover,.main .stat-card:hover,.main .qcard:hover{
-  background:#111827 !important;
-  color:#f9fafb !important;
-  border-color:#111827 !important;
-}
-.main .card:hover .stat-val,.main .card:hover .stat-label,
-.main .stat-card:hover .stat-val,.main .stat-card:hover .stat-label,
-.main .card:hover *,.main .stat-card:hover *,.main .qcard:hover *{
-  color:#f9fafb !important;
-}
-.main .card:hover .badge,.main .stat-card:hover .badge{
-  background:rgba(255,255,255,.15) !important;
-  color:#f9fafb !important;
-}
-.main .card:hover .stat-icon,.main .stat-card:hover .stat-icon{
-  background:rgba(255,255,255,.12) !important;
+/* Quick-action hover only — powder blue */
+.main .quick-action:not(:active):hover{
+  background:#EFF6FF !important;
+  border-color:#BFDBFE !important;
 }
 </style>
 </head>
@@ -1139,7 +1126,7 @@ function SessionPlanPage({course}){
           <td style={{textAlign:'center',fontSize:'.8rem',color:'var(--text2)'}}>{s.unit_no}</td>
           <td>{s.topic||s.points_to_cover||s.title||''}</td>
           <td><span style={{fontSize:'.75rem',padding:'2px 8px',borderRadius:4,background:s.teaching_method==='Evaluation'?'#fef9c3':s.teaching_method==='Lab'?'#dcfce7':'#dbeafe',color:'var(--text)'}}>{s.teaching_method||'Lecture'}</span></td>
-          <td style={{textAlign:'center',fontWeight:600,color:'var(--blue2)',fontSize:'.85rem'}}>{(s.co_mapped||[s.co]||[]).join(', ')||s.co_id||''}</td>
+          <td style={{textAlign:'center',fontWeight:600,color:'var(--blue2)',fontSize:'.85rem'}}>{(Array.isArray(s.co_mapped)?s.co_mapped.join(', '):(s.co_mapped||s.co||s.co_id||'')).toString()}</td>
         </tr>)}</tbody>
       </table></div>
       <div style={{fontSize:'.8rem',color:'var(--text2)',marginTop:'.75rem'}}>{allSessions.length} sessions across {units.length} units</div>
@@ -1153,8 +1140,8 @@ function EvalPlanPage({course}){
   const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
     try{const d=await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});setPlan(d.data||d);}
     catch(e){setErr(e.message);}setLoading(false);};
-  const components=plan?.evaluation_plan?.cie_plan||[];
-  const ese=plan?.evaluation_plan?.see_plan||null;
+  const components=plan?.evaluation_plan?.ca_components||plan?.ca_components||plan?.evaluation_plan?.cie_plan||[];
+  const ese=plan?.evaluation_plan?.see_plan||plan?.see_plan||null;
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Evaluation Plan</div>
     {!course&&<Alrt t="warning" msg="Select a course first."/>}
     {course&&<Alrt t="info" msg={`Course: ${course.course_name} (${course.course_code})`}/>}
@@ -1172,8 +1159,8 @@ function EvalPlanPage({course}){
           <tbody>{components.map((comp,i)=><tr key={i}>
             <td>{comp.component||comp.name||''}</td>
             <td style={{textAlign:'center',fontWeight:600}}>{comp.marks||comp.total_marks||''}</td>
-            <td style={{fontSize:'.8rem',color:'var(--text2)'}}>{(comp.cos_assessed||comp.units||[]).join(', ')||'--'}</td>
-            <td style={{fontSize:'.8rem',color:'var(--blue2)',fontWeight:600}}>{(comp.cos||comp.co_mapping||[]).join(', ')||'--'}</td>
+            <td style={{fontSize:'.8rem',color:'var(--text2)'}}>{Array.isArray(comp.cos_assessed||comp.units)?(comp.cos_assessed||comp.units).join(', '):(comp.cos_assessed||comp.unit_syllabus||comp.units||'--')}</td>
+            <td style={{fontSize:'.8rem',color:'var(--blue2)',fontWeight:600}}>{Array.isArray(comp.cos||comp.co_mapping)?(comp.cos||comp.co_mapping).join(', '):(comp.co_mapped||comp.cos||'--')}</td>
           </tr>)}</tbody>
         </table></div>}
         {components.length===0&&<div style={{color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No CA components found in plan.</div>}
