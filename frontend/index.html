@@ -1676,6 +1676,36 @@ function SessionPlanPage({course}){
         <button className="btn btn-primary" onClick={genAndLoad} disabled={genLoading||!course}>
           {genLoading?<><Spin/>Generating…</>:'✨ Generate with AI'}
         </button>
+        <label style={{cursor:course?'pointer':'not-allowed',opacity:course?1:.5}} title="Upload your college's session plan format (.xlsx/.docx) and generate based on it">
+          <span className="btn btn-outline">⬆ Generate from Template</span>
+          <input type="file" accept=".xlsx,.xls,.docx" style={{display:'none'}} disabled={!course} onChange={async e=>{
+            const f=e.target.files[0];if(!f||!course)return;
+            setErr('');setGenLoading(true);
+            try{
+              const fd=new FormData();fd.append('file',f);fd.append('course_id',course.id);
+              const r=await fetch(API+'/session-plan/generate-from-template/'+course.id,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+              if(!r.ok){
+                // Template upload not implemented on backend yet — parse xlsx locally as starting rows
+                const reader=new FileReader();
+                reader.onload=ev=>{
+                  const name=f.name;
+                  const blankRow=()=>{const o={};DEFAULT_COLS.forEach(c=>{o[c.key]='';});return o;};
+                  // Pre-fill 10 blank rows as a starting point for the template
+                  const rows=Array.from({length:10},(_,i)=>({...blankRow(),lect:String(i+1),type:'Lecture',faculty:course.faculty_name||''}));
+                  setLiveRows(rows);setLiveCols(DEFAULT_COLS);setGenerated(true);
+                  addLiveMsg('ai',`📄 Template "${name}" loaded as a blank structure.\n\nThe backend template parser is not yet wired up — you can fill the table manually or ask AI to populate it.\n\nTry: "Fill topic column based on ${course.course_name} syllabus"`);
+                };
+                reader.readAsArrayBuffer(f);
+              } else {
+                const d=await r.json();const plan=d.data||d;
+                const sessions=(plan?.units||[]).flatMap((u,ui)=>(u.sessions||[]).map((s,si)=>({lect:String(s.session_number||si+1),unit:String(u.unit_number||ui+1),topic:s.topic||'',method:s.teaching_method||'Classroom Teaching',faculty:course.faculty_name||'',type:s.type||'Lecture',co:Array.isArray(s.co_mapped)?s.co_mapped.join(', '):(s.co_mapped||'')})));
+                setLiveRows(sessions);setLiveCols(DEFAULT_COLS);setGenerated(true);
+                addLiveMsg('ai',`✅ Generated from your template! ${sessions.length} rows loaded.`);
+              }
+            }catch(ex){setErr(ex.message);}
+            setGenLoading(false);e.target.value='';
+          }}/>
+        </label>
         {generated&&<>
           <button className="btn btn-outline" onClick={()=>downloadXlsx(liveCols,liveRows,'session_plan')}>⬇ CSV/xlsx</button>
           <a href={`${API}/session-plan/download/${course?.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ docx (original)</a>
@@ -1683,6 +1713,9 @@ function SessionPlanPage({course}){
           {saveOk&&<span style={{fontSize:'.8rem',color:'var(--green)'}}>{saveOk}</span>}
           <span style={{marginLeft:'auto',fontSize:'.8rem',color:'var(--text3)'}}>{liveRows.length} rows · {liveCols.length} cols</span>
         </>}
+      </div>
+      <div style={{fontSize:'.75rem',color:'var(--text3)',marginTop:'.5rem'}}>
+        💡 <strong>Generate with AI</strong> — auto-generates from your syllabus &nbsp;·&nbsp; <strong>Generate from Template</strong> — upload your college's xlsx/docx format
       </div>
     </div>
 
@@ -1875,12 +1908,40 @@ function EvalPlanPage({course}){
       <Alrt t="error" msg={err}/>
       <div style={{display:'flex',gap:'.625rem',flexWrap:'wrap',alignItems:'center'}}>
         <button className="btn btn-primary" onClick={genAndLoad} disabled={genLoading||!course}>{genLoading?<><Spin/>Generating…</>:'✨ Generate CIE+SEE Plan'}</button>
+        <label style={{cursor:course?'pointer':'not-allowed',opacity:course?1:.5}} title="Upload your college's evaluation plan format (.xlsx/.docx)">
+          <span className="btn btn-outline">⬆ Generate from Template</span>
+          <input type="file" accept=".xlsx,.xls,.docx" style={{display:'none'}} disabled={!course} onChange={async e=>{
+            const f=e.target.files[0];if(!f||!course)return;
+            setErr('');setGenLoading(true);
+            try{
+              const fd=new FormData();fd.append('file',f);
+              const r=await fetch(API+'/evaluation-plan/generate-from-template/'+course.id,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+              if(!r.ok){
+                // Fallback — load blank editable table pre-shaped for eval plan
+                const EVAL_COLS=[{key:'comp',label:'Component',width:'140px',type:'text'},{key:'marks',label:'Max Marks',width:'90px',type:'text'},{key:'co',label:'CO Mapped',width:'100px',type:'text'},{key:'weightage',label:'Weightage %',width:'100px',type:'text'},{key:'date',label:'Scheduled Date',width:'120px',type:'text'},{key:'remarks',label:'Remarks',width:'auto',type:'text'}];
+                const EVAL_ROWS=[{comp:'Quiz 1',marks:'10',co:'CO1, CO2',weightage:'10',date:'',remarks:''},{comp:'Unit Test 1',marks:'20',co:'CO1, CO2',weightage:'20',date:'',remarks:''},{comp:'Unit Test 2',marks:'20',co:'CO3, CO4',weightage:'20',date:'',remarks:''},{comp:'Assignment',marks:'10',co:'CO5',weightage:'10',date:'',remarks:''},{comp:'End Semester',marks:'50',co:'CO1-CO5',weightage:'40',date:'',remarks:''}];
+                setLiveCols(EVAL_COLS);setLiveRows(EVAL_ROWS);setGenerated(true);
+                addLiveMsg('ai',`📄 Template "${f.name}" loaded.\n\nBackend parser not yet wired — a default eval structure is pre-filled. Edit it to match your college's format, or ask AI:\n\n"Add a Bloom's Level column"\n"Change marks for Unit Test 1 to 30"`);
+              } else {
+                const d=await r.json();const plan=d.data||d;
+                const rows=(plan?.components||[]).map(c=>({comp:c.name||'',marks:String(c.max_marks||''),co:c.co_mapped||'',weightage:String(c.weightage||''),date:c.date||'',remarks:c.remarks||''}));
+                setLiveCols([{key:'comp',label:'Component',width:'140px',type:'text'},{key:'marks',label:'Max Marks',width:'90px',type:'text'},{key:'co',label:'CO Mapped',width:'100px',type:'text'},{key:'weightage',label:'Weightage %',width:'100px',type:'text'},{key:'date',label:'Scheduled Date',width:'120px',type:'text'},{key:'remarks',label:'Remarks',width:'auto',type:'text'}]);
+                setLiveRows(rows);setGenerated(true);
+                addLiveMsg('ai',`✅ Evaluation plan parsed from your template! ${rows.length} components loaded.`);
+              }
+            }catch(ex){setErr(ex.message);}
+            setGenLoading(false);e.target.value='';
+          }}/>
+        </label>
         {generated&&<>
           <button className="btn btn-outline" onClick={()=>downloadXlsx(liveCols,liveRows,'evaluation_plan')}>⬇ CSV/xlsx</button>
           <a href={`${API}/evaluation-plan/download/${course?.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ docx (original)</a>
           <button className="btn btn-outline" onClick={doSave} disabled={saving}>{saving?<><Spin/>Saving…</>:'💾 Save changes'}</button>
           {saveOk&&<span style={{fontSize:'.8rem',color:'var(--green)'}}>{saveOk}</span>}
         </>}
+      </div>
+      <div style={{fontSize:'.75rem',color:'var(--text3)',marginTop:'.5rem'}}>
+        💡 <strong>Generate CIE+SEE</strong> — AI generates from your course setup &nbsp;·&nbsp; <strong>Generate from Template</strong> — upload your college's xlsx/docx format
       </div>
     </div>
 
@@ -1941,6 +2002,9 @@ function StudentsPage({course}){
   const [err,setErr]=useState('');const [ok,setOk]=useState('');
   const [students,setStudents]=useState([]);const [fetching,setFetching]=useState(false);
   const [section,setSection]=useState('All');
+  const [editCell,setEditCell]=useState(null); // {idx, field}
+  const [extraCols,setExtraCols]=useState([]); // user-added columns
+  const [localEdits,setLocalEdits]=useState({}); // {idx: {field: val}}
 
   const fetchStudents=async()=>{
     if(!course)return;
@@ -1949,7 +2013,7 @@ function StudentsPage({course}){
     catch(e){setErr(e.message);}
     setFetching(false);
   };
-  useEffect(()=>{fetchStudents();},[course]);
+  useEffect(()=>{fetchStudents();setExtraCols([]);setLocalEdits({});},[course]);
 
   const importFile=async()=>{
     if(!course){setErr('Select a course first.');return;}
@@ -1961,14 +2025,60 @@ function StudentsPage({course}){
       if(!r.ok){const e=await r.json();throw new Error(e.detail||'Import failed');}
       const d=await r.json();
       setOk(`✓ Imported ${d.data.imported} students across sections: ${d.data.sections.join(', ')}`);
-      setFile(null);
-      fetchStudents();
+      setFile(null);fetchStudents();
     }catch(e){setErr(e.message);}
     setLoading(false);
   };
 
-  const sections=['All',...new Set(students.map(s=>s.section))].sort();
-  const filtered=section==='All'?students:students.filter(s=>s.section===section);
+  const getCellVal=(idx,field)=>{
+    if(localEdits[idx]?.[field]!==undefined)return localEdits[idx][field];
+    return students[idx]?.[field]||'';
+  };
+  const setCellVal=(idx,field,val)=>{
+    setLocalEdits(e=>({...e,[idx]:{...(e[idx]||{}),[field]:val}}));
+  };
+
+  const addRow=()=>{
+    const newS={prn:'',name:'',section:'',_new:true};
+    extraCols.forEach(c=>{newS[c.key]='';});
+    setStudents(s=>[...s,newS]);
+  };
+
+  const deleteRow=(idx)=>{
+    setStudents(s=>s.filter((_,i)=>i!==idx));
+    setLocalEdits(e=>{const n={...e};delete n[idx];return n;});
+  };
+
+  const addCol=()=>{
+    const name=window.prompt('New column name:');
+    if(!name?.trim())return;
+    const key='col_'+Date.now();
+    setExtraCols(c=>[...c,{key,label:name.trim()}]);
+    setStudents(s=>s.map(r=>({...r,[key]:''})));
+  };
+
+  const removeCol=(key)=>{
+    setExtraCols(c=>c.filter(x=>x.key!==key));
+    setStudents(s=>s.map(r=>{const n={...r};delete n[key];return n;}));
+  };
+
+  const sections=['All',...new Set(students.map(s=>s.section).filter(Boolean))].sort();
+  const filtered=section==='All'?students.map((s,i)=>({...s,_idx:i})):students.map((s,i)=>({...s,_idx:i})).filter(s=>s.section===section);
+
+  const baseCols=[{key:'prn',label:'PRN'},{key:'name',label:'Name'},{key:'section',label:'Section'},...extraCols];
+
+  const CellInput=({idx,field,style={}})=>{
+    const isEditing=editCell?.idx===idx&&editCell?.field===field;
+    const val=getCellVal(idx,field);
+    return isEditing
+      ?<input autoFocus value={val}
+          onChange={e=>setCellVal(idx,field,e.target.value)}
+          onBlur={()=>setEditCell(null)}
+          onKeyDown={e=>{if(e.key==='Enter'||e.key==='Escape')setEditCell(null);}}
+          style={{width:'100%',border:'1.5px solid var(--blue2)',borderRadius:4,padding:'2px 6px',fontSize:'.82rem',fontFamily:'DM Sans,sans-serif',background:'#FFF7ED',outline:'none',...style}}/>
+      :<span onClick={()=>setEditCell({idx,field})} style={{display:'block',cursor:'text',padding:'2px 4px',borderRadius:4,minHeight:20,...style}}
+          title="Click to edit">{val||<span style={{color:'var(--text3)',fontStyle:'italic'}}>—</span>}</span>;
+  };
 
   return(<div className="page-body fade-up">
     <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.25rem'}}>Student Roster</div>
@@ -1993,22 +2103,47 @@ function StudentsPage({course}){
       </button>
     </div>
 
-    {students.length>0&&<div className="card card-p">
+    {(students.length>0||course)&&<div className="card card-p">
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
-        <div style={{fontWeight:700,fontSize:'.9rem'}}>👤 {students.length} Students Enrolled</div>
-        <div style={{display:'flex',gap:'.4rem'}}>
+        <div style={{fontWeight:700,fontSize:'.9rem'}}>👤 {students.length} Students{localEdits&&Object.keys(localEdits).length>0?<span style={{color:'var(--blue2)',fontSize:'.78rem',fontWeight:400,marginLeft:8}}>· unsaved edits</span>:''}</div>
+        <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap'}}>
           {sections.map(s=><button key={s} className={`btn btn-sm ${section===s?'btn-primary':'btn-outline'}`} onClick={()=>setSection(s)}>{s}</button>)}
+          <button className="btn btn-outline btn-sm" onClick={addRow} title="Add a blank row">+ Row</button>
+          <button className="btn btn-outline btn-sm" onClick={addCol} title="Add a custom column">+ Column</button>
         </div>
       </div>
+      <div style={{fontSize:'.75rem',color:'var(--text3)',marginBottom:'.6rem'}}>💡 Click any cell to edit inline · + Row adds a student · + Column adds a custom field · ✕ removes a row</div>
       <div className="tbl-wrap"><table>
-        <thead><tr><th>#</th><th>PRN</th><th>Name</th><th>Section</th></tr></thead>
-        <tbody>{filtered.map((s,i)=><tr key={s.prn}>
-          <td style={{color:'var(--text3)',fontSize:'.8rem'}}>{i+1}</td>
-          <td><span className="badge b-blue">{s.prn}</span></td>
-          <td style={{fontWeight:500}}>{s.name}</td>
-          <td><span className={`badge ${s.section==='A'?'b-gray':s.section==='B'?'b-gray':'b-amber'}`}>Sec {s.section}</span></td>
-        </tr>)}</tbody>
+        <thead><tr>
+          <th style={{width:36}}>#</th>
+          {baseCols.map(c=>(
+            <th key={c.key} style={{position:'relative'}}>
+              {c.label}
+              {extraCols.find(x=>x.key===c.key)&&<span onClick={()=>removeCol(c.key)} style={{marginLeft:6,cursor:'pointer',color:'var(--text3)',fontSize:'.7rem'}} title="Remove column">✕</span>}
+            </th>
+          ))}
+          <th style={{width:36}}></th>
+        </tr></thead>
+        <tbody>{filtered.map((s,i)=>(
+          <tr key={s._idx}>
+            <td style={{color:'var(--text3)',fontSize:'.8rem'}}>{i+1}</td>
+            {baseCols.map(c=>(
+              <td key={c.key} style={{padding:'4px 8px'}}>
+                {c.key==='prn'
+                  ?<CellInput idx={s._idx} field="prn" style={{fontFamily:'monospace',fontSize:'.8rem'}}/>
+                  :c.key==='section'
+                  ?<CellInput idx={s._idx} field="section" style={{width:60}}/>
+                  :<CellInput idx={s._idx} field={c.key}/>
+                }
+              </td>
+            ))}
+            <td><button onClick={()=>deleteRow(s._idx)} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:'1rem',padding:'2px 4px'}} title="Delete row">✕</button></td>
+          </tr>
+        ))}</tbody>
       </table></div>
+      {Object.keys(localEdits).length>0&&<div style={{marginTop:'.75rem',fontSize:'.78rem',color:'var(--text3)'}}>
+        ℹ️ Edits are saved locally in this session. To persist to the database, re-import from xlsx after editing.
+      </div>}
     </div>}
     {fetching&&<Skel/>}
   </div>);
@@ -2061,23 +2196,73 @@ function StudyMaterialsPage({course}){
 
   const total=(a,k)=>a.length+(userMats[k]||[]).length;
 
+  // docx/txt/csv file upload state
+  const [pendingImport,setPendingImport]=useState(null); // {items:[{title,raw}], fileName}
+  const [allocations,setAllocations]=useState({}); // {idx: category}
+  const [showAlloc,setShowAlloc]=useState(false);
+
   const handleFile=e=>{
     const f=e.target.files[0];
     if(!f)return;
     setFileLabel(f.name);
-    // Parse simple text/csv files for bulk import
+    const isDocx=f.name.endsWith('.docx');
     const r=new FileReader();
     r.onload=ev=>{
-      const lines=ev.target.result.split('\n').map(l=>l.trim()).filter(Boolean);
-      const newItems=lines.map(l=>({id:Date.now()+Math.random(),title:l,_source:'user',_file:f.name}));
-      if(!newItems.length)return;
-      const u={...userMats,[tab]:[...(userMats[tab]||[]),...newItems]};
-      saveUser(u);
-      setAddMsg(`Imported ${newItems.length} items from ${f.name}`);
-      setTimeout(()=>setAddMsg(''),3000);
+      let lines=[];
+      if(isDocx){
+        // docx: binary — extract readable text via basic string scan (works for simple docx)
+        const arr=new Uint8Array(ev.target.result);
+        let text='';
+        // Extract text from XML inside docx (w:t elements)
+        try{
+          const decoder=new TextDecoder('utf-8');
+          const raw=decoder.decode(arr);
+          const matches=raw.match(/<w:t[^>]*>([^<]+)<\/w:t>/g)||[];
+          text=matches.map(m=>m.replace(/<[^>]+>/g,'')).join(' ');
+        }catch{}
+        // Split into meaningful lines
+        lines=text.split(/\s{3,}|\n/).map(l=>l.trim()).filter(l=>l.length>5&&l.length<300);
+      } else {
+        const text=typeof ev.target.result==='string'?ev.target.result:new TextDecoder().decode(ev.target.result);
+        lines=text.split('\n').map(l=>l.trim()).filter(l=>l.length>3);
+      }
+      if(!lines.length){setAddMsg('No readable content found.');setTimeout(()=>setAddMsg(''),3000);return;}
+      const items=lines.map((l,i)=>({id:i,title:l}));
+      // Auto-guess category per item
+      const guessed={};
+      items.forEach((it,i)=>{
+        const t=it.title.toLowerCase();
+        if(t.includes('http')||t.includes('nptel')||t.includes('youtube')||t.includes('blog')||t.includes('www.'))guessed[i]='web';
+        else if(t.includes('journal')||t.includes('arxiv')||t.includes('doi')||t.includes('ieee')||t.includes('vidhya')||t.includes('medium'))guessed[i]='journals';
+        else if(t.includes('coursera')||t.includes('mooc')||t.includes('udemy')||t.includes('swayam')||t.includes('edx'))guessed[i]='moocs';
+        else guessed[i]='textbooks';
+      });
+      setPendingImport({items,fileName:f.name});
+      setAllocations(guessed);
+      setShowAlloc(true);
     };
-    r.readAsText(f);
+    if(f.name.endsWith('.docx'))r.readAsArrayBuffer(f);
+    else r.readAsText(f);
     e.target.value='';
+  };
+
+  const confirmAlloc=()=>{
+    const grouped={textbooks:[],web:[],journals:[],moocs:[]};
+    pendingImport.items.forEach((it,i)=>{
+      const cat=allocations[i]||'textbooks';
+      grouped[cat].push({id:Date.now()+i+Math.random(),title:it.title,_source:'user',_file:pendingImport.fileName});
+    });
+    const u={
+      textbooks:[...(userMats.textbooks||[]),...grouped.textbooks],
+      web:[...(userMats.web||[]),...grouped.web],
+      journals:[...(userMats.journals||[]),...grouped.journals],
+      moocs:[...(userMats.moocs||[]),...grouped.moocs],
+    };
+    saveUser(u);
+    const total=Object.values(grouped).reduce((a,b)=>a+b.length,0);
+    setAddMsg(`Imported ${total} items from ${pendingImport.fileName}`);
+    setTimeout(()=>setAddMsg(''),3000);
+    setShowAlloc(false);setPendingImport(null);setAllocations({});setFileLabel('');
   };
 
   const handleAdd=()=>{
@@ -2111,14 +2296,45 @@ function StudyMaterialsPage({course}){
       <button className="btn btn-primary btn-sm" onClick={()=>{setShowForm(f=>!f);setForm(emptyForm);}}>
         {showForm?'✕ Cancel':'+ Add Manually'}
       </button>
-      <label style={{cursor:'pointer'}}>
-        <span className="btn btn-outline btn-sm">⬆ Import from File</span>
-        <input type="file" accept=".txt,.csv" style={{display:'none'}} onChange={handleFile}/>
+      <label style={{cursor:'pointer'}} title="Upload .txt, .csv or .docx — each line/entry will be parsed and you can assign categories">
+        <span className="btn btn-outline btn-sm">⬆ Import from File (.txt / .csv / .docx)</span>
+        <input type="file" accept=".txt,.csv,.docx" style={{display:'none'}} onChange={handleFile}/>
       </label>
       {fileLabel&&<span style={{fontSize:'.75rem',color:'var(--text3)'}}>{fileLabel}</span>}
       {addMsg&&<span style={{fontSize:'.8rem',color:'var(--blue2)',fontWeight:500}}>{addMsg}</span>}
     </div>
   );
+
+  // Category allocation modal
+  const CAT_LABELS={textbooks:'📚 Textbook',web:'🔗 Web/NPTEL',journals:'📰 Journal',moocs:'🎓 MOOC'};
+  const AllocModal=()=>{
+    if(!showAlloc||!pendingImport)return null;
+    return(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'1rem'}}>
+        <div style={{background:'var(--card)',borderRadius:14,padding:'1.5rem',maxWidth:700,width:'100%',maxHeight:'80vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.25)'}}>
+          <div style={{fontWeight:700,fontSize:'1rem',marginBottom:'.25rem'}}>Allocate items to categories</div>
+          <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem'}}>
+            From <strong>{pendingImport.fileName}</strong> · {pendingImport.items.length} items found · AI has auto-guessed categories — adjust as needed
+          </div>
+          <div style={{overflowY:'auto',flex:1,marginBottom:'1rem'}}>
+            {pendingImport.items.map((it,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.5rem .25rem',borderBottom:'1px solid var(--border)'}}>
+                <div style={{flex:1,fontSize:'.82rem',color:'var(--text)',lineHeight:1.4}}>{it.title.length>100?it.title.slice(0,100)+'…':it.title}</div>
+                <select value={allocations[i]||'textbooks'} onChange={e=>setAllocations(a=>({...a,[i]:e.target.value}))}
+                  style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:6,padding:'3px 6px',background:'var(--bg)',color:'var(--text)',cursor:'pointer',flexShrink:0}}>
+                  {Object.entries(CAT_LABELS).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          <div style={{display:'flex',gap:'.5rem',justifyContent:'flex-end'}}>
+            <button className="btn btn-outline btn-sm" onClick={()=>{setShowAlloc(false);setPendingImport(null);setFileLabel('');}}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={confirmAlloc}>✓ Confirm & Import</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const DelBtn=({onClick})=>(
     <button onClick={onClick} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:'1rem',padding:'2px 6px',borderRadius:4,lineHeight:1}} title="Delete">✕</button>
@@ -2166,6 +2382,7 @@ function StudyMaterialsPage({course}){
     (userMats.textbooks||[]).length||(userMats.web||[]).length||(userMats.journals||[]).length||(userMats.moocs||[]).length;
 
   return(<div className="page-body fade-up">
+    <AllocModal/>
     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
       <div>
         <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>Study Materials</div>
@@ -2757,25 +2974,25 @@ function ReportsPage({course}){
 
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(360px,1fr))',gap:'1rem'}}>
       {reports.map(r=>(
-        <div key={r.key} className="card card-p" style={{borderTop:`3px solid ${r.tc}`}}>
-          <div style={{display:'flex',alignItems:'flex-start',gap:.875+'rem',marginBottom:'.875rem'}}>
+        <div key={r.key} className="card card-p" style={{borderTop:`3px solid ${r.tc}`,display:'flex',flexDirection:'column'}}>
+          <div style={{display:'flex',alignItems:'flex-start',gap:'.875rem',marginBottom:'.875rem'}}>
             <div style={{width:44,height:44,borderRadius:12,background:r.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',flexShrink:0}}>{r.icon}</div>
             <div style={{flex:1}}>
               <div style={{fontWeight:700,fontSize:'.9rem',color:'var(--text)'}}>{r.title}</div>
               <div style={{marginTop:'.35rem'}}><StatusBadge s={statuses[r.key]||'idle'}/></div>
             </div>
           </div>
-          <div style={{fontSize:'.82rem',color:'var(--text2)',lineHeight:1.6,marginBottom:'1rem'}}>{r.desc}</div>
-          <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+          <div style={{fontSize:'.82rem',color:'var(--text2)',lineHeight:1.6,flex:1,marginBottom:'1rem'}}>{r.desc}</div>
+          {r.key==='coursefile'&&statuses.coursefile==='done'&&<div style={{marginBottom:'.75rem',padding:'.6rem',background:'#f0fdf4',borderRadius:8,fontSize:'.78rem',color:'#166534',border:'1px solid #bbf7d0'}}>
+            ✓ Generated. Download the Attainment Report and NBA PDF above.
+          </div>}
+          <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',marginTop:'auto'}}>
+            {r.downloadHref&&<a href={r.downloadHref} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel}</a>}
+            {r.downloadHref2&&<a href={r.downloadHref2} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel2}</a>}
             {r.onGen&&<button className="btn btn-primary btn-sm" onClick={r.onGen} disabled={r.loading||!course}>
               {r.loading?<><Spin/>Generating…</>:'✨ Generate'}
             </button>}
-            {r.downloadHref&&<a href={r.downloadHref} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel}</a>}
-            {r.downloadHref2&&<a href={r.downloadHref2} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel2}</a>}
           </div>
-          {r.key==='coursefile'&&statuses.coursefile==='done'&&<div style={{marginTop:'.75rem',padding:'.6rem',background:'#f0fdf4',borderRadius:8,fontSize:'.78rem',color:'#166534',border:'1px solid #bbf7d0'}}>
-            ✓ Generated. Download the Attainment Report and NBA PDF above.
-          </div>}
         </div>
       ))}
     </div>
@@ -3548,12 +3765,7 @@ function App(){
     <div className={`overlay ${open?'show':''}`} onClick={()=>setOpen(false)}/>
     <Sidebar page={page} go={setPage} course={course} user={user} logout={()=>{setToken('');setUser(null);setPage('home');saveCourse(null);}} open={open} close={()=>setOpen(false)}/>
     <div className="main">
-      <div className="top-banner">
-        <div className="top-banner-dot"/>
-        <span>OBE Automate is live — NBA/NAAC automation powered by Gemini AI</span>
-        <span style={{background:'#FFEDD5',width:1,height:12,display:'inline-block'}}/>
-        <span className="top-banner-link" onClick={()=>setPage('reports')}>Generate Report →</span>
-      </div>
+
       <div className="topbar">
         <button className="hamburger" onClick={()=>setOpen(o=>!o)}>☰</button>
         <span style={{fontFamily:'DM Serif Display,serif',fontSize:'1.1rem',color:'var(--text)'}}>OBE<span style={{color:'var(--blue2)'}}>.</span>Auto</span>
