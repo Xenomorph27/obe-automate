@@ -1480,25 +1480,26 @@ function EditableTable({cols,rows,flashSet,updateCell,removeRow,onAddCol,onRemov
 
   const SelectCell=({col,value,ri})=>{
     const opts=col.opts||typeOpts||[];
-    const isCustom=value&&!opts.includes(value);
-    const [custom,setCustom]=useState(isCustom);
-    useEffect(()=>{setCustom(value&&!opts.includes(value));},[value]);
-    const listId=`combo-${col.key}-${ri}`;
+    // Stable initial mode: avoid useEffect fighting state on value changes
+    const [custom,setCustom]=useState(()=>!!(value&&!opts.includes(value)));
+    const switchToCustom=()=>{setCustom(true);};
+    const switchToDropdown=()=>{updateCell(ri,col.key,opts[0]);setCustom(false);};
     if(custom){
       return(<div style={{display:'flex',alignItems:'center',gap:2,width:'100%'}}>
-        <input value={value} onChange={e=>updateCell(ri,col.key,e.target.value)}
-          style={{flex:1,background:'transparent',border:'none',fontSize:'.8rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',outline:'none',padding:0,minWidth:0}}/>
-        <span title="Use dropdown" onClick={()=>{updateCell(ri,col.key,opts[0]);setCustom(false);}}
-          style={{cursor:'pointer',fontSize:'.7rem',color:'var(--text3)',flexShrink:0}}>▾</span>
+        <input autoFocus value={value||''} onChange={e=>updateCell(ri,col.key,e.target.value)}
+          placeholder="Type your value…"
+          style={{flex:1,background:'transparent',border:'none',borderBottom:'1.5px solid var(--blue2)',fontSize:'.8rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',outline:'none',padding:'1px 2px',minWidth:0}}/>
+        <span title="Switch back to dropdown" onClick={switchToDropdown}
+          style={{cursor:'pointer',fontSize:'.7rem',color:'var(--text3)',flexShrink:0,paddingLeft:3}}>&#9662;</span>
       </div>);
     }
     return(<div style={{display:'flex',alignItems:'center',gap:2,width:'100%'}}>
-      <select value={value} onChange={e=>{
-        if(e.target.value==='__custom__'){updateCell(ri,col.key,'');setCustom(true);}
+      <select value={opts.includes(value)?value:opts[0]} onChange={e=>{
+        if(e.target.value==='__custom__'){switchToCustom();}
         else updateCell(ri,col.key,e.target.value);
       }} style={{flex:1,background:'transparent',border:'none',fontSize:'.8rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',cursor:'pointer',outline:'none',padding:0,minWidth:0}}>
-        {opts.map(o=><option key={o}>{o}</option>)}
-        <option value="__custom__">✎ Custom…</option>
+        {opts.map(o=><option key={o} value={o}>{o}</option>)}
+        <option value="__custom__">&#9998; Custom…</option>
       </select>
     </div>);
   };
@@ -3162,12 +3163,26 @@ function ReportsPage({course}){
   const [err,setErr]=useState('');
   const [statuses,setStatuses]=useState({nba:'idle',att:'idle',coursefile:'idle'});
   const set=(k,v)=>setStatuses(s=>({...s,[k]:v}));
+  const [templates,setTemplates]=useState({nba:null,att:null,coursefile:null});
+  const setTpl=(k,f)=>setTemplates(t=>({...t,[k]:f}));
+  const nbaRef=useRef();const attRef=useRef();const cfRef=useRef();
+
+  const postWithTemplate=async(url,templateFile)=>{
+    const token=sessionStorage.getItem('obe_token');
+    if(templateFile){
+      const fd=new FormData();fd.append('template',templateFile);
+      const r=await fetch(API+url,{method:'POST',body:fd,headers:{Authorization:'Bearer '+token}});
+      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
+      return r.json();
+    }
+    return api(url,{method:'POST'});
+  };
 
   const genNba=async()=>{
     if(!course){setErr('Select a course first.');return;}
     setNbaLoading(true);setErr('');set('nba','loading');
     try{
-      await api(`/attainment/nba-report/${course.id}`,{method:'POST'});
+      await postWithTemplate(`/attainment/nba-report/${course.id}`,templates.nba);
       set('nba','done');
     }catch(e){setErr(e.message);set('nba','idle');}
     setNbaLoading(false);
@@ -3177,7 +3192,7 @@ function ReportsPage({course}){
     if(!course){setErr('Select a course first.');return;}
     setAttLoading(true);setErr('');set('att','loading');
     try{
-      await api(`/attainment/report/${course.id}`,{method:'POST'});
+      await postWithTemplate(`/attainment/report/${course.id}`,templates.att);
       set('att','done');
     }catch(e){setErr(e.message);set('att','idle');}
     setAttLoading(false);
@@ -3187,9 +3202,8 @@ function ReportsPage({course}){
     if(!course){setErr('Select a course first.');return;}
     setCourseFileLoading(true);setErr('');set('coursefile','loading');
     try{
-      // Course file = attainment report + NBA report bundled; trigger both
-      await api(`/attainment/report/${course.id}`,{method:'POST'});
-      await api(`/attainment/nba-report/${course.id}`,{method:'POST'});
+      await postWithTemplate(`/attainment/report/${course.id}`,templates.coursefile);
+      await postWithTemplate(`/attainment/nba-report/${course.id}`,templates.coursefile);
       set('coursefile','done');
     }catch(e){setErr(e.message);set('coursefile','idle');}
     setCourseFileLoading(false);
@@ -3211,6 +3225,7 @@ function ReportsPage({course}){
       tc:'#C2410C',
       onGen:genNba,
       loading:nbaLoading,
+      tplRef:nbaRef,
       downloadHref:course?`${API}/attainment/nba-report/download/${course.id}`:null,
       downloadLabel:'⬇ Download PDF',
     },
@@ -3223,6 +3238,7 @@ function ReportsPage({course}){
       tc:'#065f46',
       onGen:genAtt,
       loading:attLoading,
+      tplRef:attRef,
       downloadHref:course?`${API}/attainment/download/${course.id}`:null,
       downloadLabel:'⬇ Download .docx',
     },
@@ -3235,6 +3251,7 @@ function ReportsPage({course}){
       tc:'#6d28d9',
       onGen:genCourseFile,
       loading:courseFileLoading,
+      tplRef:cfRef,
       downloadHref:null,
       downloadLabel:null,
     },
@@ -3311,6 +3328,22 @@ function ReportsPage({course}){
           {r.key==='coursefile'&&statuses.coursefile==='done'&&<div style={{marginBottom:'.75rem',padding:'.6rem',background:'#f0fdf4',borderRadius:8,fontSize:'.78rem',color:'#166534',border:'1px solid #bbf7d0'}}>
             ✓ Generated. Download the Attainment Report and NBA PDF above.
           </div>}
+          {r.onGen&&(<div style={{marginBottom:'.65rem',padding:'.6rem .75rem',background:'var(--bg2)',borderRadius:8}}>
+            <div style={{fontSize:'.74rem',color:'var(--text2)',marginBottom:'.35rem',fontWeight:600}}>&#128206; Template (optional)</div>
+            <div style={{display:'flex',alignItems:'center',gap:'.4rem',flexWrap:'wrap'}}>
+              <input type="file" accept=".docx" style={{display:'none'}} ref={r.tplRef}
+                onChange={e=>setTpl(r.key,e.target.files[0]||null)}/>
+              <button className="btn btn-outline btn-sm" onClick={()=>r.tplRef.current&&r.tplRef.current.click()}
+                style={{fontSize:'.73rem',padding:'3px 10px'}}>
+                {templates[r.key]?'✓ '+templates[r.key].name:'Upload .docx template'}
+              </button>
+              {templates[r.key]&&<span onClick={()=>setTpl(r.key,null)} title="Remove template"
+                style={{cursor:'pointer',color:'var(--text3)',fontSize:'.85rem',lineHeight:1}}>×</span>}
+            </div>
+            {templates[r.key]&&<div style={{fontSize:'.71rem',color:'var(--text3)',marginTop:'.3rem'}}>
+              Report will follow your template’s structure and format
+            </div>}
+          </div>)}
           <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',marginTop:'auto'}}>
             {r.downloadHref&&<a href={r.downloadHref} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel}</a>}
             {r.downloadHref2&&<a href={r.downloadHref2} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel2}</a>}
