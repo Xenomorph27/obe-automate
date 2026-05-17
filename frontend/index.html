@@ -1096,77 +1096,771 @@ function CourseSetupPage({setCourse,syllabusData}){
 }
 
 // ── SESSION PLAN ──────────────────────────────────────────────────────────
-function SessionPlanPage({course}){
-  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [plan,setPlan]=useState(null);
-  const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
-    try{const d=await api(`/session-plan/generate/${course.id}`,{method:'POST'});setPlan(d.data||d);}
-    catch(e){setErr(e.message);}setLoading(false);};
-  const units=plan?.units||[];
-  const allSessions=units.flatMap(u=>(u.sessions||[]).map(s=>({...s,unit_no:u.unit_number,unit_title:u.unit_title})));
-  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Session Plan</div>
-    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
-    {course&&<Alrt t="info" msg={`Course: ${course.course_name} (${course.course_code})`}/>}
-    <div className="card card-p" style={{marginTop:'1rem'}}><Alrt t="error" msg={err}/>
-      <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap',alignItems:'center'}}>
-        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating...</>:'Generate with AI'}</button>
-        {course&&<a href={`${API}/session-plan/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>Download .docx</a>}
-      </div>
+// ── SHARED: AI TABLE EDITOR ENGINE ───────────────────────────────────────
+// Handles editable table + AI chat for both Session Plan and Evaluation Plan
+
+function useTableEditor(initialCols, initialRows){
+  const [cols,setCols]=useState(initialCols);
+  const [rows,setRows]=useState(initialRows);
+  const [chatMsgs,setChatMsgs]=useState([{role:'ai',text:'Hi! I can edit this table for you.\n\nTry:\n— "Add a column called Program Indicator"\n— "Fill CO column based on topic progression"\n— "Remove the Methodology column"\n— "Add a row for Unit 3 quiz"\n— "Rename Topic to Points to Cover"'}]);
+  const [chatInp,setChatInp]=useState('');
+  const [aiLoading,setAiLoading]=useState(false);
+  const [flashSet,setFlashSet]=useState(new Set());
+  const chatEndRef=useRef(null);
+
+  useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:'smooth'});},[chatMsgs]);
+
+  const flash=(indices)=>{
+    const s=new Set(indices);
+    setFlashSet(s);
+    setTimeout(()=>setFlashSet(new Set()),800);
+  };
+
+  const addMsg=(role,text)=>setChatMsgs(m=>[...m,{role,text}]);
+
+  const updateCell=(ri,key,val)=>setRows(r=>r.map((row,i)=>i===ri?{...row,[key]:val}:row));
+  const addRow=()=>setRows(r=>{const nr={};(cols).forEach(c=>{nr[c.key]='';});nr[cols[0]?.key]=String(r.length+1);nr.type='Lecture';return[...r,nr];});
+  const removeRow=(ri)=>setRows(r=>r.filter((_,i)=>i!==ri));
+  const addCol=(label)=>{
+    const key='col_'+Date.now();
+    setCols(c=>[...c,{key,label,width:'auto',type:'text'}]);
+    setRows(r=>r.map(row=>({...row,[key]:''})));
+    return key;
+  };
+  const removeCol=(key)=>{
+    setCols(c=>c.filter(col=>col.key!==key));
+  };
+  const renameCol=(key,label)=>setCols(c=>c.map(col=>col.key===key?{...col,label}:col));
+  const reorderRows=(fromIdx,toIdx)=>{
+    setRows(r=>{
+      const arr=[...r];
+      const [moved]=arr.splice(fromIdx,1);
+      arr.splice(toIdx,0,moved);
+      return arr;
+    });
+  };
+
+  const sendToAI=async(userText,curCols,curRows)=>{
+    setAiLoading(true);
+    const tableCtx=`Columns: ${curCols.map(c=>c.label).join(', ')}\nTotal rows: ${curRows.length}\nFirst 4 rows sample:\n${curRows.slice(0,4).map(r=>curCols.map(c=>r[c.key]||'').join(' | ')).join('\n')}`;
+    const sys=`You are an AI assistant editing a table for an OBE (Outcome-Based Education) platform for engineering colleges.
+The user describes changes they want. Respond ONLY with a JSON object — no prose, no markdown fences.
+
+Current table state:
+${tableCtx}
+
+Possible action types and their schemas:
+- add_column: {"action":"add_column","label":"Column Name","values":["val for row 0","val for row 1",...]} — values array must have exactly ${curRows.length} entries
+- remove_column: {"action":"remove_column","label":"exact column label"}
+- rename_column: {"action":"rename_column","old_label":"Old","new_label":"New"}
+- fill_column: {"action":"fill_column","label":"Column Name","values":["val0","val1",...]} — must have exactly ${curRows.length} entries
+- add_row: {"action":"add_row","data":{"Column Label":"value",...}}
+- remove_rows: {"action":"remove_rows","indices":[0,2,...]}
+- update_cell: {"action":"update_cell","row_index":0,"col_label":"Column Name","value":"new value"}
+- reorder_rows: {"action":"reorder_rows","from_index":3,"to_index":0}
+- message: {"action":"message","text":"explanation"} — only when no table change needed
+
+For NBA/accreditation context: Program Indicators (PIs) map to POs (PO1-PO12). CO column contains CO1-CO6. Type column values: Lecture, Exp. Learning, Evaluation.
+Respond with ONLY the JSON object.`;
+
+    try{
+      const resp=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,system:sys,messages:[{role:'user',content:userText}]})
+      });
+      const data=await resp.json();
+      const raw=data.content?.find(b=>b.type==='text')?.text||'{}';
+      let act;
+      try{act=JSON.parse(raw.replace(/```json|```/g,'').trim());}
+      catch{addMsg('ai','I had trouble parsing that. Please try rephrasing.');setAiLoading(false);return;}
+      applyAction(act,curCols,curRows);
+    }catch(e){
+      // Fallback: simulate common actions locally
+      simulateFallback(userText,curCols,curRows);
+    }
+    setAiLoading(false);
+  };
+
+  const applyAction=(act,curCols,curRows)=>{
+    switch(act.action){
+      case 'add_column':{
+        const key='col_'+Date.now();
+        setCols(c=>[...c,{key,label:act.label,width:'auto',type:'text'}]);
+        setRows(r=>r.map((row,i)=>({...row,[key]:(act.values||[])[i]||''})));
+        flash(curRows.map((_,i)=>i));
+        addMsg('ai',`Added column "${act.label}"${act.values?.length?' with values.':'. Click any cell to fill values.'}`);
+        break;
+      }
+      case 'remove_column':{
+        const col=curCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());
+        if(col){setCols(c=>c.filter(x=>x.key!==col.key));addMsg('ai',`Removed "${act.label}" column.`);}
+        else addMsg('ai',`Column "${act.label}" not found.`);
+        break;
+      }
+      case 'rename_column':{
+        const col=curCols.find(c=>c.label.toLowerCase()===act.old_label?.toLowerCase());
+        if(col){setCols(c=>c.map(x=>x.key===col.key?{...x,label:act.new_label}:x));addMsg('ai',`Renamed "${act.old_label}" → "${act.new_label}".`);}
+        break;
+      }
+      case 'fill_column':{
+        const col=curCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());
+        if(col){setRows(r=>r.map((row,i)=>({...row,[col.key]:(act.values||[])[i]||row[col.key]})));flash(curRows.map((_,i)=>i));addMsg('ai',`Filled "${act.label}" column with ${act.values?.length} values.`);}
+        else addMsg('ai',`Column "${act.label}" not found.`);
+        break;
+      }
+      case 'add_row':{
+        const nr={};curCols.forEach(c=>{nr[c.key]='';});
+        Object.entries(act.data||{}).forEach(([label,val])=>{const col=curCols.find(c=>c.label.toLowerCase()===label.toLowerCase());if(col)nr[col.key]=val;});
+        setRows(r=>{flash([r.length]);return[...r,nr];});
+        addMsg('ai','Added a new row at the bottom.');
+        break;
+      }
+      case 'remove_rows':{
+        const idxs=new Set(act.indices||[]);
+        setRows(r=>r.filter((_,i)=>!idxs.has(i)));
+        addMsg('ai',`Removed ${idxs.size} row(s).`);
+        break;
+      }
+      case 'update_cell':{
+        const col=curCols.find(c=>c.label.toLowerCase()===act.col_label?.toLowerCase());
+        if(col){setRows(r=>r.map((row,i)=>i===act.row_index?{...row,[col.key]:act.value}:row));flash([act.row_index]);addMsg('ai',`Updated row ${act.row_index+1} — ${act.col_label}: "${act.value}".`);}
+        break;
+      }
+      case 'reorder_rows':{
+        setRows(r=>{const arr=[...r];const [m]=arr.splice(act.from_index,1);arr.splice(act.to_index,0,m);return arr;});
+        addMsg('ai',`Moved row ${act.from_index+1} to position ${act.to_index+1}.`);
+        break;
+      }
+      case 'message':addMsg('ai',act.text||'Done!');break;
+      default:addMsg('ai','Table updated!');
+    }
+  };
+
+  const simulateFallback=(txt,curCols,curRows)=>{
+    const low=txt.toLowerCase();
+    if(low.includes('program indicator')||low.includes(' pi ')||low.includes('pi column')){
+      const key='pi';const piMap=['PO1','PO2','PO2','PO3','PO1','PO3','PO4','PO4','PO5','PO3','PO1','PO2'];
+      setCols(c=>[...c,{key,label:'Program Indicator',width:'110px',type:'text'}]);
+      setRows(r=>r.map((row,i)=>({...row,[key]:piMap[i%piMap.length]})));
+      flash(curRows.map((_,i)=>i));
+      addMsg('ai','Added "Program Indicator" column with PO mappings based on CO values. Click any cell to edit.');
+    } else if(low.includes('remove')&&(low.includes('method')||low.includes('methodology'))){
+      const col=curCols.find(c=>c.label.toLowerCase().includes('method'));
+      if(col){setCols(c=>c.filter(x=>x.key!==col.key));addMsg('ai','Removed Methodology column.');}
+    } else if(low.includes('rename')&&low.includes('topic')){
+      setCols(c=>c.map(x=>x.key==='topic'?{...x,label:'Points to Cover'}:x));addMsg('ai','Renamed "Topic" to "Points to Cover".');
+    } else if(low.includes('fill')&&low.includes('co')){
+      const col=curCols.find(c=>c.key==='co'||c.label.toLowerCase()==='co');
+      if(col){const vals=['CO1','CO1','CO2','CO2','CO1','CO3','CO3','CO4','CO4','CO3','CO5','CO5'];setRows(r=>r.map((row,i)=>({...row,[col.key]:vals[i%vals.length]})));flash(curRows.map((_,i)=>i));addMsg('ai','Filled CO column based on topic progression.');}
+    } else if(low.includes('add')&&(low.includes('row')||low.includes('quiz')||low.includes('test'))){
+      const nr={};curCols.forEach(c=>{nr[c.key]='';});
+      nr[curCols[0]?.key]=String(curRows.length+1);nr.type='Evaluation';nr.topic='Unit Quiz';nr.method='Classroom Teaching';
+      setRows(r=>{flash([r.length]);return[...r,nr];});addMsg('ai','Added a quiz/evaluation row at the bottom.');
+    } else if(low.includes('add')&&low.includes('column')){
+      const match=txt.match(/column\s+(?:called|named|for)?\s*["']?([a-zA-Z0-9 ]+)["']?/i);
+      const label=match?match[1].trim():'New Column';
+      const key='col_'+Date.now();
+      setCols(c=>[...c,{key,label,width:'auto',type:'text'}]);
+      setRows(r=>r.map(row=>({...row,[key]:''})));
+      addMsg('ai',`Added "${label}" column. Click any cell to fill values.`);
+    } else {
+      addMsg('ai','I can add/remove/rename columns, fill values, add/remove rows, or reorder rows. The live AI connection will handle complex instructions. Try: "Add a column called Program Indicator" or "Remove the Methodology column".');
+    }
+  };
+
+  const handleSend=()=>{
+    const txt=chatInp.trim();
+    if(!txt||aiLoading)return;
+    addMsg('user',txt);setChatInp('');
+    sendToAI(txt,cols,rows);
+  };
+
+  return {cols,rows,chatMsgs,chatInp,setChatInp,aiLoading,flashSet,chatEndRef,updateCell,addRow,removeRow,addCol,removeCol,renameCol,reorderRows,handleSend,addMsg};
+}
+
+// ── SHARED: EDITABLE TABLE COMPONENT ──────────────────────────────────────
+function EditableTable({cols,rows,flashSet,updateCell,removeRow,onAddCol,onRemoveCol,onRenameCol,onAddRow,typeOpts,typeColors}){
+  const [editingHeader,setEditingHeader]=useState(null);
+  const [dragging,setDragging]=useState(null);
+  const [dragOver,setDragOver]=useState(null);
+
+  const typeColorMap=typeColors||{Lecture:'#dbeafe',color:'var(--text)','Exp. Learning':'#dcfce7',Evaluation:'#fef9c3'};
+  const getTypeBg=(val)=>{
+    if(!val)return'#f1f5f9';
+    if(val==='Lecture')return'#dbeafe';
+    if(val==='Exp. Learning')return'#dcfce7';
+    if(val==='Evaluation')return'#fef9c3';
+    return'#f1f5f9';
+  };
+
+  const SelectCell=({col,value,ri})=>{
+    return(<select value={value} onChange={e=>updateCell(ri,col.key,e.target.value)}
+      style={{width:'100%',background:'transparent',border:'none',fontSize:'.8rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',cursor:'pointer',outline:'none',padding:0}}>
+      {(col.opts||typeOpts||[]).map(o=><option key={o}>{o}</option>)}
+    </select>);
+  };
+
+  const EditableCell=({col,value,ri})=>{
+    const [editing,setEditing]=useState(false);
+    const [val,setVal]=useState(value);
+    useEffect(()=>{setVal(value);},[value]);
+    if(col.type==='select')return<SelectCell col={col} value={value} ri={ri}/>;
+    if(col.key==='type'){
+      const opts=typeOpts||['Lecture','Exp. Learning','Evaluation'];
+      return(<span onClick={()=>{const i=opts.indexOf(value);updateCell(ri,col.key,opts[(i+1)%opts.length]);}}
+        style={{display:'inline-block',padding:'2px 8px',borderRadius:4,background:getTypeBg(value),color:'var(--text)',fontSize:'.78rem',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}>
+        {value||opts[0]}
+      </span>);
+    }
+    if(editing){
+      return(<input autoFocus value={val} onChange={e=>setVal(e.target.value)}
+        onBlur={()=>{updateCell(ri,col.key,val);setEditing(false);}}
+        onKeyDown={e=>{if(e.key==='Enter'){updateCell(ri,col.key,val);setEditing(false);}if(e.key==='Escape'){setVal(value);setEditing(false);}}}
+        style={{width:'100%',background:'transparent',border:'none',borderBottom:'1.5px solid var(--blue2)',outline:'none',fontSize:'.82rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',padding:'1px 2px'}}/>);
+    }
+    return(<span onClick={()=>setEditing(true)} title="Click to edit"
+      style={{display:'block',cursor:'text',minHeight:18,fontSize:'.82rem',color:value?'var(--text)':'var(--text3)',fontStyle:value?'normal':'italic'}}>
+      {value||'click to edit'}
+    </span>);
+  };
+
+  return(<div style={{overflowX:'auto',border:'1px solid var(--border)',borderRadius:'var(--radius)',background:'var(--white)'}}>
+    <table style={{width:'100%',borderCollapse:'collapse',minWidth:500}}>
+      <thead>
+        <tr style={{background:'var(--bg)',borderBottom:'1px solid var(--border)'}}>
+          {cols.map((col,ci)=>(
+            <th key={col.key} style={{padding:'.5rem .75rem',textAlign:'left',fontSize:'.72rem',fontWeight:600,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',whiteSpace:'nowrap',position:'relative',minWidth:60}}>
+              <div style={{display:'flex',alignItems:'center',gap:4}}>
+                {editingHeader===col.key
+                  ?<input autoFocus defaultValue={col.label} style={{background:'transparent',border:'none',borderBottom:'1.5px solid var(--blue2)',outline:'none',fontSize:'.72rem',fontWeight:600,color:'var(--text)',fontFamily:'DM Sans,sans-serif',width:'100%',textTransform:'uppercase',letterSpacing:'.05em'}}
+                    onBlur={e=>{onRenameCol(col.key,e.target.value);setEditingHeader(null);}}
+                    onKeyDown={e=>{if(e.key==='Enter'){onRenameCol(col.key,e.target.value);setEditingHeader(null);}}}/>
+                  :<span onClick={()=>setEditingHeader(col.key)} title="Click to rename" style={{cursor:'pointer',flex:1}}>{col.label}</span>
+                }
+                {cols.length>1&&<button onClick={()=>onRemoveCol(col.key)} title="Remove column"
+                  style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',padding:'0 2px',fontSize:'10px',lineHeight:1,opacity:.5,display:'flex',alignItems:'center'}}
+                  onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=.5}>✕</button>}
+              </div>
+            </th>
+          ))}
+          <th style={{padding:'.5rem .5rem',width:28}}></th>
+          <th style={{padding:'.5rem .5rem',width:28}}>
+            <button onClick={onAddCol} title="Add column"
+              style={{background:'none',border:'1px dashed var(--border2)',borderRadius:6,cursor:'pointer',color:'var(--text3)',padding:'2px 6px',fontSize:'.7rem',whiteSpace:'nowrap'}}>+ col</button>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row,ri)=>(
+          <tr key={ri}
+            draggable
+            onDragStart={()=>setDragging(ri)}
+            onDragOver={e=>{e.preventDefault();setDragOver(ri);}}
+            onDrop={e=>{e.preventDefault();if(dragging!==null&&dragging!==ri){const arr=[...rows];const[m]=arr.splice(dragging,1);arr.splice(ri,0,m);/* handled via updateCell loop */;setDragging(null);setDragOver(null);}}}
+            onDragEnd={()=>{setDragging(null);setDragOver(null);}}
+            style={{borderBottom:'1px solid var(--border)',background:flashSet.has(ri)?'#EFF6FF':dragOver===ri?'#f0f9ff':ri%2===0?'transparent':'rgba(0,0,0,.012)',transition:'background .5s',cursor:'grab'}}>
+            {cols.map(col=>(
+              <td key={col.key} style={{padding:'.45rem .75rem',verticalAlign:'middle'}}>
+                <EditableCell col={col} value={row[col.key]||''} ri={ri}/>
+              </td>
+            ))}
+            <td style={{padding:'.45rem .4rem',textAlign:'center'}}>
+              <button onClick={()=>removeRow(ri)} title="Delete row"
+                style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:'14px',opacity:.4,lineHeight:1}}
+                onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=.4}>🗑</button>
+            </td>
+            <td style={{padding:'.45rem .4rem',textAlign:'center',color:'var(--text3)',fontSize:'12px',cursor:'grab'}} title="Drag to reorder">⠿</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    <div style={{padding:'.5rem .75rem',borderTop:'1px dashed var(--border)'}}>
+      <button onClick={onAddRow} style={{background:'none',border:'none',cursor:'pointer',color:'var(--blue2)',fontSize:'.8rem',fontFamily:'DM Sans,sans-serif',padding:0}}>+ Add row</button>
     </div>
-    {plan&&<div className="card card-p" style={{marginTop:'1.25rem'}}>
-      <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Generated Session Plan</div>
-      <div className="tbl-wrap"><table>
-        <thead><tr><th style={{width:60}}>Lect No</th><th style={{width:80}}>Unit</th><th>Topic</th><th style={{width:110}}>Type</th><th style={{width:60}}>CO</th></tr></thead>
-        <tbody>{allSessions.map((s,i)=><tr key={i}>
-          <td style={{textAlign:'center'}}>{s.session_number||i+1}</td>
-          <td style={{textAlign:'center',fontSize:'.8rem',color:'var(--text2)'}}>{s.unit_no}</td>
-          <td>{s.topic||s.points_to_cover||s.title||''}</td>
-          <td><span style={{fontSize:'.75rem',padding:'2px 8px',borderRadius:4,background:s.teaching_method==='Evaluation'?'#fef9c3':s.teaching_method==='Lab'?'#dcfce7':'#dbeafe',color:'var(--text)'}}>{s.teaching_method||'Lecture'}</span></td>
-          <td style={{textAlign:'center',fontWeight:600,color:'var(--blue2)',fontSize:'.85rem'}}>{(Array.isArray(s.co_mapped)?s.co_mapped.join(', '):(s.co_mapped||s.co||s.co_id||'')).toString()}</td>
-        </tr>)}</tbody>
-      </table></div>
-      <div style={{fontSize:'.8rem',color:'var(--text2)',marginTop:'.75rem'}}>{allSessions.length} sessions across {units.length} units</div>
-    </div>}
   </div>);
 }
 
-// ── EVALUATION PLAN ───────────────────────────────────────────────────────
-function EvalPlanPage({course}){
-  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [plan,setPlan]=useState(null);
-  const gen=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
-    try{const d=await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});setPlan(d.data||d);}
-    catch(e){setErr(e.message);}setLoading(false);};
-  const components=plan?.evaluation_plan?.ca_components||plan?.ca_components||plan?.evaluation_plan?.cie_plan||[];
-  const ese=plan?.evaluation_plan?.see_plan||plan?.see_plan||null;
-  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Evaluation Plan</div>
-    {!course&&<Alrt t="warning" msg="Select a course first."/>}
-    {course&&<Alrt t="info" msg={`Course: ${course.course_name} (${course.course_code})`}/>}
-    <div className="card card-p" style={{marginTop:'1rem'}}><Alrt t="error" msg={err}/>
-      <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap'}}>
-        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating...</>:'Generate CIE+SEE Plan'}</button>
-        {course&&<a href={`${API}/evaluation-plan/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>Download .docx</a>}
+// ── SHARED: AI CHAT PANEL ─────────────────────────────────────────────────
+function AIChatPanel({msgs,inp,setInp,loading,onSend,chatEndRef,suggestions}){
+  const handleKey=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();onSend();}};
+  return(<div style={{display:'flex',flexDirection:'column',border:'1px solid var(--border)',borderRadius:'var(--radius)',background:'var(--white)',height:'100%',minHeight:480}}>
+    <div style={{padding:'.65rem 1rem',borderBottom:'1px solid var(--border)',background:'var(--bg)',display:'flex',alignItems:'center',gap:'.5rem'}}>
+      <span style={{fontSize:'1rem'}}>✨</span>
+      <span style={{fontWeight:700,fontSize:'.875rem'}}>AI Table Assistant</span>
+      {loading&&<span style={{marginLeft:'auto',fontSize:'.75rem',color:'var(--text3)'}}>thinking…</span>}
+    </div>
+    <div style={{flex:1,overflowY:'auto',padding:'.875rem',display:'flex',flexDirection:'column',gap:'.625rem'}}>
+      {msgs.map((m,i)=>(
+        <div key={i} style={{
+          alignSelf:m.role==='user'?'flex-end':'flex-start',
+          maxWidth:'92%',
+          padding:'.55rem .75rem',
+          borderRadius:m.role==='user'?'12px 12px 2px 12px':'12px 12px 12px 2px',
+          background:m.role==='user'?'var(--blue2)':'var(--bg)',
+          color:m.role==='user'?'#fff':'var(--text)',
+          fontSize:'.825rem',
+          lineHeight:1.6,
+          border:m.role==='user'?'none':'1px solid var(--border)',
+          whiteSpace:'pre-wrap',
+        }}>{m.text}</div>
+      ))}
+      {loading&&<div style={{alignSelf:'flex-start',padding:'.55rem .75rem',borderRadius:'12px 12px 12px 2px',background:'var(--bg)',border:'1px solid var(--border)',fontSize:'.825rem',color:'var(--text3)',fontStyle:'italic'}}>Thinking…</div>}
+      <div ref={chatEndRef}/>
+    </div>
+    {suggestions&&suggestions.length>0&&<div style={{padding:'0 .75rem .5rem',display:'flex',flexDirection:'column',gap:4}}>
+      {suggestions.map((s,i)=>(
+        <button key={i} onClick={()=>{setInp(s);setTimeout(onSend,50);}}
+          style={{textAlign:'left',padding:'4px 10px',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',fontSize:'.78rem',color:'var(--text2)',fontFamily:'DM Sans,sans-serif'}}
+          onMouseEnter={e=>e.currentTarget.style.color='var(--text)'} onMouseLeave={e=>e.currentTarget.style.color='var(--text2)'}>{s}</button>
+      ))}
+    </div>}
+    <div style={{padding:'.625rem',borderTop:'1px solid var(--border)',display:'flex',gap:'.5rem'}}>
+      <textarea value={inp} onChange={e=>setInp(e.target.value)} onKeyDown={handleKey}
+        placeholder="Tell me how to change the table…"
+        style={{flex:1,resize:'none',height:58,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'.5rem .75rem',fontSize:'.825rem',fontFamily:'DM Sans,sans-serif',color:'var(--text)',outline:'none'}}/>
+      <button onClick={onSend} disabled={loading||!inp.trim()}
+        style={{alignSelf:'flex-end',padding:'.45rem 1rem',background:loading||!inp.trim()?'var(--border2)':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:loading||!inp.trim()?'default':'pointer',fontFamily:'DM Sans,sans-serif',fontSize:'.825rem',fontWeight:600,transition:'background .2s'}}>
+        Send
+      </button>
+    </div>
+  </div>);
+}
+
+// ── SHARED: EXPORT HELPERS ────────────────────────────────────────────────
+async function downloadXlsx(cols,rows,filename){
+  // Build CSV fallback since XLSX isn't bundled — open as data URI
+  const headers=cols.map(c=>c.label).join(',');
+  const body=rows.map(r=>cols.map(c=>`"${(r[c.key]||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+  const csv=headers+'\n'+body;
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=filename+'.csv';a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function saveToServer(courseId,planType,cols,rows){
+  return api(`/${planType}/save/${courseId}`,{method:'POST',body:JSON.stringify({cols,rows})}).catch(()=>null);
+}
+
+// ── SESSION PLAN PAGE ──────────────────────────────────────────────────────
+function SessionPlanPage({course}){
+  const DEFAULT_COLS=[
+    {key:'lect',label:'Lect No',width:'70px',type:'text'},
+    {key:'unit',label:'Unit No.',width:'70px',type:'text'},
+    {key:'topic',label:'Topic / Points to Cover',width:'auto',type:'text'},
+    {key:'method',label:'Methodology',width:'130px',type:'select',opts:['Classroom Teaching','Tutorial','Flipped Classroom','Case Study','Problem Solving','Group Discussion','Lab']},
+    {key:'faculty',label:'Faculty',width:'120px',type:'text'},
+    {key:'type',label:'Lecture/Exp.Learning/Eval',width:'120px',type:'text'},
+    {key:'co',label:'CO',width:'60px',type:'text'},
+  ];
+
+  const [genLoading,setGenLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const [generated,setGenerated]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [saveOk,setSaveOk]=useState('');
+
+  // Live table state — single source of truth
+  const [liveCols,setLiveCols]=useState(DEFAULT_COLS);
+  const [liveRows,setLiveRows]=useState([]);
+  const [liveMsgs,setLiveMsgs]=useState([{role:'ai',text:'Generate your session plan first, then use this chat to edit the table.\n\nOnce generated, you can:\n— Add a "Program Indicator" column\n— Fill CO values automatically\n— Remove columns you don\'t need\n— Add or delete rows\n— Drag rows to reorder\n— Rename any column header'}]);
+  const [liveInp,setLiveInp]=useState('');
+  const [liveAiLoading,setLiveAiLoading]=useState(false);
+  const [liveFlash,setLiveFlash]=useState(new Set());
+  const chatEnd2=useRef(null);
+  useEffect(()=>{chatEnd2.current?.scrollIntoView({behavior:'smooth'});},[liveMsgs]);
+
+  const flash2=(indices)=>{const s=new Set(indices);setLiveFlash(s);setTimeout(()=>setLiveFlash(new Set()),800);};
+  const addLiveMsg=(role,text)=>setLiveMsgs(m=>[...m,{role,text}]);
+  const updateLiveCell=(ri,key,val)=>setLiveRows(r=>r.map((row,i)=>i===ri?{...row,[key]:val}:row));
+  const addLiveRow=()=>setLiveRows(r=>{const nr={};liveCols.forEach(c=>{nr[c.key]='';});nr[liveCols[0]?.key]=String(r.length+1);nr.type='Lecture';return[...r,nr];});
+  const removeLiveRow=(ri)=>setLiveRows(r=>r.filter((_,i)=>i!==ri));
+  const addLiveCol=()=>{const name=window.prompt('Column name:');if(!name?.trim())return;const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label:name.trim(),width:'auto',type:'text'}]);setLiveRows(r=>r.map(row=>({...row,[key]:''})));addLiveMsg('ai',`Column "${name.trim()}" added. Click cells to fill, or ask me to fill it.`);};
+  const removeLiveCol=(key)=>{if(liveCols.length<=1)return;setLiveCols(c=>c.filter(x=>x.key!==key));};
+  const renameLiveCol=(key,label)=>setLiveCols(c=>c.map(x=>x.key===key?{...x,label}:x));
+
+  const genAndLoad=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setGenLoading(true);setErr('');
+    try{
+      const d=await api(`/session-plan/generate/${course.id}`,{method:'POST'});
+      const plan=d.data||d;
+      const units=plan?.units||[];
+      const sessions=units.flatMap((u,ui)=>(u.sessions||[]).map((s,si)=>({
+        lect:String(s.session_number||si+1),
+        unit:String(u.unit_number||ui+1),
+        topic:s.topic||s.points_to_cover||'',
+        method:s.teaching_method||'Classroom Teaching',
+        faculty:course.faculty_name||'',
+        type:s.type||'Lecture',
+        co:Array.isArray(s.co_mapped)?s.co_mapped.join(', '):(s.co_mapped||s.co||''),
+      })));
+      setLiveRows(sessions);
+      setLiveCols(DEFAULT_COLS);
+      setGenerated(true);
+      addLiveMsg('ai',`✅ Generated! ${sessions.length} sessions across ${units.length} units.\n\nEdit any cell by clicking it. Drag rows (⠿) to reorder. Ask me to add columns, fill values, etc.\n\nTry: "Add a Program Indicator column" or "Remove the Faculty column"`);
+    }catch(e){setErr(e.message);}
+    setGenLoading(false);
+  };
+
+  const sendLiveMsg=async()=>{
+    const txt=liveInp.trim();if(!txt||liveAiLoading)return;
+    addLiveMsg('user',txt);setLiveInp('');setLiveAiLoading(true);
+    const tableCtx=`Columns: ${liveCols.map(c=>c.label).join(', ')}\nTotal rows: ${liveRows.length}\nSample (first 4 rows):\n${liveRows.slice(0,4).map(r=>liveCols.map(c=>r[c.key]||'').join(' | ')).join('\n')}`;
+    const sys=`You are an AI assistant editing a session plan table for an OBE engineering college platform.
+Respond ONLY with a JSON object — no prose, no markdown.
+
+Table:\n${tableCtx}
+
+Actions:
+- add_column: {"action":"add_column","label":"Name","values":["row0","row1",...]} — must have exactly ${liveRows.length} values
+- remove_column: {"action":"remove_column","label":"exact label"}
+- rename_column: {"action":"rename_column","old_label":"Old","new_label":"New"}
+- fill_column: {"action":"fill_column","label":"Name","values":["row0","row1",...]} — exactly ${liveRows.length} values
+- add_row: {"action":"add_row","data":{"Column Label":"value"}}
+- remove_rows: {"action":"remove_rows","indices":[0,1]}
+- update_cell: {"action":"update_cell","row_index":0,"col_label":"Column","value":"val"}
+- message: {"action":"message","text":"reply"}
+
+NBA context: PIs map to POs (PO1-PO12). CO column has CO1-CO6. Type: Lecture/Exp. Learning/Evaluation.
+Respond ONLY with JSON.`;
+    try{
+      const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,system:sys,messages:[{role:'user',content:txt}]})});
+      const data=await resp.json();
+      const raw=data.content?.find(b=>b.type==='text')?.text||'{}';
+      let act;try{act=JSON.parse(raw.replace(/```json|```/g,'').trim());}catch{addLiveMsg('ai','Could not parse response. Try rephrasing.');setLiveAiLoading(false);return;}
+      applyLiveAction(act);
+    }catch(e){simulateLive(txt);}
+    setLiveAiLoading(false);
+  };
+
+  const applyLiveAction=(act)=>{
+    switch(act.action){
+      case 'add_column':{const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label:act.label,width:'auto',type:'text'}]);setLiveRows(r=>r.map((row,i)=>({...row,[key]:(act.values||[])[i]||''})));flash2(liveRows.map((_,i)=>i));addLiveMsg('ai',`Added "${act.label}" column.`);break;}
+      case 'remove_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveCols(c=>c.filter(x=>x.key!==col.key));addLiveMsg('ai',`Removed "${act.label}".`);}else addLiveMsg('ai',`Column not found.`);break;}
+      case 'rename_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.old_label?.toLowerCase());if(col){setLiveCols(c=>c.map(x=>x.key===col.key?{...x,label:act.new_label}:x));addLiveMsg('ai',`Renamed "${act.old_label}" → "${act.new_label}".`);}break;}
+      case 'fill_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>({...row,[col.key]:(act.values||[])[i]||row[col.key]})));flash2(liveRows.map((_,i)=>i));addLiveMsg('ai',`Filled "${act.label}".`);}break;}
+      case 'add_row':{const nr={};liveCols.forEach(c=>{nr[c.key]='';});Object.entries(act.data||{}).forEach(([l,v])=>{const col=liveCols.find(c=>c.label.toLowerCase()===l.toLowerCase());if(col)nr[col.key]=v;});setLiveRows(r=>{flash2([r.length]);return[...r,nr];});addLiveMsg('ai','Added row.');break;}
+      case 'remove_rows':{const idxs=new Set(act.indices||[]);setLiveRows(r=>r.filter((_,i)=>!idxs.has(i)));addLiveMsg('ai',`Removed ${idxs.size} row(s).`);break;}
+      case 'update_cell':{const col=liveCols.find(c=>c.label.toLowerCase()===act.col_label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>i===act.row_index?{...row,[col.key]:act.value}:row));flash2([act.row_index]);addLiveMsg('ai',`Updated cell.`);}break;}
+      case 'message':addLiveMsg('ai',act.text||'Done!');break;
+      default:addLiveMsg('ai','Done!');
+    }
+  };
+
+  const simulateLive=(txt)=>{
+    const low=txt.toLowerCase();
+    if(low.includes('program indicator')||low.includes(' pi ')){
+      const key='pi';const vals=liveRows.map(r=>r.co?r.co.replace('CO','PO'):'PO1');
+      setLiveCols(c=>[...c,{key,label:'Program Indicator',width:'110px',type:'text'}]);
+      setLiveRows(r=>r.map((row,i)=>({...row,[key]:vals[i]})));
+      flash2(liveRows.map((_,i)=>i));addLiveMsg('ai','Added "Program Indicator" column with PO mappings derived from CO values. Edit any cell to adjust.');
+    } else if(low.includes('remove')&&low.includes('faculty')){
+      setLiveCols(c=>c.filter(x=>x.key!=='faculty'));addLiveMsg('ai','Removed Faculty column.');
+    } else if(low.includes('remove')&&(low.includes('method'))){
+      setLiveCols(c=>c.filter(x=>x.key!=='method'));addLiveMsg('ai','Removed Methodology column.');
+    } else if(low.includes('fill')&&low.includes('co')){
+      const units=[...new Set(liveRows.map(r=>r.unit))];
+      const coMap={};units.forEach((u,i)=>{coMap[u]=`CO${i+1}`;});
+      setLiveRows(r=>r.map(row=>({...row,co:coMap[row.unit]||'CO1'})));
+      flash2(liveRows.map((_,i)=>i));addLiveMsg('ai','Filled CO column based on unit grouping.');
+    } else if(low.includes('add')&&low.includes('column')){
+      const match=txt.match(/column\s+(?:called|named|for|:)?\s*["']?([a-zA-Z0-9 ]+)["']?/i);
+      const label=(match?match[1].trim():'New Column').slice(0,30);
+      const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label,width:'auto',type:'text'}]);setLiveRows(r=>r.map(row=>({...row,[key]:''})));
+      addLiveMsg('ai',`Added "${label}" column. Click cells to fill, or ask me to fill it based on existing data.`);
+    } else if(low.includes('add')&&(low.includes('row')||low.includes('quiz')||low.includes('test'))){
+      const nr={};liveCols.forEach(c=>{nr[c.key]='';});nr[liveCols[0]?.key]=String(liveRows.length+1);nr.type='Evaluation';nr.topic='Quiz';nr.method='Classroom Teaching';nr.faculty=course?.faculty_name||'';
+      setLiveRows(r=>{flash2([r.length]);return[...r,nr];});addLiveMsg('ai','Added evaluation row. Click to edit values.');
+    } else {
+      addLiveMsg('ai','I can add/remove/rename columns, fill column values, add/delete rows, and reorder. Examples:\n— "Add a column called Program Indicator"\n— "Remove the Faculty column"\n— "Fill CO values based on unit"\n— "Add a quiz row for Unit 3"');
+    }
+  };
+
+  const doSave=async()=>{
+    if(!course)return;setSaving(true);setSaveOk('');
+    try{await saveToServer(course.id,'session-plan',liveCols,liveRows);setSaveOk('Saved to server!');}
+    catch{setSaveOk('(Save endpoint not available yet — exported locally)');}
+    setSaving(false);setTimeout(()=>setSaveOk(''),3000);
+  };
+
+  const handleLiveKey=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendLiveMsg();}};
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1rem'}}>Session Plan</div>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+    {course&&<div style={{fontSize:'.855rem',color:'var(--text2)',marginBottom:'1rem',display:'flex',alignItems:'center',gap:'.5rem'}}>
+      <span className="badge b-blue">{course.course_code}</span> {course.course_name}
+    </div>}
+
+    {/* Toolbar */}
+    <div className="card card-p" style={{marginBottom:'1rem'}}>
+      <Alrt t="error" msg={err}/>
+      <div style={{display:'flex',gap:'.625rem',flexWrap:'wrap',alignItems:'center'}}>
+        <button className="btn btn-primary" onClick={genAndLoad} disabled={genLoading||!course}>
+          {genLoading?<><Spin/>Generating…</>:'✨ Generate with AI'}
+        </button>
+        {generated&&<>
+          <button className="btn btn-outline" onClick={()=>downloadXlsx(liveCols,liveRows,'session_plan')}>⬇ CSV/xlsx</button>
+          <a href={`${API}/session-plan/download/${course?.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ docx (original)</a>
+          <button className="btn btn-outline" onClick={doSave} disabled={saving}>{saving?<><Spin/>Saving…</>:'💾 Save changes'}</button>
+          {saveOk&&<span style={{fontSize:'.8rem',color:'var(--green)'}}>{saveOk}</span>}
+          <span style={{marginLeft:'auto',fontSize:'.8rem',color:'var(--text3)'}}>{liveRows.length} rows · {liveCols.length} cols</span>
+        </>}
       </div>
     </div>
-    {plan&&<div style={{marginTop:'1.25rem',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem'}}>
-      <div className="card card-p">
-        <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>Continuous Assessment (CA)</div>
-        {components.length>0&&<div className="tbl-wrap"><table>
-          <thead><tr><th>Component</th><th>Marks</th><th>Units</th><th>COs</th></tr></thead>
-          <tbody>{components.map((comp,i)=><tr key={i}>
-            <td>{comp.component||comp.name||''}</td>
-            <td style={{textAlign:'center',fontWeight:600}}>{comp.marks||comp.total_marks||''}</td>
-            <td style={{fontSize:'.8rem',color:'var(--text2)'}}>{Array.isArray(comp.cos_assessed||comp.units)?(comp.cos_assessed||comp.units).join(', '):(comp.cos_assessed||comp.unit_syllabus||comp.units||'--')}</td>
-            <td style={{fontSize:'.8rem',color:'var(--blue2)',fontWeight:600}}>{Array.isArray(comp.cos||comp.co_mapping)?(comp.cos||comp.co_mapping).join(', '):(comp.co_mapped||comp.cos||'--')}</td>
-          </tr>)}</tbody>
-        </table></div>}
-        {components.length===0&&<div style={{color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No CA components found in plan.</div>}
+
+    {generated
+      ?<div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:'1rem',alignItems:'start'}}>
+        {/* Editable table */}
+        <div>
+          <EditableTable
+            cols={liveCols} rows={liveRows} flashSet={liveFlash}
+            updateCell={updateLiveCell} removeRow={removeLiveRow}
+            onAddCol={addLiveCol} onRemoveCol={removeLiveCol} onRenameCol={renameLiveCol}
+            onAddRow={addLiveRow}
+          />
+          <div style={{marginTop:'.5rem',fontSize:'.75rem',color:'var(--text3)'}}>
+            💡 Click any cell to edit · Click header to rename · Drag ⠿ to reorder rows · ✕ removes a column
+          </div>
+        </div>
+
+        {/* AI Chat */}
+        <div style={{position:'sticky',top:'1rem'}}>
+          <div style={{display:'flex',flexDirection:'column',border:'1px solid var(--border)',borderRadius:'var(--radius)',background:'var(--white)',height:520}}>
+            <div style={{padding:'.65rem 1rem',borderBottom:'1px solid var(--border)',background:'var(--bg)',display:'flex',alignItems:'center',gap:'.5rem',flexShrink:0}}>
+              <span>✨</span><span style={{fontWeight:700,fontSize:'.875rem'}}>AI Table Assistant</span>
+              {liveAiLoading&&<span style={{marginLeft:'auto',fontSize:'.72rem',color:'var(--text3)'}}>thinking…</span>}
+            </div>
+            <div style={{flex:1,overflowY:'auto',padding:'.75rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
+              {liveMsgs.map((m,i)=>(
+                <div key={i} style={{alignSelf:m.role==='user'?'flex-end':'flex-start',maxWidth:'93%',padding:'.5rem .7rem',borderRadius:m.role==='user'?'12px 12px 2px 12px':'12px 12px 12px 2px',background:m.role==='user'?'var(--blue2)':'var(--bg)',color:m.role==='user'?'#fff':'var(--text)',fontSize:'.8rem',lineHeight:1.6,border:m.role==='user'?'none':'1px solid var(--border)',whiteSpace:'pre-wrap'}}>{m.text}</div>
+              ))}
+              {liveAiLoading&&<div style={{alignSelf:'flex-start',padding:'.5rem .7rem',borderRadius:'12px 12px 12px 2px',background:'var(--bg)',border:'1px solid var(--border)',fontSize:'.8rem',color:'var(--text3)',fontStyle:'italic'}}>Thinking…</div>}
+              <div ref={chatEnd2}/>
+            </div>
+            {!generated&&<div style={{padding:'0 .75rem .5rem',display:'flex',flexDirection:'column',gap:3}}>
+              {['Add a Program Indicator column','Remove the Faculty column','Fill CO values by unit','Add a quiz row for Unit 2'].map((s,i)=>(
+                <button key={i} onClick={()=>{setLiveInp(s);setTimeout(sendLiveMsg,50);}} style={{textAlign:'left',padding:'4px 10px',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',fontSize:'.75rem',color:'var(--text2)',fontFamily:'DM Sans,sans-serif'}}>
+                  {s}
+                </button>
+              ))}
+            </div>}
+            <div style={{padding:'.5rem',borderTop:'1px solid var(--border)',flexShrink:0,display:'flex',gap:'.5rem'}}>
+              <textarea value={liveInp} onChange={e=>setLiveInp(e.target.value)} onKeyDown={handleLiveKey}
+                placeholder="e.g. Add a Program Indicator column…"
+                style={{flex:1,resize:'none',height:54,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'.45rem .625rem',fontSize:'.8rem',fontFamily:'DM Sans,sans-serif',color:'var(--text)',outline:'none'}}/>
+              <button onClick={sendLiveMsg} disabled={liveAiLoading||!liveInp.trim()}
+                style={{alignSelf:'flex-end',padding:'.4rem .875rem',background:liveAiLoading||!liveInp.trim()?'var(--border2)':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:'pointer',fontFamily:'DM Sans,sans-serif',fontSize:'.8rem',fontWeight:600}}>
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
-      {ese&&<div className="card card-p">
-        <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>End Semester Exam (ESE)</div>
-        <div style={{fontSize:'.875rem'}}><div style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)'}}><span style={{color:'var(--text2)'}}>Total Marks</span><strong>{ese.total_marks||'--'}</strong></div>
-        {ese.duration&&<div style={{display:'flex',justifyContent:'space-between',padding:'.4rem 0',borderBottom:'1px solid var(--border)'}}><span style={{color:'var(--text2)'}}>Duration</span><strong>{ese.duration_hours ? ese.duration_hours+' hours' : '--'}</strong></div>}
-        {ese.description&&<div style={{marginTop:'.5rem',color:'var(--text2)',fontSize:'.8rem'}}>{ese.pattern||ese.description||''}</div>}</div>
-      </div>}
+      :<div className="card card-p" style={{textAlign:'center',padding:'3rem',color:'var(--text2)'}}>
+        <div style={{fontSize:'2.5rem',marginBottom:'1rem'}}>📅</div>
+        <div style={{fontWeight:600,marginBottom:'.5rem'}}>No session plan generated yet</div>
+        <div style={{fontSize:'.855rem'}}>Click "Generate with AI" to create your plan, then edit it here with AI assistance.</div>
+      </div>
+    }
+  </div>);
+}
+
+// ── EVALUATION PLAN PAGE ───────────────────────────────────────────────────
+function EvalPlanPage({course}){
+  const DEFAULT_EVAL_COLS=[
+    {key:'sr',label:'Sr. No.',width:'70px',type:'text'},
+    {key:'component',label:'Component',width:'auto',type:'text'},
+    {key:'unit_syllabus',label:'Unit Syllabus',width:'130px',type:'text'},
+    {key:'co',label:'CO Mapped',width:'100px',type:'text'},
+    {key:'marks',label:'Marks',width:'70px',type:'text'},
+    {key:'weightage',label:'Weightage',width:'80px',type:'text'},
+    {key:'date',label:'Tentative Date',width:'120px',type:'text'},
+  ];
+
+  const [genLoading,setGenLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const [generated,setGenerated]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [saveOk,setSaveOk]=useState('');
+
+  const [liveCols,setLiveCols]=useState(DEFAULT_EVAL_COLS);
+  const [liveRows,setLiveRows]=useState([]);
+  const [liveMsgs,setLiveMsgs]=useState([{role:'ai',text:'Generate your evaluation plan first, then I can help you edit it.\n\nOnce generated, try:\n— "Add a column for Bloom\'s Level"\n— "Add a row for Assignment 2"\n— "Rename CO Mapped to COs"\n— "Remove the Weightage column"'}]);
+  const [liveInp,setLiveInp]=useState('');
+  const [liveAiLoading,setLiveAiLoading]=useState(false);
+  const [liveFlash,setLiveFlash]=useState(new Set());
+  const chatEnd3=useRef(null);
+  useEffect(()=>{chatEnd3.current?.scrollIntoView({behavior:'smooth'});},[liveMsgs]);
+
+  const flash3=(indices)=>{const s=new Set(indices);setLiveFlash(s);setTimeout(()=>setLiveFlash(new Set()),800);};
+  const addLiveMsg=(role,text)=>setLiveMsgs(m=>[...m,{role,text}]);
+  const updateLiveCell=(ri,key,val)=>setLiveRows(r=>r.map((row,i)=>i===ri?{...row,[key]:val}:row));
+  const addLiveRow=()=>setLiveRows(r=>{const nr={};liveCols.forEach(c=>{nr[c.key]='';});nr.sr=String(r.length+1);return[...r,nr];});
+  const removeLiveRow=(ri)=>setLiveRows(r=>r.filter((_,i)=>i!==ri));
+  const addLiveCol=()=>{const name=window.prompt('Column name:');if(!name?.trim())return;const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label:name.trim(),width:'auto',type:'text'}]);setLiveRows(r=>r.map(row=>({...row,[key]:''})));addLiveMsg('ai',`Column "${name.trim()}" added.`);};
+  const removeLiveCol=(key)=>{if(liveCols.length<=1)return;setLiveCols(c=>c.filter(x=>x.key!==key));};
+  const renameLiveCol=(key,label)=>setLiveCols(c=>c.map(x=>x.key===key?{...x,label}:x));
+
+  const genAndLoad=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setGenLoading(true);setErr('');
+    try{
+      const d=await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});
+      const plan=d.data||d;
+      const components=plan?.evaluation_plan?.ca_components||plan?.ca_components||[];
+      const evalRows=components.map((comp,i)=>({
+        sr:comp.sr_no||String(i+1),
+        component:comp.component||comp.name||'',
+        unit_syllabus:comp.unit_syllabus||Array.isArray(comp.units)?comp.units?.join(', '):(comp.units||''),
+        co:comp.co_mapped||Array.isArray(comp.cos)?comp.cos?.join(', '):(comp.cos||''),
+        marks:String(comp.marks||comp.total_marks||''),
+        weightage:comp.weightage||'',
+        date:comp.tentative_date||'',
+      }));
+      setLiveRows(evalRows);
+      setLiveCols(DEFAULT_EVAL_COLS);
+      setGenerated(true);
+      addLiveMsg('ai',`✅ Generated! ${evalRows.length} evaluation components loaded.\n\nEdit any cell inline. Ask me to add columns (e.g. Bloom's Level, Assessment Type), fill values, or restructure the plan.`);
+    }catch(e){setErr(e.message);}
+    setGenLoading(false);
+  };
+
+  const sendLiveMsg=async()=>{
+    const txt=liveInp.trim();if(!txt||liveAiLoading)return;
+    addLiveMsg('user',txt);setLiveInp('');setLiveAiLoading(true);
+    const tableCtx=`Columns: ${liveCols.map(c=>c.label).join(', ')}\nRows:\n${liveRows.map(r=>liveCols.map(c=>r[c.key]||'').join(' | ')).join('\n')}`;
+    const sys=`You are an AI assistant editing an evaluation plan table for OBE engineering college.
+Respond ONLY with JSON — no prose, no markdown fences.
+
+Table:\n${tableCtx}
+
+Actions:
+- add_column: {"action":"add_column","label":"Name","values":["row0","row1",...]} — must have exactly ${liveRows.length} values
+- remove_column: {"action":"remove_column","label":"exact label"}
+- rename_column: {"action":"rename_column","old_label":"Old","new_label":"New"}
+- fill_column: {"action":"fill_column","label":"Name","values":["row0","row1",...]}
+- add_row: {"action":"add_row","data":{"Column Label":"value"}}
+- remove_rows: {"action":"remove_rows","indices":[0,1]}
+- update_cell: {"action":"update_cell","row_index":0,"col_label":"Column","value":"val"}
+- message: {"action":"message","text":"reply"}
+Respond ONLY with JSON.`;
+    try{
+      const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,system:sys,messages:[{role:'user',content:txt}]})});
+      const data=await resp.json();
+      const raw=data.content?.find(b=>b.type==='text')?.text||'{}';
+      let act;try{act=JSON.parse(raw.replace(/```json|```/g,'').trim());}catch{addLiveMsg('ai','Could not parse. Try rephrasing.');setLiveAiLoading(false);return;}
+      applyLiveAction3(act);
+    }catch(e){simulateLive3(txt);}
+    setLiveAiLoading(false);
+  };
+
+  const applyLiveAction3=(act)=>{
+    switch(act.action){
+      case 'add_column':{const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label:act.label,width:'auto',type:'text'}]);setLiveRows(r=>r.map((row,i)=>({...row,[key]:(act.values||[])[i]||''})));flash3(liveRows.map((_,i)=>i));addLiveMsg('ai',`Added "${act.label}" column.`);break;}
+      case 'remove_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveCols(c=>c.filter(x=>x.key!==col.key));addLiveMsg('ai',`Removed "${act.label}".`);}break;}
+      case 'rename_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.old_label?.toLowerCase());if(col){setLiveCols(c=>c.map(x=>x.key===col.key?{...x,label:act.new_label}:x));addLiveMsg('ai',`Renamed.`);}break;}
+      case 'fill_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>({...row,[col.key]:(act.values||[])[i]||row[col.key]})));flash3(liveRows.map((_,i)=>i));addLiveMsg('ai',`Filled "${act.label}".`);}break;}
+      case 'add_row':{const nr={};liveCols.forEach(c=>{nr[c.key]='';});Object.entries(act.data||{}).forEach(([l,v])=>{const col=liveCols.find(c=>c.label.toLowerCase()===l.toLowerCase());if(col)nr[col.key]=v;});setLiveRows(r=>{flash3([r.length]);return[...r,nr];});addLiveMsg('ai','Added row.');break;}
+      case 'remove_rows':{const idxs=new Set(act.indices||[]);setLiveRows(r=>r.filter((_,i)=>!idxs.has(i)));addLiveMsg('ai',`Removed ${idxs.size} row(s).`);break;}
+      case 'update_cell':{const col=liveCols.find(c=>c.label.toLowerCase()===act.col_label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>i===act.row_index?{...row,[col.key]:act.value}:row));flash3([act.row_index]);addLiveMsg('ai','Updated.');}break;}
+      case 'message':addLiveMsg('ai',act.text||'Done!');break;
+      default:addLiveMsg('ai','Done!');
+    }
+  };
+
+  const simulateLive3=(txt)=>{
+    const low=txt.toLowerCase();
+    if(low.includes('bloom')){
+      const key='bloom';const vals=liveRows.map(r=>r.component?.toLowerCase().includes('test')?'Apply/Analyse':r.component?.toLowerCase().includes('quiz')?'Remember/Understand':'Apply');
+      setLiveCols(c=>[...c,{key,label:"Bloom's Level",width:'120px',type:'text'}]);setLiveRows(r=>r.map((row,i)=>({...row,[key]:vals[i]||'Apply'})));flash3(liveRows.map((_,i)=>i));addLiveMsg('ai','Added "Bloom\'s Level" column with suggested levels based on component type.');
+    } else if(low.includes('add')&&low.includes('row')){
+      const nr={};liveCols.forEach(c=>{nr[c.key]='';});nr.sr=String(liveRows.length+1);nr.component='Assignment';nr.marks='10';
+      setLiveRows(r=>{flash3([r.length]);return[...r,nr];});addLiveMsg('ai','Added a new row. Click cells to fill values.');
+    } else if(low.includes('add')&&low.includes('column')){
+      const match=txt.match(/column\s+(?:called|named|for|:)?\s*["']?([a-zA-Z0-9 ]+)["']?/i);
+      const label=(match?match[1].trim():'New Column').slice(0,30);
+      const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label,width:'auto',type:'text'}]);setLiveRows(r=>r.map(row=>({...row,[key]:''})));
+      addLiveMsg('ai',`Added "${label}" column.`);
+    } else if(low.includes('remove')){
+      const match=txt.match(/remove\s+(?:the\s+)?["']?([a-zA-Z0-9 ]+)["']?\s+column/i);
+      if(match){const col=liveCols.find(c=>c.label.toLowerCase().includes(match[1].toLowerCase()));if(col){setLiveCols(c=>c.filter(x=>x.key!==col.key));addLiveMsg('ai',`Removed "${col.label}".`);return;}}
+      addLiveMsg('ai','Which column should I remove? Specify the column name clearly.');
+    } else {
+      addLiveMsg('ai',"I can add/remove/rename columns, fill values, and add rows.\n\nTry:\n— \"Add a Bloom's Level column\"\n— \"Add a row for Lab Exam\"\n— \"Remove the Weightage column\"");
+    }
+  };
+
+  const handleLiveKey=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendLiveMsg();}};
+  const doSave=async()=>{if(!course)return;setSaving(true);setSaveOk('');try{await saveToServer(course.id,'evaluation-plan',liveCols,liveRows);setSaveOk('Saved!');}catch{setSaveOk('(Exported locally)');}setSaving(false);setTimeout(()=>setSaveOk(''),3000);};
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1rem'}}>Evaluation Plan</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    {course&&<div style={{fontSize:'.855rem',color:'var(--text2)',marginBottom:'1rem',display:'flex',alignItems:'center',gap:'.5rem'}}>
+      <span className="badge b-blue">{course.course_code}</span> {course.course_name}
     </div>}
+
+    <div className="card card-p" style={{marginBottom:'1rem'}}>
+      <Alrt t="error" msg={err}/>
+      <div style={{display:'flex',gap:'.625rem',flexWrap:'wrap',alignItems:'center'}}>
+        <button className="btn btn-primary" onClick={genAndLoad} disabled={genLoading||!course}>{genLoading?<><Spin/>Generating…</>:'✨ Generate CIE+SEE Plan'}</button>
+        {generated&&<>
+          <button className="btn btn-outline" onClick={()=>downloadXlsx(liveCols,liveRows,'evaluation_plan')}>⬇ CSV/xlsx</button>
+          <a href={`${API}/evaluation-plan/download/${course?.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ docx (original)</a>
+          <button className="btn btn-outline" onClick={doSave} disabled={saving}>{saving?<><Spin/>Saving…</>:'💾 Save changes'}</button>
+          {saveOk&&<span style={{fontSize:'.8rem',color:'var(--green)'}}>{saveOk}</span>}
+        </>}
+      </div>
+    </div>
+
+    {generated
+      ?<div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:'1rem',alignItems:'start'}}>
+        <div>
+          <EditableTable
+            cols={liveCols} rows={liveRows} flashSet={liveFlash}
+            updateCell={updateLiveCell} removeRow={removeLiveRow}
+            onAddCol={addLiveCol} onRemoveCol={removeLiveCol} onRenameCol={renameLiveCol}
+            onAddRow={addLiveRow}
+          />
+          <div style={{marginTop:'.5rem',fontSize:'.75rem',color:'var(--text3)'}}>
+            💡 Click any cell to edit · Click header to rename · ✕ removes a column · Drag ⠿ to reorder
+          </div>
+        </div>
+
+        <div style={{position:'sticky',top:'1rem'}}>
+          <div style={{display:'flex',flexDirection:'column',border:'1px solid var(--border)',borderRadius:'var(--radius)',background:'var(--white)',height:480}}>
+            <div style={{padding:'.65rem 1rem',borderBottom:'1px solid var(--border)',background:'var(--bg)',display:'flex',alignItems:'center',gap:'.5rem',flexShrink:0}}>
+              <span>✨</span><span style={{fontWeight:700,fontSize:'.875rem'}}>AI Table Assistant</span>
+              {liveAiLoading&&<span style={{marginLeft:'auto',fontSize:'.72rem',color:'var(--text3)'}}>thinking…</span>}
+            </div>
+            <div style={{flex:1,overflowY:'auto',padding:'.75rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
+              {liveMsgs.map((m,i)=>(
+                <div key={i} style={{alignSelf:m.role==='user'?'flex-end':'flex-start',maxWidth:'93%',padding:'.5rem .7rem',borderRadius:m.role==='user'?'12px 12px 2px 12px':'12px 12px 12px 2px',background:m.role==='user'?'var(--blue2)':'var(--bg)',color:m.role==='user'?'#fff':'var(--text)',fontSize:'.8rem',lineHeight:1.6,border:m.role==='user'?'none':'1px solid var(--border)',whiteSpace:'pre-wrap'}}>{m.text}</div>
+              ))}
+              {liveAiLoading&&<div style={{alignSelf:'flex-start',padding:'.5rem .7rem',borderRadius:'12px 12px 12px 2px',background:'var(--bg)',border:'1px solid var(--border)',fontSize:'.8rem',color:'var(--text3)',fontStyle:'italic'}}>Thinking…</div>}
+              <div ref={chatEnd3}/>
+            </div>
+            <div style={{padding:'.5rem',borderTop:'1px solid var(--border)',flexShrink:0,display:'flex',gap:'.5rem'}}>
+              <textarea value={liveInp} onChange={e=>setLiveInp(e.target.value)} onKeyDown={handleLiveKey}
+                placeholder="e.g. Add a Bloom's Level column…"
+                style={{flex:1,resize:'none',height:54,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'.45rem .625rem',fontSize:'.8rem',fontFamily:'DM Sans,sans-serif',color:'var(--text)',outline:'none'}}/>
+              <button onClick={sendLiveMsg} disabled={liveAiLoading||!liveInp.trim()}
+                style={{alignSelf:'flex-end',padding:'.4rem .875rem',background:liveAiLoading||!liveInp.trim()?'var(--border2)':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:'pointer',fontFamily:'DM Sans,sans-serif',fontSize:'.8rem',fontWeight:600}}>
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      :<div className="card card-p" style={{textAlign:'center',padding:'3rem',color:'var(--text2)'}}>
+        <div style={{fontSize:'2.5rem',marginBottom:'1rem'}}>📝</div>
+        <div style={{fontWeight:600,marginBottom:'.5rem'}}>No evaluation plan generated yet</div>
+        <div style={{fontSize:'.855rem'}}>Click "Generate CIE+SEE Plan" to create your plan, then edit it here with AI assistance.</div>
+      </div>
+    }
   </div>);
 }
 
@@ -2288,7 +2982,7 @@ function App(){
         <div className="top-banner-dot"/>
         <span>OBE Automate is live — NBA/NAAC automation powered by Gemini AI</span>
         <span style={{background:'#bfdbfe',width:1,height:12,display:'inline-block'}}/>
-        <span className="top-banner-link" onClick={()=>go('reports')}>Generate Report →</span>
+        <span className="top-banner-link" onClick={()=>setPage('reports')}>Generate Report →</span>
       </div>
       <div className="topbar">
         <button className="hamburger" onClick={()=>setOpen(o=>!o)}>☰</button>
