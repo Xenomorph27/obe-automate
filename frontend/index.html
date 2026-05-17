@@ -11,22 +11,22 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar:#111827;
-  --sidebar2:#1f2937;
-  --sidebar3:#374151;
+  --sidebar:#0A0A0A;
+  --sidebar2:#1A1A1A;
+  --sidebar3:#2A2A2A;
   --white:#ffffff;
-  --bg:#f8fafc;
-  --bg2:#f1f5f9;
-  --card:#ffffff;
-  --border:#e2e8f0;
-  --border2:#cbd5e1;
-  --text:#0f172a;
-  --text2:#475569;
-  --text3:#94a3b8;
-  --blue:#3b82f6;
-  --blue2:#2563eb;
-  --blue3:#eff6ff;
-  --indigo:#6366f1;
+  --bg:#FFFFFF;
+  --bg2:#F5F3F0;
+  --card:#FFFFFF;
+  --border:#E2DDD8;
+  --border2:#D6D3D1;
+  --text:#0A0A0A;
+  --text2:#57534E;
+  --text3:#A8A29E;
+  --blue:#F97316;
+  --blue2:#EA580C;
+  --blue3:#FFF7ED;
+  --indigo:#C2410C;
   --green:#10b981;
   --green2:#d1fae5;
   --amber:#f59e0b;
@@ -65,41 +65,41 @@ html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg
 .role-btn.active{border-color:var(--blue2);background:var(--blue3);color:var(--blue2)}
 .role-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.1rem}
 .inp{width:100%;padding:.7rem 1rem;border:1.5px solid var(--border);border-radius:8px;font-size:.9rem;font-family:'DM Sans',sans-serif;color:var(--text);outline:none;transition:border-color .2s;background:var(--white)}
-.inp:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+.inp:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(234,88,12,.1)}
 .form-group{margin-bottom:.875rem}
 .form-label{display:block;font-size:.8rem;font-weight:600;color:var(--text2);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.05em}
 .btn-blue{background:var(--blue2);color:#fff;border:none;padding:.8rem 1.5rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.9rem;font-family:'DM Sans',sans-serif;transition:all .2s;width:100%}
-.btn-blue:hover{background:var(--blue);box-shadow:0 4px 12px rgba(37,99,235,.3)}
+.btn-blue:hover{background:var(--blue);box-shadow:0 4px 12px rgba(234,88,12,.3)}
 .btn-blue:disabled{opacity:.5;cursor:not-allowed}
 .auth-err{background:var(--red2);border:1px solid #fca5a5;border-radius:8px;padding:.65rem .875rem;color:#dc2626;font-size:.85rem;margin-bottom:.875rem}
-.auth-hint{display:flex;align-items:center;gap:.5rem;background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:.65rem .875rem;color:var(--text2);font-size:.8rem;margin-bottom:1.5rem}
+.auth-hint{display:flex;align-items:center;gap:.5rem;background:#FFF7ED;border:1px solid var(--border);border-radius:8px;padding:.65rem .875rem;color:var(--text2);font-size:.8rem;margin-bottom:1.5rem}
 
 /* ── APP SHELL ── */
 .shell{display:flex;height:100vh;overflow:hidden}
 
 /* ── SIDEBAR ── */
 .sidebar{width:var(--sidebar-w);background:var(--sidebar);display:flex;flex-direction:column;flex-shrink:0;z-index:50;transition:transform .3s}
-.sb-top{padding:1.25rem 1.25rem .875rem;border-bottom:1px solid #1f2937}
+.sb-top{padding:1.25rem 1.25rem .875rem;border-bottom:1px solid #1A1A1A}
 .sb-brand{font-family:'DM Serif Display',serif;font-size:1.5rem;color:var(--white);line-height:1}
 .sb-brand-dot{color:var(--blue)}
-.sb-sub{font-size:.65rem;color:#6b7280;letter-spacing:.1em;text-transform:uppercase;margin-top:.2rem}
-.sb-course{margin:.875rem 1rem;background:#1f2937;border-radius:10px;padding:.75rem}
-.sb-course-label{font-size:.65rem;color:#6b7280;text-transform:uppercase;letter-spacing:.08em}
-.sb-course-name{font-size:.8rem;color:#e5e7eb;font-weight:500;margin-top:.25rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-sub{font-size:.65rem;color:#5A5A5A;letter-spacing:.1em;text-transform:uppercase;margin-top:.2rem}
+.sb-course{margin:.875rem 1rem;background:#1A1A1A;border-radius:10px;padding:.75rem}
+.sb-course-label{font-size:.65rem;color:#5A5A5A;text-transform:uppercase;letter-spacing:.08em}
+.sb-course-name{font-size:.8rem;color:#D6D3D1;font-weight:500;margin-top:.25rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sb-nav{flex:1;overflow-y:auto;padding:.5rem 0}
-.sb-section{padding:.75rem 1.25rem .3rem;font-size:.65rem;color:#4b5563;letter-spacing:.1em;text-transform:uppercase;font-weight:600}
-.sb-item{display:flex;align-items:center;gap:.7rem;padding:.6rem 1.25rem;cursor:pointer;color:#9ca3af;font-size:.855rem;transition:all .15s;border-left:3px solid transparent;position:relative}
-.sb-item:hover{background:#1f2937;color:#e5e7eb}
-.sb-item.active{background:linear-gradient(90deg,#1d3a5f,#1f2937);color:#ffffff;border-left-color:var(--blue)}
+.sb-section{padding:.75rem 1.25rem .3rem;font-size:.65rem;color:#4A4A4A;letter-spacing:.1em;text-transform:uppercase;font-weight:600}
+.sb-item{display:flex;align-items:center;gap:.7rem;padding:.6rem 1.25rem;cursor:pointer;color:#8A8A8A;font-size:.855rem;transition:all .15s;border-left:3px solid transparent;position:relative}
+.sb-item:hover{background:#1A1A1A;color:#E7E5E4}
+.sb-item.active{background:linear-gradient(90deg,#2A1500,#1A1A1A);color:#ffffff;border-left-color:var(--blue)}
 .sb-item.active .sb-icon{color:var(--blue)}
 .sb-icon{width:18px;text-align:center;font-size:1rem;flex-shrink:0}
 .sb-badge{margin-left:auto;background:var(--blue2);color:#fff;border-radius:20px;font-size:.65rem;padding:.1rem .45rem;font-weight:700}
-.sb-bottom{padding:.875rem 1.25rem;border-top:1px solid #1f2937}
+.sb-bottom{padding:.875rem 1.25rem;border-top:1px solid #1A1A1A}
 .sb-user{display:flex;align-items:center;gap:.65rem;margin-bottom:.75rem}
-.sb-avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--indigo));display:flex;align-items:center;justify-content:center;color:#fff;font-size:.8rem;font-weight:700;flex-shrink:0}
-.sb-user-name{font-size:.85rem;font-weight:600;color:#e5e7eb}
-.sb-user-role{font-size:.72rem;color:#6b7280}
-.sb-logout{width:100%;padding:.5rem;background:transparent;border:1px solid #374151;border-radius:8px;color:#6b7280;cursor:pointer;font-size:.8rem;font-family:'DM Sans',sans-serif;transition:all .2s}
+.sb-avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#F97316,#C2410C);display:flex;align-items:center;justify-content:center;color:#fff;font-size:.8rem;font-weight:700;flex-shrink:0}
+.sb-user-name{font-size:.85rem;font-weight:600;color:#E7E5E4}
+.sb-user-role{font-size:.72rem;color:#5A5A5A}
+.sb-logout{width:100%;padding:.5rem;background:transparent;border:1px solid #2A2A2A;border-radius:8px;color:#5A5A5A;cursor:pointer;font-size:.8rem;font-family:'DM Sans',sans-serif;transition:all .2s}
 .sb-logout:hover{border-color:#ef4444;color:#ef4444}
 
 /* ── TOPBAR (mobile) ── */
@@ -110,7 +110,7 @@ html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg
 
 /* ── MAIN ── */
 .main{flex:1;overflow-y:auto;background:var(--bg);display:flex;flex-direction:column}
-.page-head{padding:1.5rem 2rem 1rem;border-bottom:1px solid #bfdbfe;background:linear-gradient(135deg,#dbeafe 0%,#eff6ff 100%);display:flex;align-items:center;justify-content:space-between}
+.page-head{padding:1.5rem 2rem 1rem;border-bottom:1px solid #E2DDD8;background:linear-gradient(135deg,#FFF7ED 0%,#FFFFFF 100%);display:flex;align-items:center;justify-content:space-between}
 .page-head-title{font-size:1rem;font-weight:700;color:var(--text)}
 .page-head-sub{font-size:.8rem;color:var(--text3);margin-top:.15rem}
 .page-body{padding:1.75rem 2rem;flex:1}
@@ -129,7 +129,7 @@ html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg
 .stat-card.amber::before{background:var(--amber)}
 .stat-card.teal::before{background:var(--teal)}
 .stat-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;margin-bottom:.875rem}
-.stat-icon.blue{background:#bfdbfe;color:#1d4ed8}
+.stat-icon.blue{background:#FFEDD5;color:#C2410C}
 .stat-icon.green{background:#6ee7b7;color:#065f46}
 .stat-icon.purple{background:#c4b5fd;color:#5b21b6}
 .stat-icon.amber{background:#fcd34d;color:#92400e}
@@ -142,7 +142,7 @@ html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg
 
 /* ── BUTTONS ── */
 .btn{padding:.55rem 1.1rem;border-radius:8px;font-size:.855rem;font-weight:600;cursor:pointer;transition:all .2s;border:none;font-family:'DM Sans',sans-serif;display:inline-flex;align-items:center;gap:.4rem}
-.btn-primary{background:var(--blue2);color:#fff}.btn-primary:hover{background:var(--blue);box-shadow:0 4px 12px rgba(37,99,235,.25)}
+.btn-primary{background:var(--blue2);color:#fff}.btn-primary:hover{background:var(--blue);box-shadow:0 4px 12px rgba(234,88,12,.25)}
 .btn-primary:disabled{opacity:.5;cursor:not-allowed}
 .btn-outline{background:var(--white);border:1.5px solid var(--border);color:var(--text2)}.btn-outline:hover{border-color:var(--blue2);color:var(--blue2)}
 .btn-ghost{background:transparent;border:none;color:var(--text2)}.btn-ghost:hover{color:var(--text);background:var(--bg2)}
@@ -154,7 +154,7 @@ html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg
 .fg{margin-bottom:1rem}
 .fl{display:block;font-size:.78rem;font-weight:600;color:var(--text2);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.05em}
 .fi{width:100%;padding:.65rem .875rem;border:1.5px solid var(--border);border-radius:8px;font-size:.9rem;font-family:'DM Sans',sans-serif;color:var(--text);outline:none;transition:border-color .2s;background:var(--white)}
-.fi:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+.fi:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(234,88,12,.1)}
 .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
 .fsel{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%2394a3b8'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right .75rem center;padding-right:2rem}
 
@@ -182,7 +182,7 @@ tbody tr:hover{background:var(--bg)}
 .alert{padding:.875rem 1rem;border-radius:10px;font-size:.875rem;margin-bottom:1rem;display:flex;align-items:flex-start;gap:.65rem}
 .a-error{background:var(--red2);border:1px solid #fca5a5;color:#dc2626}
 .a-success{background:var(--green2);border:1px solid #6ee7b7;color:#059669}
-.a-info{background:var(--blue3);border:1px solid #93c5fd;color:var(--blue2)}
+.a-info{background:var(--blue3);border:1px solid #FDBA74;color:var(--blue2)}
 .a-warning{background:var(--amber2);border:1px solid #fcd34d;color:#b45309}
 
 /* ── SPINNER / SKELETON ── */
@@ -281,8 +281,8 @@ tbody tr:hover{background:var(--bg)}
 /* ── TOP ANNOUNCEMENT BANNER ── */
 .top-banner{
   width:100%;
-  background:linear-gradient(90deg,#dbeafe 0%,#eff6ff 50%,#dbeafe 100%);
-  border-bottom:1px solid #bfdbfe;
+  background:linear-gradient(90deg,#FFF7ED 0%,#FFEDD5 50%,#FFF7ED 100%);
+  border-bottom:1px solid #E2DDD8;
   padding:.45rem 1.5rem;
   display:flex;
   align-items:center;
@@ -296,7 +296,7 @@ tbody tr:hover{background:var(--bg)}
 }
 .top-banner-dot{
   width:7px;height:7px;border-radius:50%;
-  background:#3b82f6;
+  background:#F97316;
   animation:pulse-dot 2s ease-in-out infinite;
 }
 @keyframes pulse-dot{
@@ -304,7 +304,7 @@ tbody tr:hover{background:var(--bg)}
   50%{opacity:.5;transform:scale(.8)}
 }
 .top-banner-link{
-  color:#2563eb;font-weight:700;cursor:pointer;
+  color:#EA580C;font-weight:700;cursor:pointer;
   text-decoration:underline;text-underline-offset:2px;
 }
 
@@ -338,9 +338,9 @@ tbody tr:hover{background:var(--bg)}
   box-shadow:0 4px 14px rgba(29,78,216,.4) !important;
 }
 .main .quick-action:hover{
-  background:#EFF6FF !important;
-  border-color:#BFDBFE !important;
-  box-shadow:0 6px 20px rgba(59,130,246,.18) !important;
+  background:#FFF7ED !important;
+  border-color:#FDBA74 !important;
+  box-shadow:0 6px 20px rgba(234,88,12,.18) !important;
   transform:translateY(-3px);
 }
 .main .quick-action:hover .qa-label{
@@ -348,7 +348,7 @@ tbody tr:hover{background:var(--bg)}
 }
 .main .quick-action:hover .qa-icon,
 .main .quick-action:hover .stat-icon{
-  background:rgba(59,130,246,.12) !important;
+  background:rgba(234,88,12,.12) !important;
 }
 </style>
 </head>
@@ -621,7 +621,7 @@ function HomePage({go,setCourse}){
               </label>
             </div>
             {ttErr&&<Alrt t="error" msg={ttErr}/>}
-            {ttFile&&<div style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'.75rem',padding:'.5rem .75rem',background:'#eff6ff',borderRadius:8,fontSize:'.8rem'}}>
+            {ttFile&&<div style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'.75rem',padding:'.5rem .75rem',background:'#FFF7ED',borderRadius:8,fontSize:'.8rem'}}>
               <span>📎 {ttFile.name}</span>
               <button className="btn btn-primary btn-sm" onClick={uploadTimetable} disabled={ttUploading}>{ttUploading?'Uploading…':'Upload'}</button>
               <button className="btn btn-ghost btn-sm" onClick={()=>setTtFile(null)}>✕</button>
@@ -638,7 +638,7 @@ function HomePage({go,setCourse}){
                 <div key={i} className="schedule-item">
                   <div className="sched-time" style={{fontSize:'.72rem',minWidth:90}}>{s.time}</div>
                   <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
-                    <div className="sched-dot" style={{background:'#3b82f6'}}/>
+                    <div className="sched-dot" style={{background:'#F97316'}}/>
                     {i<todaySchedule.length-1&&<div className="sched-line" style={{flex:1,minHeight:24}}/>}
                   </div>
                   <div className="sched-content">
@@ -658,7 +658,7 @@ function HomePage({go,setCourse}){
               return(<div key={day} style={{marginBottom:'.75rem'}}>
                 <div style={{fontSize:'.75rem',fontWeight:600,color:'var(--text2)',marginBottom:'.3rem',textTransform:'uppercase',letterSpacing:'.05em'}}>{day}</div>
                 {slots.length===0?<span style={{fontSize:'.78rem',color:'var(--border)'}}>—</span>:
-                slots.map((s,i)=><span key={i} style={{display:'inline-block',marginRight:'.4rem',marginBottom:'.3rem',padding:'.2rem .6rem',background:'#eff6ff',borderRadius:20,fontSize:'.75rem',color:'var(--blue2)',fontWeight:500}}>
+                slots.map((s,i)=><span key={i} style={{display:'inline-block',marginRight:'.4rem',marginBottom:'.3rem',padding:'.2rem .6rem',background:'#FFF7ED',borderRadius:20,fontSize:'.75rem',color:'var(--blue2)',fontWeight:500}}>
                   {s.time.split('-')[0].trim()} {s.course}{s.section?` (${s.section})`:''}</span>)}
               </div>);
             })}
@@ -735,7 +735,7 @@ function HomePage({go,setCourse}){
                 return(
                   <div key={i} style={{display:'flex',alignItems:'center',gap:'.65rem',marginBottom:'.65rem'}}>
                     <span className={`badge ${b.c}`} style={{minWidth:90}}>L{b.l} {b.n}</span>
-                    <div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${Math.round(count/max*100)}%`,background:['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#ec4899'][i]}}/></div>
+                    <div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${Math.round(count/max*100)}%`,background:['#F97316','#10b981','#f59e0b','#8b5cf6','#ef4444','#ec4899'][i]}}/></div>
                     <span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:24}}>{count}</span>
                   </div>);
               })
@@ -760,7 +760,7 @@ function CourseDetailPage({course,go}){
   const evalCfg=course.evaluation_config||{};
   const createdAt=course.created_at?new Date(course.created_at):null;
   const bloomColor={Remember:'b-gray',Understand:'b-blue',Apply:'b-teal',Analyze:'b-purple',Analyse:'b-purple',Evaluate:'b-amber',Create:'b-pink'};
-  const matrixColor={3:'#dbeafe',2:'#dcfce7',1:'#fef9c3'};
+  const matrixColor={3:'#FFF7ED',2:'#dcfce7',1:'#fef9c3'};
   const fetchAtt=async()=>{
     if(attData)return;
     setAttLoading(true);
@@ -783,7 +783,7 @@ function CourseDetailPage({course,go}){
       <div style={{position:'absolute',bottom:-50,right:80,width:100,height:100,borderRadius:'50%',background:'rgba(255,255,255,.04)'}}></div>
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:'1rem'}}>
         <div>
-          <div style={{fontSize:'.72rem',letterSpacing:'.1em',textTransform:'uppercase',color:'#93c5fd',marginBottom:'.3rem',fontWeight:600}}>Course Detail</div>
+          <div style={{fontSize:'.72rem',letterSpacing:'.1em',textTransform:'uppercase',color:'#FDBA74',marginBottom:'.3rem',fontWeight:600}}>Course Detail</div>
           <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.7rem',lineHeight:1.2,marginBottom:'.4rem'}}>{course.course_name}</div>
           <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',marginTop:'.5rem'}}>
             <span style={{background:'rgba(255,255,255,.15)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem',fontWeight:600}}>{course.course_code}</span>
@@ -793,10 +793,10 @@ function CourseDetailPage({course,go}){
           </div>
         </div>
         <div style={{textAlign:'right'}}>
-          <div style={{fontSize:'.78rem',color:'#93c5fd',marginBottom:'.2rem'}}>Faculty</div>
+          <div style={{fontSize:'.78rem',color:'#FDBA74',marginBottom:'.2rem'}}>Faculty</div>
           <div style={{fontWeight:700,fontSize:'1rem'}}>{course.faculty_name}</div>
-          <div style={{fontSize:'.78rem',color:'#bfdbfe',marginTop:'.2rem'}}>{course.department}</div>
-          {createdAt&&<div style={{fontSize:'.72rem',color:'#93c5fd',marginTop:'.4rem'}}>Created: {createdAt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} at {createdAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
+          <div style={{fontSize:'.78rem',color:'#FFEDD5',marginTop:'.2rem'}}>{course.department}</div>
+          {createdAt&&<div style={{fontSize:'.72rem',color:'#FDBA74',marginTop:'.4rem'}}>Created: {createdAt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} at {createdAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
         </div>
       </div>
     </div>
@@ -849,8 +849,8 @@ function CourseDetailPage({course,go}){
           const bc=bloomColor[co.bloom_level]||'b-gray';
           const bloomList=['Remember','Understand','Apply','Analyze','Analyse','Evaluate','Create'];
           const li=bloomList.indexOf(co.bloom_level);
-          const colors=['#6b7280','#3b82f6','#14b8a6','#8b5cf6','#8b5cf6','#f59e0b','#ec4899'];
-          const barColor=colors[li>=0?li:0]||'#3b82f6';
+          const colors=['#6b7280','#F97316','#14b8a6','#8b5cf6','#8b5cf6','#f59e0b','#ec4899'];
+          const barColor=colors[li>=0?li:0]||'#F97316';
           return(<div key={i} className="card card-p" style={{borderLeft:`4px solid ${barColor}`}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem'}}>
               <span style={{fontWeight:700,fontSize:'1rem',color:'var(--blue2)'}}>{co.co_id}</span>
@@ -874,7 +874,7 @@ function CourseDetailPage({course,go}){
       <div style={{marginBottom:'1rem'}}>
         <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.3rem'}}>CO-PO Correlation Matrix</div>
         <div style={{fontSize:'.78rem',color:'var(--text2)',display:'flex',gap:'1rem',flexWrap:'wrap'}}>
-          <span><span style={{display:'inline-block',width:12,height:12,background:'#dbeafe',borderRadius:2,marginRight:4}}/>3 — Strong</span>
+          <span><span style={{display:'inline-block',width:12,height:12,background:'#FFF7ED',borderRadius:2,marginRight:4}}/>3 — Strong</span>
           <span><span style={{display:'inline-block',width:12,height:12,background:'#dcfce7',borderRadius:2,marginRight:4}}/>2 — Moderate</span>
           <span><span style={{display:'inline-block',width:12,height:12,background:'#fef9c3',borderRadius:2,marginRight:4}}/>1 — Weak</span>
           <span><span style={{display:'inline-block',width:12,height:12,background:'var(--bg2)',borderRadius:2,marginRight:4}}/>0 — None</span>
@@ -960,11 +960,11 @@ function CoursesPage({setCourse,go}){
       {filtered.map(c=>{
         const created=c.created_at?new Date(c.created_at):null;
         return(<div key={c.id} className="card" style={{overflow:'hidden',transition:'box-shadow .2s,transform .2s'}} onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 8px 24px rgba(0,0,0,.1)';e.currentTarget.style.transform='translateY(-2px)'}} onMouseLeave={e=>{e.currentTarget.style.boxShadow='';e.currentTarget.style.transform=''}}>
-          <div style={{background:'linear-gradient(135deg,#1e40af,#3b82f6)',padding:'1rem 1.25rem',position:'relative',overflow:'hidden'}}>
+          <div style={{background:'linear-gradient(135deg,#C2410C,#F97316)',padding:'1rem 1.25rem',position:'relative',overflow:'hidden'}}>
             <div style={{position:'absolute',top:-20,right:-20,width:80,height:80,borderRadius:'50%',background:'rgba(255,255,255,.1)'}}></div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
               <div>
-                <div style={{fontSize:'.7rem',color:'#93c5fd',letterSpacing:'.08em',textTransform:'uppercase',fontWeight:600}}>{c.course_code}</div>
+                <div style={{fontSize:'.7rem',color:'#FDBA74',letterSpacing:'.08em',textTransform:'uppercase',fontWeight:600}}>{c.course_code}</div>
                 <div style={{fontWeight:700,color:'#fff',fontSize:'.95rem',marginTop:'.2rem',lineHeight:1.3,maxWidth:200}}>{c.course_name}</div>
               </div>
               <div style={{background:'rgba(255,255,255,.2)',borderRadius:8,padding:'.3rem .6rem',fontSize:'.75rem',color:'#fff',fontWeight:700,flexShrink:0}}>{c.credits}cr</div>
@@ -1352,10 +1352,10 @@ function EditableTable({cols,rows,flashSet,updateCell,removeRow,onAddCol,onRemov
   const [dragging,setDragging]=useState(null);
   const [dragOver,setDragOver]=useState(null);
 
-  const typeColorMap=typeColors||{Lecture:'#dbeafe',color:'var(--text)','Exp. Learning':'#dcfce7',Evaluation:'#fef9c3'};
+  const typeColorMap=typeColors||{Lecture:'#FFF7ED',color:'var(--text)','Exp. Learning':'#dcfce7',Evaluation:'#fef9c3'};
   const getTypeBg=(val)=>{
     if(!val)return'#f1f5f9';
-    if(val==='Lecture')return'#dbeafe';
+    if(val==='Lecture')return'#FFF7ED';
     if(val==='Exp. Learning')return'#dcfce7';
     if(val==='Evaluation')return'#fef9c3';
     return'#f1f5f9';
@@ -1426,7 +1426,7 @@ function EditableTable({cols,rows,flashSet,updateCell,removeRow,onAddCol,onRemov
             onDragOver={e=>{e.preventDefault();setDragOver(ri);}}
             onDrop={e=>{e.preventDefault();if(dragging!==null&&dragging!==ri){const arr=[...rows];const[m]=arr.splice(dragging,1);arr.splice(ri,0,m);/* handled via updateCell loop */;setDragging(null);setDragOver(null);}}}
             onDragEnd={()=>{setDragging(null);setDragOver(null);}}
-            style={{borderBottom:'1px solid var(--border)',background:flashSet.has(ri)?'#EFF6FF':dragOver===ri?'#f0f9ff':ri%2===0?'transparent':'rgba(0,0,0,.012)',transition:'background .5s',cursor:'grab'}}>
+            style={{borderBottom:'1px solid var(--border)',background:flashSet.has(ri)?'#FFF7ED':dragOver===ri?'#FFF0E6':ri%2===0?'transparent':'rgba(0,0,0,.012)',transition:'background .5s',cursor:'grab'}}>
             {cols.map(col=>(
               <td key={col.key} style={{padding:'.45rem .75rem',verticalAlign:'middle'}}>
                 <EditableCell col={col} value={row[col.key]||''} ri={ri}/>
@@ -2536,8 +2536,8 @@ function ReportsPage({course}){
       icon:'🏆',
       title:'NBA / NAAC PDF Report',
       desc:'Full NBA-format PDF with CO/PO attainment charts, gap analysis, CO-PO correlation matrix, and AI-generated recommendations. Required for accreditation submissions.',
-      color:'#dbeafe',
-      tc:'#1d4ed8',
+      color:'#FFF7ED',
+      tc:'#C2410C',
       onGen:genNba,
       loading:nbaLoading,
       downloadHref:course?`${API}/attainment/nba-report/download/${course.id}`:null,
@@ -2928,7 +2928,7 @@ function ClassifyPage({course}){
                 <div style={{fontSize:'.7rem',fontWeight:600,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.35rem'}}>{l}</div>{v}
               </div>))}
           </div>
-          {res.classification.reasoning&&<div style={{background:'#eff6ff',borderRadius:8,padding:'.75rem',borderLeft:'3px solid var(--blue2)'}}>
+          {res.classification.reasoning&&<div style={{background:'#FFF7ED',borderRadius:8,padding:'.75rem',borderLeft:'3px solid var(--blue2)'}}>
             <div style={{fontSize:'.7rem',fontWeight:600,color:'var(--blue2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.35rem'}}>AI Reasoning</div>
             <p style={{fontSize:'.85rem',color:'var(--text2)',lineHeight:1.6}}>{res.classification.reasoning}</p>
           </div>}
@@ -2982,7 +2982,7 @@ function ManipulatePage({course}){
         {res&&<div className="card card-p fade-up">
           <div style={{fontWeight:700,fontSize:'.95rem',marginBottom:'1rem'}}>Choose a Rewrite</div>
           {[['suggested','✨ Suggested',res.suggested_rewrite],['alternative','🔀 Alternative',res.alternative_rewrite]].map(([k,l,t])=>(
-            <div key={k} onClick={()=>setSel(k)} style={{cursor:'pointer',background:sel===k?'#eff6ff':'var(--bg)',border:`1.5px solid ${sel===k?'var(--blue2)':'var(--border)'}`,borderRadius:10,padding:'1rem',marginBottom:'.75rem',transition:'all .15s'}}>
+            <div key={k} onClick={()=>setSel(k)} style={{cursor:'pointer',background:sel===k?'#FFF7ED':'var(--bg)',border:`1.5px solid ${sel===k?'var(--blue2)':'var(--border)'}`,borderRadius:10,padding:'1rem',marginBottom:'.75rem',transition:'all .15s'}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:'.5rem'}}>
                 <span style={{fontSize:'.8rem',fontWeight:700,color:sel===k?'var(--blue2)':'var(--text2)'}}>{l}</span>
                 {sel===k&&<span style={{fontSize:'.72rem',color:'var(--blue2)',fontWeight:600}}>● Selected</span>}
@@ -3422,7 +3422,7 @@ function App(){
       <div className="top-banner">
         <div className="top-banner-dot"/>
         <span>OBE Automate is live — NBA/NAAC automation powered by Gemini AI</span>
-        <span style={{background:'#bfdbfe',width:1,height:12,display:'inline-block'}}/>
+        <span style={{background:'#FFEDD5',width:1,height:12,display:'inline-block'}}/>
         <span className="top-banner-link" onClick={()=>setPage('reports')}>Generate Report →</span>
       </div>
       <div className="topbar">
