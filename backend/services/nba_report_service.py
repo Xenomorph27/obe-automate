@@ -794,3 +794,182 @@ Keep the tone formal and suitable for submission to NBA/NAAC auditors."""
             leftIndent=10)
 
         return s
+
+    # ------------------------------------------------------------------
+    # Template-based PDF generation (additive — existing generate_pdf untouched)
+    # ------------------------------------------------------------------
+
+    async def generate_pdf_from_template(self, course_id: int, template_bytes: bytes) -> dict:
+        """
+        Generate an NBA/NAAC PDF whose section order follows the user-uploaded .docx template.
+
+        Steps:
+          1. Extract headings from the template using python-docx
+          2. Build gap_analysis data (same as normal flow)
+          3. Get AI recommendations (same as normal flow)
+          4. Build PDF using the extracted section order — unknown sections get AI-written content,
+             known NBA sections (CO table, PO table, bar chart, matrix, recommendations) are
+             rendered with the existing _section_* builders when the heading matches
+          5. Save via storage (same path — overrides normal report)
+        """
+        import io as _io
+        import json as _json
+        from docx import Document as _Document
+        import google.generativeai as genai
+
+        logger.info(f"Template-based NBA PDF for course_id={course_id}")
+
+        # ── 1. Extract headings from template ──────────────────────────
+        tpl_doc = _Document(_io.BytesIO(template_bytes))
+        headings = []
+        for para in tpl_doc.paragraphs:
+            style = para.style.name.lower()
+            text = para.text.strip()
+            if text and ('heading' in style or (para.runs and any(r.bold for r in para.runs))):
+                headings.append(text)
+
+        if not headings:
+            headings = [
+                "Course Information",
+                "CO Attainment Analysis",
+                "PO Attainment Analysis",
+                "CO-PO Correlation Matrix",
+                "Gap Analysis",
+                "AI Recommendations",
+            ]
+        logger.info(f"NBA template headings: {headings}")
+
+        # ── 2. Gap data + recommendations (identical to normal flow) ───
+        gap_data = await self.gap_analysis(course_id)
+        course_svc = CourseService(self.db)
+        course = await course_svc.get_course(course_id)
+        recommendations = await self._get_recommendations(course, gap_data)
+
+        # ── 3. Ask Gemini for non-standard section content ─────────────
+        known_keywords = {
+            "co attainment", "course outcome", "po attainment", "program outcome",
+            "matrix", "correlation", "gap analysis", "recommendation", "bar chart",
+            "cover", "course information",
+        }
+
+        def is_known(h: str) -> bool:
+            hl = h.lower()
+            return any(kw in hl for kw in known_keywords)
+
+        unknown_headings = [h for h in headings if not is_known(h)]
+        section_content = {}
+
+        if unknown_headings:
+            summary = _json.dumps({
+                "course_name": gap_data["course_name"],
+                "course_code": gap_data["course_code"],
+                "total_students": gap_data["total_students"],
+                "overall_co_attainment": gap_data["overall_co_attainment"],
+                "at_risk_cos": gap_data.get("at_risk_cos", []),
+                "at_risk_pos": gap_data.get("at_risk_pos", []),
+            }, indent=2)
+
+            prompt = f"""You are an NBA/NAAC accreditation report writer for engineering colleges in India.
+Write 2-3 professional paragraphs for each section heading below, suitable for an accreditation PDF report.
+Return ONLY a JSON object. Keys = exact heading strings. Values = paragraph text. No markdown fences.
+
+Headings to fill:
+{_json.dumps(unknown_headings)}
+
+Course data:
+{summary}
+
+JSON only:"""
+            try:
+                from backend.core.config import GEMINI_API_KEY
+                genai.configure(api_key=GEMINI_API_KEY)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                resp = model.generate_content(prompt)
+                raw = resp.text.strip().replace("```json", "").replace("```", "").strip()
+                section_content = _json.loads(raw)
+            except Exception as e:
+                logger.warning(f"Gemini content generation failed: {e}")
+                for h in unknown_headings:
+                    section_content[h] = (
+                        f"This section covers {h} for {gap_data['course_name']}. "
+                        f"Overall CO attainment stands at {gap_data['overall_co_attainment']}%."
+                    )
+
+        # ── 4. Build PDF following template section order ───────────────
+        styles = self._make_styles()
+
+        def on_page(canvas, doc):
+            self._draw_header_footer(canvas, doc, course, gap_data)
+
+        from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, PageBreak, Paragraph, Spacer
+        from reportlab.lib.units import cm
+        from reportlab.lib.pagesizes import A4
+
+        _storage = get_storage()
+        _filename = f"nba_report_{course_id}.pdf"
+        import tempfile as _tmp
+        from pathlib import Path as _Path
+
+        with _tmp.TemporaryDirectory() as _t:
+            filepath = str(_Path(_t) / _filename)
+
+            frame = Frame(1.5*cm, 2.5*cm, A4[0] - 3*cm, A4[1] - 4.5*cm, id="main")
+            template_pg = PageTemplate(id="main", frames=[frame], onPage=on_page)
+            doc = BaseDocTemplate(filepath, pagesize=A4, pageTemplates=[template_pg])
+
+            story = []
+
+            # Always start with cover page
+            story += self._cover_page(course, gap_data, styles)
+            story.append(PageBreak())
+
+            # Walk template headings and render each section
+            for heading in headings:
+                hl = heading.lower()
+
+                if any(kw in hl for kw in ["cover", "course information"]):
+                    continue  # already rendered as cover page
+
+                elif any(kw in hl for kw in ["co attainment", "course outcome"]):
+                    story += self._section_nba(course, gap_data, styles)
+
+                elif any(kw in hl for kw in ["po attainment", "program outcome"]):
+                    story += self._section_naac(course, gap_data, styles)
+
+                elif any(kw in hl for kw in ["recommendation"]):
+                    story += self._section_recommendations(recommendations, styles)
+
+                elif any(kw in hl for kw in ["matrix", "correlation"]):
+                    story += self._section_matrix(course, gap_data, styles)
+
+                elif any(kw in hl for kw in ["gap analysis"]):
+                    # Render gap analysis as a sub-section using NBA section (contains gap table)
+                    story += self._section_nba(course, gap_data, styles)
+
+                else:
+                    # Unknown section — render AI-generated text under the heading
+                    story.append(Paragraph(heading, styles["SectionTitle"]))
+                    story.append(Spacer(1, 0.2*cm))
+                    content = section_content.get(heading, "")
+                    if content:
+                        story.append(Paragraph(content, styles["Body"]))
+                    story.append(Spacer(1, 0.5*cm))
+
+            doc.build(story)
+            _storage.save_from_path(_CATEGORY, _filename, _Path(filepath))
+
+        filepath = str(_storage.get_path(_CATEGORY, _filename))
+        logger.info(f"Template-based NBA PDF saved → {filepath}")
+
+        return {
+            "course_id": course_id,
+            "course_name": gap_data["course_name"],
+            "filename": _filename,
+            "download_url": f"/attainment/nba-report/download/{course_id}",
+            "overall_co_attainment": gap_data["overall_co_attainment"],
+            "at_risk_cos": gap_data["at_risk_cos"],
+            "at_risk_pos": gap_data["at_risk_pos"],
+            "total_students": gap_data["total_students"],
+            "template_used": True,
+            "sections_generated": headings,
+        }

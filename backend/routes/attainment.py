@@ -219,16 +219,22 @@ async def calculate_attainment(
 @router.post("/report/{course_id}", status_code=201)
 async def generate_attainment_report(
     course_id: int,
+    template: Optional[UploadFile] = File(None, description="Optional .docx template to guide report structure"),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Generate a formatted Word document attainment report.
     Requires marks to be uploaded first via POST /attainment/marks/{course_id}.
+    Optionally accepts a .docx template — if provided, the report follows that template's structure.
     """
-    logger.info(f"Attainment report requested for course_id={course_id}")
+    logger.info(f"Attainment report requested for course_id={course_id}, template={'yes' if template else 'no'}")
     try:
         service = AttainmentService(db)
-        result = await service.generate_report(course_id)
+        if template and template.filename:
+            template_bytes = await template.read()
+            result = await service.generate_report_from_template(course_id, template_bytes)
+        else:
+            result = await service.generate_report(course_id)
         return {"status": "success", "data": result}
     except OBEException as e:
         logger.error(f"Attainment report error: {e.message}")
@@ -259,6 +265,7 @@ async def download_attainment_report(course_id: int):
 @router.post("/nba-report/{course_id}", status_code=201)
 async def generate_nba_report(
     course_id: int,
+    template: Optional[UploadFile] = File(None, description="Optional .docx template to guide report structure"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -269,11 +276,16 @@ async def generate_nba_report(
     - Section D: CO-PO correlation matrix
 
     Requires marks to be uploaded first via POST /attainment/marks/{course_id}.
+    Optionally accepts a .docx template — if provided, the PDF follows that template's section structure.
     """
-    logger.info(f"NBA/NAAC PDF report requested for course_id={course_id}")
+    logger.info(f"NBA/NAAC PDF report requested for course_id={course_id}, template={'yes' if template else 'no'}")
     try:
         service = NBAReportService(db)
-        result = await service.generate_pdf(course_id)
+        if template and template.filename:
+            template_bytes = await template.read()
+            result = await service.generate_pdf_from_template(course_id, template_bytes)
+        else:
+            result = await service.generate_pdf(course_id)
         return {"status": "success", "data": result}
     except OBEException as e:
         logger.error(f"NBA report error: {e.message}")
