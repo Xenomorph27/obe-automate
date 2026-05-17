@@ -1,5 +1,7 @@
 # backend/routes/courses.py
 from fastapi import APIRouter, Depends, HTTPException
+from backend.core.auth import require_auth
+from backend.database.user_models import User
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.database.connection import get_db
 from backend.services.course_service import CourseService
