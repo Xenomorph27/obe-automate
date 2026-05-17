@@ -473,6 +473,8 @@ function Sidebar({page,go,course,user,logout,open,close}){
     {s:'FACULTY FLOW'},
     {p:'syllabus',i:'📄',n:'Upload Syllabus'},{p:'setup',i:'⚙',n:'Course Setup'},
     {p:'sessions',i:'📅',n:'Session Plan'},{p:'evaluation',i:'📝',n:'Evaluation Plan'},
+    {s:'STUDENTS & MATERIALS'},
+    {p:'students',i:'👥',n:'Students Roster'},{p:'materials',i:'📚',n:'Study Materials'},{p:'student_portal',i:'🎓',n:'Student Portal'},
     {s:'ATTAINMENT'},
     {p:'marks',i:'✏',n:'Upload Marks'},{p:'attainment',i:'📊',n:'CO/PO Attainment'},{p:'reports',i:'📑',n:'Reports'},
     {s:'QUESTIONS'},
@@ -677,7 +679,7 @@ function HomePage({go,setCourse}){
                     <div style={{fontSize:'.855rem',fontWeight:600,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.course_name}</div>
                     <div style={{fontSize:'.75rem',color:'var(--text2)'}}>{c.course_code} | {c.department}</div>
                   </div>
-                  <button className="btn btn-outline btn-sm" onClick={()=>{saveCourse(c);go('courses_detail');}}>Open</button>
+                  <button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('courses_detail');}}>Open</button>
                 </div>))
             }
           </div>
@@ -995,32 +997,97 @@ function CoursesPage({setCourse,go}){
 // ── SYLLABUS ───────────────────────────────────────────────────────────────
 function SyllabusPage({onExtracted}){
   const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);const [res,setRes]=useState(null);const [err,setErr]=useState('');
+  // Editable extracted fields
+  const [editRes,setEditRes]=useState(null);
+  const [editingCos,setEditingCos]=useState([]);
+  const [editingUnits,setEditingUnits]=useState([]);
+
   const upload=async()=>{if(!file){setErr('Select a PDF.');return;}setLoading(true);setErr('');setRes(null);
-    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;setRes(d);}
-    catch(e){setErr(e.message);}setLoading(false);};
+    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;
+      setRes(d);
+      setEditRes({course_name:d.course_name||'',course_code:d.course_code||'',credits:d.credits||4});
+      setEditingCos((d.course_outcomes||d.cos||[]).map(co=>({...co})));
+      setEditingUnits((d.units||[]).map(u=>({...u})));
+    }catch(e){setErr(e.message);}setLoading(false);};
+
+  const updCo=(i,k,v)=>setEditingCos(c=>{const a=[...c];a[i]={...a[i],[k]:v};return a;});
+  const addCo=()=>setEditingCos(c=>[...c,{co_id:`CO${c.length+1}`,statement:'',bloom_level:'Apply'}]);
+  const rmCo=(i)=>setEditingCos(c=>c.filter((_,j)=>j!==i));
+  const updUnit=(i,k,v)=>setEditingUnits(u=>{const a=[...u];a[i]={...a[i],[k]:v};return a;});
+  const addUnit=()=>setEditingUnits(u=>[...u,{unit_number:u.length+1,unit_title:'',topics:[]}]);
+  const rmUnit=(i)=>setEditingUnits(u=>u.filter((_,j)=>j!==i));
+
+  const proceed=()=>{
+    const merged={...res,...editRes,course_outcomes:editingCos,cos:editingCos,units:editingUnits};
+    onExtracted&&onExtracted(merged);
+  };
+
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Upload Syllabus</div>
-    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',maxWidth:900}}>
-      <div className="card card-p">
+    <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'1.5rem',maxWidth:980}}>
+      {/* Upload card */}
+      <div className="card card-p" style={{maxWidth:600}}>
         <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Upload PDF</div>
         <div className="fg"><label className="fl">Syllabus PDF</label><input type="file" accept=".pdf" className="fi" onChange={e=>setFile(e.target.files[0])}/></div>
         <Alrt t="error" msg={err}/>
         <button className="btn btn-primary" onClick={upload} disabled={loading}>{loading?<><Spin/>Extracting with AI...</>:'Upload & Extract'}</button>
       </div>
-      {res&&<div className="card card-p fade-up">
-        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem',color:'var(--green)'}}>Extracted Successfully</div>
-        <div style={{fontSize:'1.1rem',fontWeight:700,marginBottom:'.25rem'}}>{res.course_name||'--'}</div>
-        <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1rem'}}>{res.course_code||'--'} | {res.credits||'--'} credits</div>
-        <div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.5rem'}}>Course Outcomes</div>
-        {(res.course_outcomes||res.cos||[]).length===0&&<div style={{color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No outcomes found - fill in manually during Course Setup.</div>}
-        {(res.course_outcomes||res.cos||[]).map((co,i)=><div key={i} style={{padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.4rem',fontSize:'.855rem'}}><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong>: {co.statement}</div>)}
-        {res.units&&res.units.length>0&&<div><div style={{fontWeight:600,fontSize:'.8rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',margin:'.75rem 0 .5rem'}}>Units ({res.units.length})</div>
-        {res.units.map((u,i)=><div key={i} style={{padding:'.4rem .75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.3rem',fontSize:'.855rem'}}><strong>{u.unit_number}. {u.unit_title}</strong></div>)}</div>}
-        {onExtracted&&<button className="btn btn-primary" style={{marginTop:'1rem',width:'100%'}} onClick={()=>onExtracted(res)}>Continue to Course Setup</button>}
+
+      {/* Editable extracted result */}
+      {editRes&&<div className="card card-p fade-up">
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem'}}>
+          <div style={{fontWeight:700,fontSize:'.95rem',color:'var(--green)'}}>✓ Extracted — Edit before continuing</div>
+          <button className="btn btn-primary" onClick={proceed}>Continue to Course Setup →</button>
+        </div>
+
+        {/* Basic info — editable */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'.75rem',marginBottom:'1.5rem',padding:'1rem',background:'var(--bg)',borderRadius:10,border:'1px solid var(--border)'}}>
+          <div><label className="fl">Course Name</label><input className="fi" value={editRes.course_name} onChange={e=>setEditRes(x=>({...x,course_name:e.target.value}))}/></div>
+          <div><label className="fl">Course Code</label><input className="fi" value={editRes.course_code} onChange={e=>setEditRes(x=>({...x,course_code:e.target.value}))}/></div>
+          <div><label className="fl">Credits</label><input className="fi" type="number" value={editRes.credits} onChange={e=>setEditRes(x=>({...x,credits:e.target.value}))}/></div>
+        </div>
+
+        {/* Course Outcomes — editable */}
+        <div style={{marginBottom:'1.5rem'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.75rem'}}>
+            <div style={{fontWeight:600,fontSize:'.85rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>Course Outcomes ({editingCos.length})</div>
+            <button className="btn btn-outline btn-sm" onClick={addCo}>+ Add CO</button>
+          </div>
+          {editingCos.map((co,i)=>(
+            <div key={i} style={{display:'flex',gap:'.5rem',alignItems:'flex-start',marginBottom:'.5rem',padding:'.65rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
+              <input className="fi" style={{width:72,flexShrink:0,fontSize:'.82rem',padding:'.45rem .6rem'}} value={co.co_id} onChange={e=>updCo(i,'co_id',e.target.value)} placeholder="CO1"/>
+              <select className="fi fsel" style={{width:130,flexShrink:0,fontSize:'.82rem',padding:'.45rem .6rem'}} value={co.bloom_level} onChange={e=>updCo(i,'bloom_level',e.target.value)}>
+                {['Remember','Understand','Apply','Analyze','Evaluate','Create'].map(b=><option key={b}>{b}</option>)}
+              </select>
+              <input className="fi" style={{flex:1,fontSize:'.82rem',padding:'.45rem .6rem'}} value={co.statement} onChange={e=>updCo(i,'statement',e.target.value)} placeholder="CO statement…"/>
+              <button onClick={()=>rmCo(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0,padding:'0 4px'}}>×</button>
+            </div>
+          ))}
+          {editingCos.length===0&&<div style={{textAlign:'center',padding:'1rem',color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No COs found — add them manually.</div>}
+        </div>
+
+        {/* Units — editable */}
+        <div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.75rem'}}>
+            <div style={{fontWeight:600,fontSize:'.85rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>Units ({editingUnits.length})</div>
+            <button className="btn btn-outline btn-sm" onClick={addUnit}>+ Add Unit</button>
+          </div>
+          {editingUnits.map((u,i)=>(
+            <div key={i} style={{display:'flex',gap:'.5rem',alignItems:'center',marginBottom:'.4rem',padding:'.5rem .65rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
+              <input className="fi" style={{width:60,flexShrink:0,fontSize:'.82rem',padding:'.4rem .5rem'}} type="number" value={u.unit_number} onChange={e=>updUnit(i,'unit_number',e.target.value)} placeholder="1"/>
+              <input className="fi" style={{flex:1,fontSize:'.82rem',padding:'.4rem .6rem'}} value={u.unit_title} onChange={e=>updUnit(i,'unit_title',e.target.value)} placeholder="Unit title…"/>
+              <button onClick={()=>rmUnit(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0,padding:'0 4px'}}>×</button>
+            </div>
+          ))}
+          {editingUnits.length===0&&<div style={{textAlign:'center',padding:'1rem',color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No units extracted — add them manually.</div>}
+        </div>
+
+        <div style={{marginTop:'1.25rem',paddingTop:'1rem',borderTop:'1px solid var(--border)',display:'flex',justifyContent:'flex-end'}}>
+          <button className="btn btn-primary" onClick={proceed}>Continue to Course Setup →</button>
+        </div>
       </div>}
     </div>
   </div>);
 }
-
 // ── COURSE SETUP ───────────────────────────────────────────────────────────
 function CourseSetupPage({setCourse,syllabusData}){
   const initCos=syllabusData?.course_outcomes||[];
@@ -2937,6 +3004,165 @@ function ManipulatePage({course}){
   </div>);
 }
 
+// ── STUDENT PORTAL ────────────────────────────────────────────────────────
+function StudentPortalPage({course}){
+  const [data,setData]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState('');
+  const [prn,setPrn]=useState('');const [searched,setSearched]=useState(false);
+  const [allStudents,setAllStudents]=useState([]);const [studLoading,setStudLoading]=useState(false);
+
+  useEffect(()=>{
+    if(!course)return;
+    setStudLoading(true);
+    api(`/students/${course.id}`).then(d=>setAllStudents(d.data||[])).catch(()=>{}).finally(()=>setStudLoading(false));
+  },[course]);
+
+  const search=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setLoading(true);setErr('');setData(null);setSearched(true);
+    try{
+      const att=await api(`/attainment/calculate/${course.id}`);
+      const result=att.data||att;
+      const coList=Object.values(result.co_attainment||{});
+      // Find student in roster
+      const student=allStudents.find(s=>s.prn===prn.trim()||s.name.toLowerCase().includes(prn.toLowerCase()));
+      setData({coList,student,summary:result});
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const coList=data?.coList||[];
+  const attained=coList.filter(c=>c.target_met).length;
+  const gaps=coList.filter(c=>!c.target_met);
+
+  // Remedial topics mapped to COs
+  const remedialMap={
+    CO1:['Review lecture notes on Unit 1 fundamentals','Attempt practice problems from question bank','Attend remedial session: Tuesdays 4-5pm'],
+    CO2:['Re-study Unit 2 problem-solving techniques','Work through past question papers','Consult faculty during office hours'],
+    CO3:['Focus on application-based questions in Unit 3','Complete assignment exercises','Join study group for peer learning'],
+    CO4:['Deep dive into Unit 4 analysis methods','Practice case studies','Watch NPTEL supplementary lectures'],
+    CO5:['Complete MOOC module on advanced topics','Synthesis exercises from question bank','Project-based practice recommended'],
+  };
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.3rem'}}>Student Portal</div>
+    <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1.5rem'}}>View CO-wise performance, attainment gaps, and remediation plan</div>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+
+    {/* Search */}
+    <div className="card card-p" style={{maxWidth:600,marginBottom:'1.5rem'}}>
+      <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.9rem'}}>🔍 Find Student</div>
+      <div style={{display:'flex',gap:'.75rem',alignItems:'flex-end'}}>
+        <div style={{flex:1}}>
+          <label className="fl">PRN or Name</label>
+          <input className="fi" value={prn} onChange={e=>setPrn(e.target.value)} onKeyDown={e=>e.key==='Enter'&&search()} placeholder="e.g. 24070126001 or student name…"/>
+        </div>
+        <button className="btn btn-primary" onClick={search} disabled={loading||!course||!prn.trim()}>
+          {loading?<><Spin/>Searching…</>:'Search →'}
+        </button>
+      </div>
+      {studLoading&&<div style={{marginTop:'.5rem',fontSize:'.78rem',color:'var(--text3)'}}>Loading student roster…</div>}
+      {allStudents.length>0&&!studLoading&&<div style={{marginTop:'.5rem',fontSize:'.78rem',color:'var(--text2)'}}>{allStudents.length} students enrolled</div>}
+      <Alrt t="error" msg={err}/>
+    </div>
+
+    {/* Results */}
+    {searched&&!loading&&data&&<div className="fade-up">
+      {/* Student info */}
+      {data.student&&<div style={{background:'linear-gradient(135deg,#1e3a5f,#1d4ed8)',borderRadius:12,padding:'1.25rem 1.5rem',marginBottom:'1.25rem',color:'#fff',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+        <div style={{width:48,height:48,borderRadius:'50%',background:'rgba(255,255,255,.2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',flexShrink:0}}>👤</div>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:'1.1rem'}}>{data.student.name}</div>
+          <div style={{fontSize:'.82rem',opacity:.75}}>{data.student.prn} · Section {data.student.section}</div>
+        </div>
+        <div style={{textAlign:'right'}}>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'2rem',lineHeight:1}}>{data.summary.overall_co_attainment}%</div>
+          <div style={{fontSize:'.75rem',opacity:.75}}>Overall CO Attainment</div>
+        </div>
+      </div>}
+
+      {/* CO-wise performance */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:'1rem',marginBottom:'1.5rem'}}>
+        {coList.map((co,i)=>{
+          const pct=co.attainment_percentage;
+          const color=pct>=70?'var(--green)':pct>=50?'var(--amber)':'var(--red)';
+          const bg=pct>=70?'#f0fdf4':pct>=50?'#fffbeb':'#fef2f2';
+          const border=pct>=70?'#86efac':pct>=50?'#fcd34d':'#fca5a5';
+          return(<div key={co.co_id} style={{background:bg,border:`1.5px solid ${border}`,borderRadius:12,padding:'1rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem'}}>
+              <span style={{fontWeight:700,color:'var(--blue2)',fontSize:'1rem'}}>{co.co_id}</span>
+              {co.target_met
+                ?<span className="badge b-green">✓ Attained</span>
+                :<span className="badge b-red">✗ Gap</span>}
+            </div>
+            <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.8rem',color,lineHeight:1,marginBottom:'.25rem'}}>{pct}%</div>
+            <div style={{fontSize:'.72rem',color:'var(--text2)',marginBottom:'.4rem'}}>{co.statement?.slice(0,55)}…</div>
+            <div style={{height:6,background:'rgba(0,0,0,.08)',borderRadius:10,overflow:'hidden'}}>
+              <div style={{width:`${Math.min(pct,100)}%`,height:'100%',background:color,borderRadius:10}}/>
+            </div>
+            <div style={{fontSize:'.7rem',color:'var(--text3)',marginTop:'.25rem'}}>Bloom: {co.bloom_level}</div>
+          </div>);
+        })}
+      </div>
+
+      {/* Gaps + Remediation */}
+      {gaps.length>0&&<div className="card card-p" style={{marginBottom:'1.25rem'}}>
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.9rem',color:'var(--red)'}}>⚠️ Attainment Gaps & Remediation Plan</div>
+        {gaps.map((co,i)=>(
+          <div key={co.co_id} style={{padding:'.875rem',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:10,marginBottom:'.75rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem'}}>
+              <div style={{fontWeight:700,color:'#dc2626'}}>{co.co_id} — {co.attainment_percentage}% <span style={{fontWeight:400,fontSize:'.82rem',color:'#b91c1c'}}>(need 60%)</span></div>
+              <span style={{fontSize:'.78rem',color:'#b91c1c',fontWeight:600}}>Gap: {(60-co.attainment_percentage).toFixed(1)}%</span>
+            </div>
+            <div style={{fontSize:'.82rem',color:'var(--text)',marginBottom:'.625rem',lineHeight:1.5}}>{co.statement}</div>
+            <div style={{fontWeight:600,fontSize:'.78rem',color:'#7c3aed',marginBottom:'.4rem',textTransform:'uppercase',letterSpacing:'.04em'}}>📚 Remediation Steps:</div>
+            {(remedialMap[co.co_id]||['Review course material for this CO','Attend extra sessions','Practice additional problems']).map((step,j)=>(
+              <div key={j} style={{display:'flex',gap:'.5rem',alignItems:'flex-start',marginBottom:'.3rem',fontSize:'.82rem',color:'var(--text)'}}>
+                <span style={{color:'#7c3aed',flexShrink:0,fontWeight:700}}>{j+1}.</span>{step}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>}
+
+      {/* All attained */}
+      {gaps.length===0&&<div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:12,padding:'1.5rem',textAlign:'center'}}>
+        <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>🎉</div>
+        <div style={{fontWeight:700,color:'#16a34a',fontSize:'1.1rem'}}>All COs Attained!</div>
+        <div style={{fontSize:'.855rem',color:'#166534',marginTop:'.3rem'}}>Great performance — all Course Outcomes are meeting the 60% threshold.</div>
+      </div>}
+
+      {/* Summary stats */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:'1rem',marginTop:'1.25rem'}}>
+        {[
+          {label:'COs Attained',val:`${attained}/${coList.length}`,color:'var(--green)',bg:'#f0fdf4'},
+          {label:'COs with Gap',val:String(gaps.length),color:'var(--red)',bg:'#fef2f2'},
+          {label:'Overall',val:`${data.summary.overall_co_attainment}%`,color:'var(--blue2)',bg:'var(--blue3)'},
+          {label:'Class Threshold',val:'60%',color:'var(--amber)',bg:'var(--amber2)'},
+        ].map((s,i)=>(
+          <div key={i} style={{background:s.bg,border:'1px solid var(--border)',borderRadius:10,padding:'.875rem',textAlign:'center'}}>
+            <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.6rem',color:s.color,lineHeight:1}}>{s.val}</div>
+            <div style={{fontSize:'.72rem',color:'var(--text2)',marginTop:'.3rem'}}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>}
+
+    {searched&&!loading&&!data&&!err&&<Alrt t="info" msg="No data found. Make sure marks are uploaded and attainment has been calculated."/>}
+
+    {/* Class-level CO summary (no student search needed) */}
+    {!searched&&course&&<div className="card card-p" style={{marginTop:'1rem'}}>
+      <div style={{fontWeight:700,marginBottom:'.5rem',fontSize:'.9rem'}}>📋 How to use this portal</div>
+      <div style={{fontSize:'.855rem',color:'var(--text2)',lineHeight:1.8}}>
+        1. Enter a student PRN or name above and click Search<br/>
+        2. View their CO-wise attainment performance<br/>
+        3. Identify gaps (COs below 60% threshold)<br/>
+        4. Follow the personalised remediation plan for each gap CO<br/>
+        <span style={{fontSize:'.78rem',color:'var(--text3)'}}>* Results are based on class-level attainment data. Individual student marks must be uploaded first.</span>
+      </div>
+    </div>}
+  </div>);
+}
+
 // ── APP ───────────────────────────────────────────────────────────────────
 
 
@@ -3163,7 +3389,7 @@ function App(){
 
   if(!user)return<Login onLogin={setUser}/>;
 
-  const titles={home:'Dashboard',courses:'Courses',usermgmt:'User Management',profile:'My Profile',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Level'};
+  const titles={home:'Dashboard',courses:'Courses',usermgmt:'User Management',profile:'My Profile',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Level',students:'Student Roster',materials:'Study Materials',student_portal:'Student Portal'};
 
   const pages={
     home:<HomePage go={setPage} setCourse={saveCourse}/>,
@@ -3176,6 +3402,7 @@ function App(){
     marks:<MarksPage course={course}/>,
     students:<StudentsPage course={course}/>,
     materials:<StudyMaterialsPage course={course}/>,
+    student_portal:<StudentPortalPage course={course}/>,
     attainment:<AttainmentPage course={course}/>,
     reports:<ReportsPage course={course}/>,
     hod:<HodPage/>,
