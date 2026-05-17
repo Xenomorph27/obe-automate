@@ -6,7 +6,7 @@ Used by Session Plan and Evaluation Plan pages for the AI assistant panel.
 """
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 from backend.core.llm import get_llm_response
 from backend.core.logger import get_logger
 from backend.core.auth import get_current_user
@@ -34,23 +34,28 @@ async def table_chat(
     current_user: User = Depends(get_current_user),
 ):
     col_labels = [c.label for c in req.cols]
-    sample_rows = req.rows[:5]
-    sample_text = "\n".join(
-        " | ".join(str(row.get(c.key, "")) for c in req.cols)
-        for row in sample_rows
-    )
-
     context = "session plan (OBE)" if req.plan_type == "session" else "evaluation/assessment plan (OBE)"
+
+    # Send ALL rows with their 0-based index so Gemini can find exact rows
+    # Cap at 200 rows to stay within token limits — sufficient for any real session plan
+    rows_to_send = req.rows[:200]
+    all_rows_text = "\n".join(
+        f"[{i}] " + " | ".join(str(row.get(c.key, "")) for c in req.cols)
+        for i, row in enumerate(rows_to_send)
+    )
 
     prompt = f"""You are an AI assistant editing a {context} table for an engineering college NBA/NAAC accreditation platform.
 
 Current table:
 Columns: {", ".join(col_labels)}
 Total rows: {len(req.rows)}
-Sample rows (first 5):
-{sample_text}
+
+ALL rows (format: [index] col1 | col2 | ...):
+{all_rows_text}
 
 User instruction: {req.user_message}
+
+IMPORTANT for remove_rows: scan ALL rows above to find matching ones by topic/content. Use the [index] number shown. Return ALL matching indices.
 
 Respond ONLY with a single JSON object — no prose, no markdown fences, no explanation.
 
@@ -60,7 +65,7 @@ Available actions:
 - {{"action":"rename_column","old_label":"Old","new_label":"New"}}
 - {{"action":"fill_column","label":"Column Name","values":["val0","val1",...]}}  — exactly {len(req.rows)} entries
 - {{"action":"add_row","data":{{"Column Label":"value",...}}}}
-- {{"action":"remove_rows","indices":[0,2,...]}}
+- {{"action":"remove_rows","indices":[0,2,...]}}  — use the [index] numbers from the rows listed above
 - {{"action":"update_cell","row_index":0,"col_label":"Column Name","value":"new value"}}
 - {{"action":"reorder_rows","from_index":3,"to_index":0}}
 - {{"action":"message","text":"explanation"}}  — only when no table change is needed
@@ -75,7 +80,6 @@ Respond with ONLY the JSON object."""
 
     try:
         raw = await get_llm_response(prompt)
-        # Strip markdown fences if present
         clean = raw.strip()
         if clean.startswith("```"):
             clean = clean.split("```")[1]

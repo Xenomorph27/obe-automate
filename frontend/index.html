@@ -1534,7 +1534,21 @@ function SessionPlanPage({course}){
       case 'rename_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.old_label?.toLowerCase());if(col){setLiveCols(c=>c.map(x=>x.key===col.key?{...x,label:act.new_label}:x));addLiveMsg('ai',`Renamed "${act.old_label}" → "${act.new_label}".`);}break;}
       case 'fill_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>({...row,[col.key]:(act.values||[])[i]||row[col.key]})));flash2(liveRows.map((_,i)=>i));addLiveMsg('ai',`Filled "${act.label}".`);}break;}
       case 'add_row':{const nr={};liveCols.forEach(c=>{nr[c.key]='';});Object.entries(act.data||{}).forEach(([l,v])=>{const col=liveCols.find(c=>c.label.toLowerCase()===l.toLowerCase());if(col)nr[col.key]=v;});setLiveRows(r=>{flash2([r.length]);return[...r,nr];});addLiveMsg('ai','Added row.');break;}
-      case 'remove_rows':{const idxs=new Set(act.indices||[]);setLiveRows(r=>r.filter((_,i)=>!idxs.has(i)));addLiveMsg('ai',`Removed ${idxs.size} row(s).`);break;}
+      case 'remove_rows':{
+        const idxs=new Set(act.indices||[]);
+        // Also support fuzzy text match via act.topic_contains
+        if(act.topic_contains){
+          const term=act.topic_contains.toLowerCase();
+          liveRows.forEach((row,i)=>{
+            const allVals=Object.values(row).join(' ').toLowerCase();
+            if(allVals.includes(term))idxs.add(i);
+          });
+        }
+        if(idxs.size===0){addLiveMsg('ai','No matching rows found. Try using the row number directly, e.g. "remove row 5".');break;}
+        setLiveRows(r=>r.filter((_,i)=>!idxs.has(i)));
+        addLiveMsg('ai',`Removed ${idxs.size} row(s).`);
+        break;
+      }
       case 'update_cell':{const col=liveCols.find(c=>c.label.toLowerCase()===act.col_label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>i===act.row_index?{...row,[col.key]:act.value}:row));flash2([act.row_index]);addLiveMsg('ai',`Updated cell.`);}break;}
       case 'message':addLiveMsg('ai',act.text||'Done!');break;
       default:addLiveMsg('ai','Done!');
@@ -1745,7 +1759,11 @@ function EvalPlanPage({course}){
       case 'rename_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.old_label?.toLowerCase());if(col){setLiveCols(c=>c.map(x=>x.key===col.key?{...x,label:act.new_label}:x));addLiveMsg('ai',`Renamed.`);}break;}
       case 'fill_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>({...row,[col.key]:(act.values||[])[i]||row[col.key]})));flash3(liveRows.map((_,i)=>i));addLiveMsg('ai',`Filled "${act.label}".`);}break;}
       case 'add_row':{const nr={};liveCols.forEach(c=>{nr[c.key]='';});Object.entries(act.data||{}).forEach(([l,v])=>{const col=liveCols.find(c=>c.label.toLowerCase()===l.toLowerCase());if(col)nr[col.key]=v;});setLiveRows(r=>{flash3([r.length]);return[...r,nr];});addLiveMsg('ai','Added row.');break;}
-      case 'remove_rows':{const idxs=new Set(act.indices||[]);setLiveRows(r=>r.filter((_,i)=>!idxs.has(i)));addLiveMsg('ai',`Removed ${idxs.size} row(s).`);break;}
+      case 'remove_rows':{
+        const idxs=new Set(act.indices||[]);
+        if(act.topic_contains){const term=act.topic_contains.toLowerCase();liveRows.forEach((row,i)=>{if(Object.values(row).join(' ').toLowerCase().includes(term))idxs.add(i);});}
+        if(idxs.size===0){addLiveMsg('ai','No matching rows found. Try using the row number directly.');break;}
+        setLiveRows(r=>r.filter((_,i)=>!idxs.has(i)));addLiveMsg('ai',`Removed ${idxs.size} row(s).`);break;}
       case 'update_cell':{const col=liveCols.find(c=>c.label.toLowerCase()===act.col_label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>i===act.row_index?{...row,[col.key]:act.value}:row));flash3([act.row_index]);addLiveMsg('ai','Updated.');}break;}
       case 'message':addLiveMsg('ai',act.text||'Done!');break;
       default:addLiveMsg('ai','Done!');
