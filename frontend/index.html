@@ -1929,70 +1929,129 @@ function StudentsPage({course}){
 
 // ── STUDY MATERIALS ───────────────────────────────────────────────────────
 function StudyMaterialsPage({course}){
-  const textbooks=[
-    {title:"Machine Learning: A Probabilistic Perspective",author:"Kevin P Murphy",publisher:"MIT Press, August 2012"},
-    {title:"Machine Learning: The Art and Science of Algorithms that Make Sense of Data",author:"Peter Flach",publisher:"Cambridge University Press, Edition 2012"},
-  ];
-  const webLinks=[
-    {sr:1,link:"Pattern Recognition and Machine Learning — Christopher M. Bishop",module:"Fundamental concepts",url:""},
-    {sr:2,link:"Hands-On Unsupervised Learning Using Python — Ankur A. Patel",module:"Unit 3, 4",url:""},
-    {sr:3,link:"The Elements of Statistical Learning — Hastie, Tibshirani, Friedman",module:"Unit 2, 3, 4",url:""},
-    {sr:4,link:"NPTEL – Introduction to Machine Learning (IIT Madras)",module:"Overall curriculum",url:"https://nptel.ac.in/courses/106106139"},
-    {sr:5,link:"NPTEL – Machine Learning (IIT Kharagpur)",module:"Overall curriculum",url:"https://nptel.ac.in/courses/106105152"},
-    {sr:6,link:"YouTube – StatQuest with Josh Starmer (PCA, Clustering)",module:"All units",url:"https://www.youtube.com/@statquest"},
-    {sr:7,link:"Towards Data Science – Unsupervised Learning",module:"All units",url:"https://towardsdatascience.com/tagged/unsupervised-learning"},
-  ];
-  const journals=[
-    {sr:1,title:"Towards Data Science Articles on clustering, dimensionality reduction",url:"https://medium.com/data-science/a-dive-into-unsupervised-learning-bf1d6b5f02a7"},
-    {sr:2,title:"Analytics Vidhya — Practical unsupervised learning examples",url:"https://www.analyticsvidhya.com/blog/category/unsupervised/"},
-    {sr:3,title:"Goodfellow et al. — Generative Adversarial Nets",url:"https://arxiv.org/abs/1406.2661"},
-    {sr:4,title:"Kingma & Welling — Auto-Encoding Variational Bayes",url:"https://arxiv.org/abs/1312.6114"},
-  ];
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const [tab,setTab]=useState('textbooks');
+
+  const fetch_=async()=>{
+    if(!course)return;
+    setLoading(true);setErr('');
+    try{
+      const d=await api(`/session-plan/materials/${course.id}`);
+      setData(d.data||d);
+    }catch(e){
+      // If endpoint doesn't exist yet, fall back to what's in the session plan
+      try{
+        const sp=await api(`/session-plan/generate/${course.id}`,{method:'POST'});
+        const plan=sp.data||sp;
+        setData(plan?.study_materials||plan?.materials||null);
+      }catch{setErr('Generate the session plan first to see study materials.');}
+    }
+    setLoading(false);
+  };
+
+  useEffect(()=>{fetch_();},[course]);
+
+  // Flatten materials from all units if data is a session plan structure
+  const textbooks=data?.textbooks||data?.reference_books||[];
+  const webLinks=data?.web_links||data?.online_links||data?.nptel_links||[];
+  const journals=data?.journals||data?.research_papers||[];
+  const moocs=data?.mooc_courses||data?.moocs||[];
+
+  const hasAny=textbooks.length||webLinks.length||journals.length||moocs.length;
 
   return(<div className="page-body fade-up">
-    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.25rem'}}>Study Materials</div>
-    {course&&<div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1.25rem'}}>For: {course.course_name} ({course.course_code})</div>}
-
-    {/* Textbooks */}
-    <div className="card card-p" style={{marginBottom:'1.25rem'}}>
-      <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📚 Textbooks & Reference Books</div>
-      <div className="tbl-wrap"><table>
-        <thead><tr><th>#</th><th>Title</th><th>Author</th><th>Publisher</th></tr></thead>
-        <tbody>{textbooks.map((b,i)=><tr key={i}>
-          <td style={{color:'var(--text3)'}}>{i+1}</td>
-          <td style={{fontWeight:600}}>{b.title}</td>
-          <td>{b.author}</td>
-          <td style={{color:'var(--text2)',fontSize:'.82rem'}}>{b.publisher}</td>
-        </tr>)}</tbody>
-      </table></div>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
+      <div>
+        <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>Study Materials</div>
+        {course&&<div style={{fontSize:'.82rem',color:'var(--text2)',marginTop:'.2rem'}}>{course.course_name} · {course.course_code}</div>}
+      </div>
+      <button className="btn btn-outline" onClick={fetch_} disabled={loading||!course}>
+        {loading?<><Spin/>Loading…</>:'↻ Refresh'}
+      </button>
     </div>
 
-    {/* Web Links */}
-    <div className="card card-p" style={{marginBottom:'1.25rem'}}>
-      <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>🔗 Web Links / NPTEL / YouTube</div>
-      <div className="tbl-wrap"><table>
-        <thead><tr><th>Sr.</th><th>Resource</th><th>Module</th><th>Link</th></tr></thead>
-        <tbody>{webLinks.map((w)=><tr key={w.sr}>
-          <td style={{color:'var(--text3)'}}>{w.sr}</td>
-          <td style={{fontWeight:500,fontSize:'.855rem'}}>{w.link}</td>
-          <td style={{fontSize:'.82rem',color:'var(--text2)'}}>{w.module}</td>
-          <td>{w.url?<a href={w.url} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
-        </tr>)}</tbody>
-      </table></div>
-    </div>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+    <Alrt t="error" msg={err}/>
 
-    {/* Journals */}
-    <div className="card card-p">
-      <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📰 Journals & Research Papers</div>
-      <div className="tbl-wrap"><table>
-        <thead><tr><th>Sr.</th><th>Title</th><th>Link</th></tr></thead>
-        <tbody>{journals.map((j)=><tr key={j.sr}>
-          <td style={{color:'var(--text3)'}}>{j.sr}</td>
-          <td style={{fontWeight:500,fontSize:'.855rem'}}>{j.title}</td>
-          <td><a href={j.url} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a></td>
-        </tr>)}</tbody>
-      </table></div>
-    </div>
+    {loading&&<div className="card card-p" style={{textAlign:'center',padding:'3rem'}}>
+      <Spin/><span style={{color:'var(--text2)',marginLeft:'.5rem'}}>Loading materials…</span>
+    </div>}
+
+    {!loading&&!hasAny&&!err&&course&&<div className="card card-p" style={{textAlign:'center',padding:'3rem',color:'var(--text2)'}}>
+      <div style={{fontSize:'2rem',marginBottom:'1rem'}}>📚</div>
+      <div style={{fontWeight:600,marginBottom:'.5rem'}}>No study materials found</div>
+      <div style={{fontSize:'.855rem'}}>Generate the Session Plan first — materials are extracted from it automatically.</div>
+    </div>}
+
+    {!loading&&hasAny&&<>
+      <div className="tabs">
+        {[['textbooks',`📚 Textbooks (${textbooks.length})`],['web',`🔗 Web / NPTEL (${webLinks.length})`],['journals',`📰 Journals (${journals.length})`],['moocs',`🎓 MOOCs (${moocs.length})`]].map(([t,l])=>(
+          <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{l}</div>
+        ))}
+      </div>
+
+      {tab==='textbooks'&&<div className="card card-p">
+        {textbooks.length===0
+          ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No textbooks found in the session plan.</div>
+          :<div className="tbl-wrap"><table>
+            <thead><tr><th>#</th><th>Title</th><th>Author</th><th>Publisher</th></tr></thead>
+            <tbody>{textbooks.map((b,i)=><tr key={i}>
+              <td style={{color:'var(--text3)'}}>{i+1}</td>
+              <td style={{fontWeight:600,fontSize:'.855rem'}}>{b.title||b.name||b}</td>
+              <td style={{fontSize:'.82rem'}}>{b.author||'—'}</td>
+              <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{b.publisher||b.edition||'—'}</td>
+            </tr>)}</tbody>
+          </table></div>
+        }
+      </div>}
+
+      {tab==='web'&&<div className="card card-p">
+        {webLinks.length===0
+          ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No web links found.</div>
+          :<div className="tbl-wrap"><table>
+            <thead><tr><th>Sr.</th><th>Resource</th><th>Unit / Module</th><th>Link</th></tr></thead>
+            <tbody>{webLinks.map((w,i)=><tr key={i}>
+              <td style={{color:'var(--text3)'}}>{i+1}</td>
+              <td style={{fontWeight:500,fontSize:'.855rem'}}>{w.title||w.name||w.link||w}</td>
+              <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{w.unit||w.module||'—'}</td>
+              <td>{(w.url||w.link_url||w.href)?<a href={w.url||w.link_url||w.href} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
+            </tr>)}</tbody>
+          </table></div>
+        }
+      </div>}
+
+      {tab==='journals'&&<div className="card card-p">
+        {journals.length===0
+          ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No journals or research papers found.</div>
+          :<div className="tbl-wrap"><table>
+            <thead><tr><th>Sr.</th><th>Title</th><th>Link</th></tr></thead>
+            <tbody>{journals.map((j,i)=><tr key={i}>
+              <td style={{color:'var(--text3)'}}>{i+1}</td>
+              <td style={{fontWeight:500,fontSize:'.855rem'}}>{j.title||j.name||j}</td>
+              <td>{(j.url||j.doi)?<a href={j.url||j.doi} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
+            </tr>)}</tbody>
+          </table></div>
+        }
+      </div>}
+
+      {tab==='moocs'&&<div className="card card-p">
+        {moocs.length===0
+          ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No MOOC recommendations found.</div>
+          :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'1rem'}}>
+            {moocs.map((m,i)=>(
+              <div key={i} style={{padding:'1rem',border:'1px solid var(--border)',borderRadius:10,background:'var(--bg)'}}>
+                <div style={{fontWeight:600,fontSize:'.875rem',marginBottom:'.35rem'}}>{m.title||m.name||m.course||m}</div>
+                {m.platform&&<div style={{fontSize:'.78rem',color:'var(--blue2)',marginBottom:'.35rem'}}>{m.platform}</div>}
+                {m.duration&&<div style={{fontSize:'.75rem',color:'var(--text3)'}}>⏱ {m.duration}</div>}
+                {(m.url||m.link)&&<a href={m.url||m.link} target="_blank" rel="noreferrer" style={{display:'inline-block',marginTop:'.5rem',fontSize:'.78rem',color:'var(--blue2)'}}>Enroll →</a>}
+              </div>
+            ))}
+          </div>
+        }
+      </div>}
+    </>}
   </div>);
 }
 
@@ -2341,17 +2400,171 @@ function AttainmentPage({course}){
 
 // ── REPORTS ───────────────────────────────────────────────────────────────
 function ReportsPage({course}){
-  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
-  const gen=async()=>{if(!course){setErr('Select a course.');return;}setLoading(true);setErr('');setOk('');
-    try{await api(`/attainment/nba-report/${course.id}`,{method:'POST'});setOk('NBA/NAAC PDF generated!');}
-    catch(e){setErr(e.message);}setLoading(false);};
-  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>NBA / NAAC Reports</div>
-    {!course&&<Alrt t="warning" msg="Select a course first."/>}
-    <div style={{display:'flex',gap:'.875rem',flexWrap:'wrap',marginBottom:'1.25rem'}}>
-      <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating PDF…</>:'📊 Generate NBA/NAAC PDF'}</button>
-      {course&&<a href={`${API}/attainment/nba-report/download/${course.id}`} className="btn btn-outline" style={{textDecoration:'none'}}>⬇ Download PDF</a>}
+  const [nbaLoading,setNbaLoading]=useState(false);
+  const [attLoading,setAttLoading]=useState(false);
+  const [courseFileLoading,setCourseFileLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const [statuses,setStatuses]=useState({nba:'idle',att:'idle',coursefile:'idle'});
+  const set=(k,v)=>setStatuses(s=>({...s,[k]:v}));
+
+  const genNba=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setNbaLoading(true);setErr('');set('nba','loading');
+    try{
+      await api(`/attainment/nba-report/${course.id}`,{method:'POST'});
+      set('nba','done');
+    }catch(e){setErr(e.message);set('nba','idle');}
+    setNbaLoading(false);
+  };
+
+  const genAtt=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setAttLoading(true);setErr('');set('att','loading');
+    try{
+      await api(`/attainment/report/${course.id}`,{method:'POST'});
+      set('att','done');
+    }catch(e){setErr(e.message);set('att','idle');}
+    setAttLoading(false);
+  };
+
+  const genCourseFile=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setCourseFileLoading(true);setErr('');set('coursefile','loading');
+    try{
+      // Course file = attainment report + NBA report bundled; trigger both
+      await api(`/attainment/report/${course.id}`,{method:'POST'});
+      await api(`/attainment/nba-report/${course.id}`,{method:'POST'});
+      set('coursefile','done');
+    }catch(e){setErr(e.message);set('coursefile','idle');}
+    setCourseFileLoading(false);
+  };
+
+  const StatusBadge=({s})=>{
+    if(s==='done')return<span className="badge b-green">✓ Ready to download</span>;
+    if(s==='loading')return<span className="badge b-blue"><span className="spin"/>Generating…</span>;
+    return<span className="badge b-gray">Not generated</span>;
+  };
+
+  const reports=[
+    {
+      key:'nba',
+      icon:'🏆',
+      title:'NBA / NAAC PDF Report',
+      desc:'Full NBA-format PDF with CO/PO attainment charts, gap analysis, CO-PO correlation matrix, and AI-generated recommendations. Required for accreditation submissions.',
+      color:'#dbeafe',
+      tc:'#1d4ed8',
+      onGen:genNba,
+      loading:nbaLoading,
+      downloadHref:course?`${API}/attainment/nba-report/download/${course.id}`:null,
+      downloadLabel:'⬇ Download PDF',
+    },
+    {
+      key:'att',
+      icon:'📊',
+      title:'CO/PO Attainment Report (Word)',
+      desc:'Detailed Word document with student-wise CO attainment, class average, remedial flags, and PO attainment via CO-PO matrix.',
+      color:'#d1fae5',
+      tc:'#065f46',
+      onGen:genAtt,
+      loading:attLoading,
+      downloadHref:course?`${API}/attainment/download/${course.id}`:null,
+      downloadLabel:'⬇ Download .docx',
+    },
+    {
+      key:'coursefile',
+      icon:'📁',
+      title:'Full Course File',
+      desc:'One-click generation of the complete NBA/NAAC course file — includes session plan, evaluation plan, question papers, marks analysis, and CO/PO attainment. Download all separately after generation.',
+      color:'#ede9fe',
+      tc:'#6d28d9',
+      onGen:genCourseFile,
+      loading:courseFileLoading,
+      downloadHref:null,
+      downloadLabel:null,
+    },
+    {
+      key:'session',
+      icon:'📅',
+      title:'Session Plan (.docx)',
+      desc:'Download the original AI-generated session plan Word document with unit-wise topic breakdown, methodology, and CO mapping.',
+      color:'#fef3c7',
+      tc:'#b45309',
+      onGen:null,
+      loading:false,
+      downloadHref:course?`${API}/session-plan/download/${course.id}`:null,
+      downloadLabel:'⬇ Download .docx',
+    },
+    {
+      key:'eval',
+      icon:'📋',
+      title:'Evaluation Plan (.docx)',
+      desc:'Download the original AI-generated evaluation plan Word document with CA component breakdown, marks, weightage, and CO mapping.',
+      color:'#fce7f3',
+      tc:'#be185d',
+      onGen:null,
+      loading:false,
+      downloadHref:course?`${API}/evaluation-plan/download/${course.id}`:null,
+      downloadLabel:'⬇ Download .docx',
+    },
+    {
+      key:'qpaper',
+      icon:'❓',
+      title:'Question Paper (.docx + PDF)',
+      desc:'Download the last generated question paper with Bloom\'s tags, PI tags, difficulty split, and CO mapping.',
+      color:'#ccfbf1',
+      tc:'#0f766e',
+      onGen:null,
+      loading:false,
+      downloadHref:course?`${API}/questions/paper/download/${course.id}/docx`:null,
+      downloadLabel:'⬇ Download .docx',
+      downloadHref2:course?`${API}/questions/paper/download/${course.id}/pdf`:null,
+      downloadLabel2:'⬇ Download PDF',
+    },
+  ];
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.35rem'}}>NBA / NAAC Reports</div>
+    <div style={{fontSize:'.855rem',color:'var(--text2)',marginBottom:'1.5rem'}}>Generate and download all course documents for accreditation</div>
+
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+    <Alrt t="error" msg={err}/>
+
+    {course&&<div style={{background:'linear-gradient(135deg,#1e3a5f,#1d4ed8)',borderRadius:14,padding:'1.25rem 1.5rem',marginBottom:'1.5rem',color:'#fff',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:700,fontSize:'1rem'}}>{course.course_name}</div>
+        <div style={{fontSize:'.82rem',opacity:.75,marginTop:'.2rem'}}>{course.course_code} · {course.department} · Sem {course.semester}</div>
+      </div>
+      <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+        <span style={{background:'rgba(255,255,255,.15)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{(course.cos||[]).length} COs</span>
+        <span style={{background:'rgba(255,255,255,.15)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{(course.pos||[]).length} POs</span>
+        <span style={{background:'rgba(255,255,255,.15)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{course.total_hours} hrs</span>
+      </div>
+    </div>}
+
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(360px,1fr))',gap:'1rem'}}>
+      {reports.map(r=>(
+        <div key={r.key} className="card card-p" style={{borderTop:`3px solid ${r.tc}`}}>
+          <div style={{display:'flex',alignItems:'flex-start',gap:.875+'rem',marginBottom:'.875rem'}}>
+            <div style={{width:44,height:44,borderRadius:12,background:r.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',flexShrink:0}}>{r.icon}</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:'.9rem',color:'var(--text)'}}>{r.title}</div>
+              <div style={{marginTop:'.35rem'}}><StatusBadge s={statuses[r.key]||'idle'}/></div>
+            </div>
+          </div>
+          <div style={{fontSize:'.82rem',color:'var(--text2)',lineHeight:1.6,marginBottom:'1rem'}}>{r.desc}</div>
+          <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+            {r.onGen&&<button className="btn btn-primary btn-sm" onClick={r.onGen} disabled={r.loading||!course}>
+              {r.loading?<><Spin/>Generating…</>:'✨ Generate'}
+            </button>}
+            {r.downloadHref&&<a href={r.downloadHref} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel}</a>}
+            {r.downloadHref2&&<a href={r.downloadHref2} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel2}</a>}
+          </div>
+          {r.key==='coursefile'&&statuses.coursefile==='done'&&<div style={{marginTop:'.75rem',padding:'.6rem',background:'#f0fdf4',borderRadius:8,fontSize:'.78rem',color:'#166534',border:'1px solid #bbf7d0'}}>
+            ✓ Generated. Download the Attainment Report and NBA PDF above.
+          </div>}
+        </div>
+      ))}
     </div>
-    <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
   </div>);
 }
 
