@@ -196,6 +196,114 @@ async def upload_marks(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/marks/{course_id}")
+async def get_marks(
+    course_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return all student marks records for a course as a list of dicts.
+    Used by the frontend to display and edit uploaded marks.
+    """
+    from sqlalchemy import select as _select
+    from backend.database.models import COAttainment
+    logger.info(f"Fetching marks for course_id={course_id}")
+    try:
+        result = await db.execute(
+            _select(COAttainment).where(COAttainment.course_id == course_id)
+        )
+        records = result.scalars().all()
+        return {"status": "success", "data": [r.to_dict() for r in records], "total": len(records)}
+    except Exception:
+        logger.exception(f"Error fetching marks for course {course_id}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.put("/marks/{course_id}/student/{student_id}", status_code=200)
+async def update_student_marks(
+    course_id: int,
+    student_id: str,
+    request: MarksUploadRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update marks for a single student in a course.
+    Finds the existing COAttainment record by course_id + student_id and patches marks.
+    """
+    from sqlalchemy import select as _select
+    from backend.database.models import COAttainment
+    logger.info(f"Updating marks for course_id={course_id} student_id={student_id}")
+    try:
+        result = await db.execute(
+            _select(COAttainment).where(
+                COAttainment.course_id == course_id,
+                COAttainment.student_id == student_id,
+            )
+        )
+        rec = result.scalar_one_or_none()
+        if not rec:
+            raise HTTPException(status_code=404, detail=f"No marks found for student_id={student_id}")
+        student_data = request.students[0]
+        rec.student_name = student_data.student_name
+        rec.marks = student_data.marks
+        await db.commit()
+        await db.refresh(rec)
+        return {"status": "success", "data": rec.to_dict()}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(f"Error updating marks for course {course_id} student {student_id}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/documents/{course_id}")
+async def list_documents(course_id: int):
+    """
+    List all generated documents for a course (session plan, evaluation plan,
+    attainment report, NBA report, question papers).
+    Returns filename, category, size, download URL.
+    """
+    from backend.core.storage import get_storage
+    storage = get_storage()
+    docs = []
+    checks = [
+        ("session_plans",     f"session_plan_{course_id}.docx",    "Session Plan",        f"/session-plan/download/{course_id}",            "📅"),
+        ("evaluation_plans",  f"eval_plan_{course_id}.docx",       "Evaluation Plan",     f"/evaluation-plan/download/{course_id}",          "📋"),
+        ("attainment_reports",f"attainment_report_{course_id}.docx","Attainment Report",  f"/attainment/download/{course_id}",               "📊"),
+        ("nba_reports",       f"nba_report_{course_id}.pdf",        "NBA/NAAC PDF",        f"/attainment/nba-report/download/{course_id}",    "🏆"),
+        ("question_papers",   f"qpaper_{course_id}_latest.docx",    "Question Paper (.docx)",f"/questions/paper/download/{course_id}/docx",  "❓"),
+        ("question_papers",   f"qpaper_{course_id}_latest.pdf",     "Question Paper (.pdf)", f"/questions/paper/download/{course_id}/pdf",   "❓"),
+    ]
+    for category, filename, label, url, icon in checks:
+        p = storage.get_path(category, filename)
+        if p and p.exists():
+            stat = p.stat()
+            docs.append({
+                "label": label,
+                "filename": filename,
+                "category": category,
+                "icon": icon,
+                "size_kb": round(stat.st_size / 1024, 1),
+                "download_url": url,
+                "generated_at": stat.st_mtime,
+            })
+        else:
+            # Also try listing by prefix for question papers which may have timestamps
+            if category == "question_papers":
+                files = storage.list_files(category, prefix=f"qpaper_{course_id}_")
+                for f in files:
+                    stat = f.stat()
+                    ext = f.suffix
+                    lbl = f"Question Paper ({ext})"
+                    dl_url = f"/questions/paper/download/{course_id}/docx" if ext == ".docx" else f"/questions/paper/download/{course_id}/pdf"
+                    docs.append({
+                        "label": lbl, "filename": f.name, "category": category,
+                        "icon": "❓", "size_kb": round(stat.st_size / 1024, 1),
+                        "download_url": dl_url, "generated_at": stat.st_mtime,
+                    })
+    return {"status": "success", "data": docs, "total": len(docs)}
+
+
 @router.get("/calculate/{course_id}")
 async def calculate_attainment(
     course_id: int,

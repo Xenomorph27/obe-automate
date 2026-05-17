@@ -879,7 +879,7 @@ function CourseDetailPage({course,go,setCourse}){
 
     {/* ── Tabs ── */}
     <div className="tabs">
-      {[['overview','Overview'],['cos','Course Outcomes'],['matrix','CO-PO Matrix'],['evaluation','Eval Config']].map(([t,l])=>(
+      {[['overview','Overview'],['cos','Course Outcomes'],['matrix','CO-PO Matrix'],['evaluation','Eval Config'],['documents','📎 Documents']].map(([t,l])=>(
         <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>{setTab(t);}}>{l}</div>
       ))}
     </div>
@@ -1001,6 +1001,49 @@ function CourseDetailPage({course,go,setCourse}){
         </div>
       </div>
     </div>}
+
+    {/* ── Documents Tab ── */}
+    {tab==='documents'&&<DocsTab course={course}/>}
+  </div>);
+}
+
+function DocsTab({course}){
+  const [docs,setDocs]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
+  const load=async()=>{
+    if(!course)return;
+    setLoading(true);setErr('');
+    try{
+      const d=await api(`/attainment/documents/${course.id}`);
+      setDocs(d.data||[]);
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[course]);
+  const fmtSize=(kb)=>kb>=1024?`${(kb/1024).toFixed(1)} MB`:`${kb} KB`;
+  const fmtDate=(ts)=>ts?new Date(ts*1000).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+  return(<div>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
+      <div style={{fontWeight:700,fontSize:'.95rem'}}>📎 Generated Documents</div>
+      <button className="btn btn-outline btn-sm" onClick={load} disabled={loading}>{loading?<><Spin/>Refreshing…</>:'↺ Refresh'}</button>
+    </div>
+    <Alrt t="error" msg={err}/>
+    {loading?<Skel/>:docs.length===0?
+      <Alrt t="info" msg="No documents generated yet for this course. Generate session plan, evaluation plan, marks report or NBA report first."/>:
+      <div className="tbl-wrap"><table>
+        <thead><tr><th>Document</th><th>File</th><th>Size</th><th>Last Generated</th><th style={{textAlign:'center'}}>Download</th></tr></thead>
+        <tbody>{docs.map((d,i)=>(
+          <tr key={i}>
+            <td><span style={{marginRight:'.4rem'}}>{d.icon}</span><strong>{d.label}</strong></td>
+            <td style={{fontSize:'.78rem',color:'var(--text3)',fontFamily:'monospace'}}>{d.filename}</td>
+            <td style={{fontSize:'.82rem',color:'var(--text2)'}}>{fmtSize(d.size_kb)}</td>
+            <td style={{fontSize:'.8rem',color:'var(--text2)'}}>{fmtDate(d.generated_at)}</td>
+            <td style={{textAlign:'center'}}>
+              <a href={API+d.download_url} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm" style={{textDecoration:'none',fontSize:'.78rem'}}>⬇ Download</a>
+            </td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+    }
   </div>);
 }
 
@@ -2793,6 +2836,10 @@ function MarksPage({course}){
   const [students,setStudents]=useState([]);const [fetching,setFetching]=useState(false);
   // manual entry state
   const [manualStudents,setManualStudents]=useState([]);const [saving,setSaving]=useState(false);
+  // current marks state
+  const [currentMarks,setCurrentMarks]=useState([]);const [currentLoading,setCurrentLoading]=useState(false);
+  const [currentErr,setCurrentErr]=useState('');const [currentOk,setCurrentOk]=useState('');
+  const [editingRow,setEditingRow]=useState(null);const [editBuf,setEditBuf]=useState({});const [savingRow,setSavingRow]=useState(null);
   const cos=course?.cos||[];
   const components=Object.keys(course?.evaluation_config?.components||{});
   const maxMarks=course?.evaluation_config?.components||{};
@@ -2812,6 +2859,34 @@ function MarksPage({course}){
     setFetching(false);
   };
 
+  const fetchCurrentMarks=async()=>{
+    if(!course)return;
+    setCurrentLoading(true);setCurrentErr('');
+    try{
+      const d=await api(`/attainment/marks/${course.id}`);
+      setCurrentMarks(d.data||[]);
+    }catch(e){
+      if(e.message&&e.message.includes('No student marks'))setCurrentMarks([]);
+      else setCurrentErr(e.message);
+    }
+    setCurrentLoading(false);
+  };
+
+  const startEdit=(rec)=>{setEditingRow(rec.student_id);setEditBuf(JSON.parse(JSON.stringify(rec.marks)));};
+  const cancelEdit=()=>{setEditingRow(null);setEditBuf({});};
+
+  const saveEdit=async(rec)=>{
+    setSavingRow(rec.student_id);setCurrentErr('');setCurrentOk('');
+    try{
+      const payload={students:[{student_id:rec.student_id,student_name:rec.student_name,marks:editBuf}]};
+      await api(`/attainment/marks/${course.id}/student/${encodeURIComponent(rec.student_id)}`,{method:'PUT',body:JSON.stringify(payload)});
+      setCurrentOk(`✓ Marks updated for ${rec.student_name}`);
+      setEditingRow(null);setEditBuf({});
+      fetchCurrentMarks();fetchMarksPreview();
+    }catch(e){setCurrentErr(e.message);}
+    setSavingRow(null);
+  };
+
   const uploadXlsx=async()=>{
     if(!course){setErr('Select a course.');return;}
     if(!file){setErr('Select an xlsx file.');return;}
@@ -2822,8 +2897,9 @@ function MarksPage({course}){
       if(!r.ok){const e=await r.json();throw new Error(e.detail||'Upload failed');}
       const d=await r.json();
       const ud=d.data||d;
-      setOk(`✓ Uploaded ${ud.parsed_students||d.parsed_students||'all'} students. Switch to "CO Summary" to see results.`);
+      setOk(`✓ Uploaded ${ud.parsed_students||d.parsed_students||'all'} students. View and edit in "Current Marks" tab.`);
       setFile(null);
+      setTab('current');
       fetchMarksPreview();
     }catch(e){setErr(e.message);}
     setLoading(false);
@@ -2857,13 +2933,14 @@ function MarksPage({course}){
   };
 
   useEffect(()=>{if(tab==='summary')fetchMarksPreview();},[tab,course]);
+  useEffect(()=>{if(tab==='current')fetchCurrentMarks();},[tab,course]);
 
   return(<div className="page-body fade-up">
     <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.25rem'}}>Upload Student Marks</div>
     {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
 
     <div className="tabs" style={{marginBottom:'1.25rem'}}>
-      {[['upload','📤 Upload xlsx'],['manual','✏️ Manual Entry'],['summary','📊 CO Summary']].map(([t,l])=>(
+      {[['upload','📤 Upload xlsx'],['manual','✏️ Manual Entry'],['current','📋 Current Marks'],['summary','📊 CO Summary']].map(([t,l])=>(
         <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{l}</div>
       ))}
     </div>
@@ -2923,6 +3000,70 @@ function MarksPage({course}){
           {saving?<><Spin/>Saving…</>:'💾 Save Marks'}
         </button>}
       </div>
+    </div>}
+
+    {/* ── Current Marks Tab ── */}
+    {tab==='current'&&<div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
+        <div style={{fontWeight:700,fontSize:'.95rem'}}>📋 Student-wise Marks (Editable)</div>
+        <button className="btn btn-outline btn-sm" onClick={fetchCurrentMarks} disabled={currentLoading}>{currentLoading?<><Spin/>Loading…</>:'↺ Refresh'}</button>
+      </div>
+      <Alrt t="error" msg={currentErr}/><Alrt t="success" msg={currentOk}/>
+      {currentLoading?<Skel/>:currentMarks.length===0?
+        <Alrt t="info" msg="No marks uploaded yet. Upload an xlsx or use Manual Entry first."/>:
+        (()=>{
+          // Collect all COs and components from first record
+          const allCOs=Object.keys(currentMarks[0]?.marks||{});
+          const allComps=[...new Set(currentMarks.flatMap(r=>allCOs.flatMap(co=>Object.keys(r.marks[co]||{}))))];
+          return(<div className="tbl-wrap"><table>
+            <thead>
+              <tr>
+                <th style={{minWidth:100}}>PRN</th>
+                <th style={{minWidth:160}}>Student Name</th>
+                {allCOs.map(co=>(
+                  <th key={co} colSpan={allComps.length} style={{textAlign:'center',background:'var(--blue3)',color:'var(--blue2)'}}>{co}</th>
+                ))}
+                <th style={{textAlign:'center'}}>Actions</th>
+              </tr>
+              <tr>
+                <th/><th/>
+                {allCOs.flatMap(co=>allComps.map(comp=>(
+                  <th key={co+comp} style={{textAlign:'center',fontSize:'.74rem',color:'var(--text3)',fontWeight:500}}>{comp}</th>
+                )))}
+                <th/>
+              </tr>
+            </thead>
+            <tbody>{currentMarks.map(rec=>{
+              const isEditing=editingRow===rec.student_id;
+              const isSaving=savingRow===rec.student_id;
+              return(<tr key={rec.student_id} style={{background:isEditing?'var(--blue3)':''}}>
+                <td style={{fontFamily:'monospace',fontSize:'.8rem'}}>{rec.student_id}</td>
+                <td style={{fontSize:'.85rem',fontWeight:isEditing?600:'normal'}}>{rec.student_name}</td>
+                {allCOs.flatMap(co=>allComps.map(comp=>{
+                  const val=isEditing?(editBuf[co]?.[comp]??''):(rec.marks[co]?.[comp]??'—');
+                  return(<td key={co+comp} style={{textAlign:'center'}}>
+                    {isEditing?
+                      <input type="number" min="0" value={editBuf[co]?.[comp]??''} style={{width:52,textAlign:'center',border:'1px solid var(--blue2)',borderRadius:5,padding:'2px 4px',fontSize:'.82rem'}}
+                        onChange={e=>{const v=e.target.value;setEditBuf(b=>{const nb=JSON.parse(JSON.stringify(b));if(!nb[co])nb[co]={};nb[co][comp]=v===''?'':parseFloat(v)||0;return nb;});}}/>
+                      :<span style={{fontSize:'.83rem',color:val==='—'?'var(--text3)':'var(--text)'}}>{val}</span>
+                    }
+                  </td>);
+                }))}
+                <td style={{textAlign:'center',whiteSpace:'nowrap'}}>
+                  {isEditing?(<>
+                    <button className="btn btn-primary btn-sm" onClick={()=>saveEdit(rec)} disabled={isSaving} style={{marginRight:4,fontSize:'.75rem'}}>
+                      {isSaving?<><Spin/>Saving…</>:'💾 Save'}
+                    </button>
+                    <button className="btn btn-outline btn-sm" onClick={cancelEdit} style={{fontSize:'.75rem'}}>✕ Cancel</button>
+                  </>):(
+                    <button className="btn btn-outline btn-sm" onClick={()=>startEdit(rec)} style={{fontSize:'.75rem'}}>✎ Edit</button>
+                  )}
+                </td>
+              </tr>);
+            })}</tbody>
+          </table></div>);
+        })()
+      }
     </div>}
 
     {/* ── CO Summary Tab ── */}
