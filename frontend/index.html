@@ -1112,7 +1112,7 @@ function SyllabusPage({onExtracted}){
   const [editingUnits,setEditingUnits]=useState([]);
 
   const upload=async()=>{if(!file){setErr('Select a PDF.');return;}setLoading(true);setErr('');setRes(null);
-    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('token')}});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;
+    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;
       setRes(d);
       setEditRes({course_name:d.course_name||'',course_code:d.course_code||'',credits:d.credits||4});
       setEditingCos((d.course_outcomes||d.cos||[]).map(co=>({...co})));
