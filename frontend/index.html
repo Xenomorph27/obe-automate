@@ -8,6 +8,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -1478,10 +1479,28 @@ function EditableTable({cols,rows,flashSet,updateCell,removeRow,onAddCol,onRemov
   };
 
   const SelectCell=({col,value,ri})=>{
-    return(<select value={value} onChange={e=>updateCell(ri,col.key,e.target.value)}
-      style={{width:'100%',background:'transparent',border:'none',fontSize:'.8rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',cursor:'pointer',outline:'none',padding:0}}>
-      {(col.opts||typeOpts||[]).map(o=><option key={o}>{o}</option>)}
-    </select>);
+    const opts=col.opts||typeOpts||[];
+    const isCustom=value&&!opts.includes(value);
+    const [custom,setCustom]=useState(isCustom);
+    useEffect(()=>{setCustom(value&&!opts.includes(value));},[value]);
+    const listId=`combo-${col.key}-${ri}`;
+    if(custom){
+      return(<div style={{display:'flex',alignItems:'center',gap:2,width:'100%'}}>
+        <input value={value} onChange={e=>updateCell(ri,col.key,e.target.value)}
+          style={{flex:1,background:'transparent',border:'none',fontSize:'.8rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',outline:'none',padding:0,minWidth:0}}/>
+        <span title="Use dropdown" onClick={()=>{updateCell(ri,col.key,opts[0]);setCustom(false);}}
+          style={{cursor:'pointer',fontSize:'.7rem',color:'var(--text3)',flexShrink:0}}>▾</span>
+      </div>);
+    }
+    return(<div style={{display:'flex',alignItems:'center',gap:2,width:'100%'}}>
+      <select value={value} onChange={e=>{
+        if(e.target.value==='__custom__'){updateCell(ri,col.key,'');setCustom(true);}
+        else updateCell(ri,col.key,e.target.value);
+      }} style={{flex:1,background:'transparent',border:'none',fontSize:'.8rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',cursor:'pointer',outline:'none',padding:0,minWidth:0}}>
+        {opts.map(o=><option key={o}>{o}</option>)}
+        <option value="__custom__">✎ Custom…</option>
+      </select>
+    </div>);
   };
 
   const EditableCell=({col,value,ri})=>{
@@ -2338,12 +2357,15 @@ function StudyMaterialsPage({course}){
     setFileLabel(f.name);
     const isDocx=f.name.endsWith('.docx');
     const r=new FileReader();
-    r.onload=ev=>{
+    r.onload=async ev=>{
       let parsedItems=[];
       if(isDocx){
         try{
-          const decoder=new TextDecoder('utf-8');
-          const raw=decoder.decode(new Uint8Array(ev.target.result));
+          // .docx is a ZIP archive — use JSZip to unpack word/document.xml properly
+          const zip=await JSZip.loadAsync(ev.target.result);
+          const xmlFile=zip.file('word/document.xml');
+          if(!xmlFile){setAddMsg('Could not read .docx: missing word/document.xml.');setTimeout(()=>setAddMsg(''),4000);return;}
+          const raw=await xmlFile.async('string');
 
           // Extract all paragraph text (headings + body)
           const allParas=[];
@@ -3924,18 +3946,19 @@ function UserMgmtPage({currentUser}){
   );
 
   return(
-    <div className="page-body">
+    <div className="page-body fade-up">
+      <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:'1.25rem'}}>
+        <div>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',lineHeight:1.2}}>User Management</div>
+          <div style={{fontSize:'.85rem',color:'var(--text2)',marginTop:'.2rem'}}>{users.length} accounts registered</div>
+        </div>
+        <button className="btn btn-primary" onClick={()=>setShowCreate(s=>!s)}>+ Add User</button>
+      </div>
       <Alrt t="error" msg={err}/>
       <Alrt t="success" msg={ok}/>
 
       <div className="card" style={{marginBottom:'1.25rem'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
-          <div>
-            <div style={{fontWeight:700,fontSize:'1rem'}}>All Users</div>
-            <div style={{fontSize:'.8rem',color:'var(--text2)'}}>{users.length} accounts registered</div>
-          </div>
-          <button className="btn btn-primary" onClick={()=>setShowCreate(s=>!s)}>+ Add User</button>
-        </div>
+        <div>
 
         {showCreate&&(
           <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1.25rem',marginBottom:'1.25rem'}}>

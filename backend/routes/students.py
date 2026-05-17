@@ -140,3 +140,67 @@ async def get_students(
     except Exception as e:
         logger.error(f"Get students error: {e}")
         return {"status": "success", "data": [], "total": 0}
+
+
+from pydantic import BaseModel
+
+class StudentRosterUpdate(BaseModel):
+    students: list  # [{prn, name, section}, ...]
+
+
+@router.put("/update/{course_id}")
+async def update_students(
+    course_id: int,
+    body: StudentRosterUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """
+    Replace the entire student roster for a course with the provided list.
+    Deletes all existing students for the course, then inserts the new list.
+    """
+    from sqlalchemy import text
+    students = body.students
+    if not isinstance(students, list):
+        raise HTTPException(400, "students must be a list")
+
+    try:
+        # Ensure table exists
+        await db.execute(text("""
+            CREATE TABLE IF NOT EXISTS students (
+                id SERIAL PRIMARY KEY,
+                course_id INTEGER NOT NULL,
+                prn TEXT NOT NULL,
+                name TEXT NOT NULL,
+                section TEXT DEFAULT 'A',
+                UNIQUE(course_id, prn)
+            )
+        """))
+
+        # Delete existing roster for this course
+        await db.execute(text("DELETE FROM students WHERE course_id=:cid"), {"cid": course_id})
+
+        inserted = 0
+        for s in students:
+            prn = str(s.get("prn", "")).strip()
+            name = str(s.get("name", "")).strip()
+            section = str(s.get("section", "A")).strip() or "A"
+            if not prn or not name:
+                continue
+            await db.execute(text("""
+                INSERT INTO students (course_id, prn, name, section)
+                VALUES (:course_id, :prn, :name, :section)
+                ON CONFLICT (course_id, prn) DO UPDATE
+                  SET name=EXCLUDED.name, section=EXCLUDED.section
+            """), {"course_id": course_id, "prn": prn, "name": name, "section": section})
+            inserted += 1
+
+        await db.commit()
+        logger.info(f"Updated roster for course_id={course_id}: {inserted} students saved")
+        return {
+            "status": "success",
+            "data": {"saved": inserted, "total": len(students)}
+        }
+    except Exception as e:
+        logger.error(f"Student roster update error: {e}")
+        raise HTTPException(500, f"Failed to update roster: {str(e)}")

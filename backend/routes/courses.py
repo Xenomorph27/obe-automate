@@ -50,6 +50,21 @@ class CourseSetupRequest(BaseModel):
     evaluation_config: EvaluationConfig
 
 
+class CourseUpdateRequest(BaseModel):
+    course_name: str | None = None
+    course_code: str | None = None
+    credits: int | None = None
+    total_hours: int | None = None
+    faculty_name: str | None = None
+    department: str | None = None
+    semester: str | None = None
+    academic_year: str | None = None
+    cos: List[CourseOutcome] | None = None
+    pos: List[ProgramOutcome] | None = None
+    co_po_matrix: Dict[str, Dict[str, int]] | None = None
+    evaluation_config: EvaluationConfig | None = None
+
+
 # --- Routes ---
 
 @router.post("/setup", status_code=201)
@@ -105,4 +120,27 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
         return {"status": "success", "count": len(courses), "data": courses}
     except Exception:
         logger.exception("Error listing courses")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.put("/{course_id}")
+async def update_course(
+    course_id: int,
+    request: CourseUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update an existing course's fields (partial update — only non-None fields applied)."""
+    logger.info(f"Course update request for id={course_id}")
+    try:
+        service = CourseService(db)
+        course = await service.update_course(course_id, request)
+        return {
+            "status": "success",
+            "message": "Course updated successfully",
+            "data": course.to_dict()
+        }
+    except OBEException as e:
+        logger.error(f"Course update failed: {e.message}")
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+    except Exception as e:
+        logger.exception("Unexpected error during course update")
         raise HTTPException(status_code=500, detail="Internal server error")

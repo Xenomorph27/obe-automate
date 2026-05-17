@@ -44,49 +44,139 @@ async def table_chat(
         for i, row in enumerate(rows_to_send)
     )
 
-    prompt = f"""You are an AI assistant editing a {context} table for an engineering college NBA/NAAC accreditation platform.
+    n_rows = len(req.rows)
+    prompt = f"""You are an AI table editor for an OBE (Outcome-Based Education) {context} used in NBA/NAAC accreditation at an Indian engineering college.
 
-Current table:
-Columns: {", ".join(col_labels)}
-Total rows: {len(req.rows)}
+=== CURRENT TABLE ===
+Columns (in order): {", ".join(col_labels)}
+Total rows: {n_rows}
 
-ALL rows (format: [index] col1 | col2 | ...):
+ALL rows (format: [index] col1 | col2 | col3 | ...):
 {all_rows_text}
 
-User instruction: {req.user_message}
+=== USER INSTRUCTION ===
+{req.user_message}
 
-IMPORTANT for remove_rows: scan ALL rows above to find matching ones by topic/content. Use the [index] number shown. Return ALL matching indices.
+=== YOUR TASK ===
+Step 1 — THINK: Identify exactly what the user wants. Map their intent to ONE of the actions below.
+Step 2 — PICK the single best action. Do not combine multiple actions into one response.
+Step 3 — OUTPUT: Respond with ONLY a valid JSON object. No prose, no markdown, no code fences, no explanation.
 
-Respond ONLY with a single JSON object — no prose, no markdown fences, no explanation.
+=== ACTION SCHEMAS (pick exactly one) ===
 
-Available actions:
-- {{"action":"add_column","label":"Column Name","values":["val for row 0","val for row 1",...]}}  — values array must have exactly {len(req.rows)} entries
-- {{"action":"remove_column","label":"exact column label"}}
-- {{"action":"rename_column","old_label":"Old","new_label":"New"}}
-- {{"action":"fill_column","label":"Column Name","values":["val0","val1",...]}}  — exactly {len(req.rows)} entries
-- {{"action":"add_row","data":{{"Column Label":"value",...}}}}
-- {{"action":"remove_rows","indices":[0,2,...]}}  — use the [index] numbers from the rows listed above
-- {{"action":"update_cell","row_index":0,"col_label":"Column Name","value":"new value"}}
-- {{"action":"reorder_rows","from_index":3,"to_index":0}}
-- {{"action":"message","text":"explanation"}}  — only when no table change is needed
+ACTION: add_column
+Use when: user wants a new column added to the table.
+Schema: {{"action":"add_column","label":"Column Name","values":["value for row 0","value for row 1",...]}}
+Rules: "values" array MUST have exactly {n_rows} entries (one per row). Generate meaningful values based on context.
+Example — user says "add a Program Indicator column":
+→ {{"action":"add_column","label":"Program Indicator","values":["PO1,PO2","PO1,PO3","PO2","PO1","PO2,PO4","PO3"]}}
 
-NBA/OBE context:
-- CO column: CO1–CO6 (Course Outcomes)
-- Program Indicators (PI) map to POs (PO1–PO12)
-- Type column values: Lecture, Exp. Learning, Evaluation
-- Bloom's levels: Remember, Understand, Apply, Analyse, Evaluate, Create
+ACTION: remove_column
+Use when: user wants to delete/remove an existing column.
+Schema: {{"action":"remove_column","label":"Exact Column Label"}}
+Rules: label must exactly match one of: {", ".join(col_labels)}
+Example — user says "remove the Methodology column":
+→ {{"action":"remove_column","label":"Methodology"}}
 
-Respond with ONLY the JSON object."""
+ACTION: rename_column
+Use when: user wants to rename/relabel a column.
+Schema: {{"action":"rename_column","old_label":"Current Label","new_label":"New Label"}}
+Rules: old_label must match an existing column exactly.
+Example — user says "rename Topic to Points to Cover":
+→ {{"action":"rename_column","old_label":"Topic / Points to Cover","new_label":"Points to Cover"}}
 
+ACTION: fill_column
+Use when: user wants to populate/fill values in an existing column.
+Schema: {{"action":"fill_column","label":"Column Name","values":["val0","val1",...]}}
+Rules: "values" array MUST have exactly {n_rows} entries. "label" must match an existing column exactly.
+Example — user says "fill the CO column based on topics":
+→ {{"action":"fill_column","label":"CO","values":["CO1","CO1","CO2","CO2","CO3","CO3"]}}
+
+ACTION: add_row
+Use when: user wants to add/insert a new row to the table.
+Schema: {{"action":"add_row","data":{{"Column Label":"value",...}}}}
+Rules: include ALL column labels as keys. "data" keys must be column labels (not key names).
+Example — user says "add a row for Unit 3 quiz":
+→ {{"action":"add_row","data":{{"Lect No":"19","Unit No.":"3","Topic / Points to Cover":"Unit 3 Quiz","Methodology":"Classroom Teaching","Faculty":"","Lecture/Exp.Learning/Eval":"Evaluation","CO":"CO3"}}}}
+
+ACTION: remove_rows
+Use when: user wants to delete/remove one or more rows by content or index.
+Schema: {{"action":"remove_rows","indices":[0,2,5,...]}}
+Rules: scan ALL rows shown above. Match rows by topic/content/index. Return ALL matching [index] numbers.
+Example — user says "remove all evaluation rows" (rows [4] and [9] contain "Evaluation"):
+→ {{"action":"remove_rows","indices":[4,9]}}
+
+ACTION: update_cell
+Use when: user wants to change one specific cell.
+Schema: {{"action":"update_cell","row_index":0,"col_label":"Column Label","value":"new value"}}
+Rules: row_index is the [index] from the table above. col_label must match an existing column exactly.
+Example — user says "set row 3 CO to CO2":
+→ {{"action":"update_cell","row_index":3,"col_label":"CO","value":"CO2"}}
+
+ACTION: reorder_rows
+Use when: user wants to move a row to a different position.
+Schema: {{"action":"reorder_rows","from_index":3,"to_index":0}}
+Example — user says "move row 5 to the top":
+→ {{"action":"reorder_rows","from_index":5,"to_index":0}}
+
+ACTION: message
+Use ONLY when no table change is needed — e.g. user asks a question, or the request is ambiguous/impossible.
+Schema: {{"action":"message","text":"your explanation here"}}
+Example — user says "what is CO attainment?":
+→ {{"action":"message","text":"CO Attainment measures how well students achieved each Course Outcome based on marks in CA and End-Sem exams."}}
+
+=== OBE CONTEXT ===
+- CO column values: CO1 through CO6 (Course Outcomes)
+- Type column values: Lecture | Exp. Learning | Evaluation
+- Methodology values: Classroom Teaching | Tutorial | Flipped Classroom | Case Study | Problem Solving | Group Discussion | Lab
+- Bloom's levels: Remember | Understand | Apply | Analyse | Evaluate | Create
+- PI = Program Indicator, maps to PO1–PO12
+
+=== CRITICAL RULES ===
+1. Output ONLY the raw JSON object. No backticks. No "```json". No text before or after.
+2. "values" arrays for add_column and fill_column MUST contain exactly {n_rows} items.
+3. "label" in remove_column and fill_column must be an EXACT match to an existing column label.
+4. "data" keys in add_row must be column labels (the human-readable labels, NOT the key names).
+5. If the instruction is unclear, return a "message" action asking for clarification."""
+
+    import json, re
     try:
         raw = await get_llm_response(prompt)
         clean = raw.strip()
+
+        # Strip markdown fences if present (model sometimes forgets rule 1)
         if clean.startswith("```"):
-            clean = clean.split("```")[1]
-            if clean.startswith("json"):
-                clean = clean[4:]
+            clean = re.sub(r"^```(?:json)?\s*", "", clean)
+            clean = re.sub(r"\s*```$", "", clean)
         clean = clean.strip()
+
+        # Validate it's parseable JSON before sending to frontend
+        parsed = json.loads(clean)
+
+        # Sanity-check required "action" field
+        if "action" not in parsed:
+            logger.warning(f"AI response missing 'action' field: {clean[:200]}")
+            return {"ok": True, "raw": json.dumps({"action": "message", "text": "Sorry, I couldn't understand that. Could you rephrase?"})}
+
+        # Coerce values arrays to correct length if off-by-one (add_column / fill_column)
+        if parsed["action"] in ("add_column", "fill_column"):
+            vals = parsed.get("values", [])
+            if len(vals) != n_rows:
+                logger.warning(f"AI values array length {len(vals)} != {n_rows}, padding/trimming")
+                if len(vals) < n_rows:
+                    vals = vals + [""] * (n_rows - len(vals))
+                else:
+                    vals = vals[:n_rows]
+                parsed["values"] = vals
+                clean = json.dumps(parsed)
+
+        logger.info(f"AI table chat action={parsed.get('action')} for plan_type={req.plan_type}")
         return {"ok": True, "raw": clean}
+
+    except json.JSONDecodeError as e:
+        logger.error(f"AI table chat JSON parse error: {e} | raw: {raw[:300] if 'raw' in dir() else 'N/A'}")
+        fallback = json.dumps({"action": "message", "text": "I had trouble processing that request. Please try rephrasing it."})
+        return {"ok": True, "raw": fallback}
     except Exception as e:
         logger.error(f"AI table chat error: {e}")
         return {"ok": False, "error": str(e)}
