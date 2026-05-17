@@ -32,6 +32,7 @@ class SavePlanRequest(BaseModel):
 async def generate_evaluation_plan(
     course_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Generates a full CIE + SEE evaluation plan for the course using Gemini AI.
@@ -51,7 +52,7 @@ async def generate_evaluation_plan(
 
 
 @router.get("/download/{course_id}")
-async def download_evaluation_plan(course_id: int):
+async def download_evaluation_plan(course_id: int, current_user: User = Depends(require_auth)):
     """Download the generated evaluation plan Word document."""
     filepath = EvaluationPlanService.get_filepath(course_id)
     if not os.path.exists(filepath):
@@ -71,6 +72,7 @@ async def save_evaluation_plan(
     course_id: int,
     payload: SavePlanRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Saves the user-edited evaluation plan table (cols + rows).

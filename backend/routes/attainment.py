@@ -3,6 +3,8 @@ import io
 import os
 from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from backend.core.auth import require_auth
+from backend.database.user_models import User
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,6 +141,7 @@ async def upload_marks_xlsx(
     course_id: int,
     file: UploadFile = File(..., description="Student marks Excel file (.xlsx)"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Upload student marks from an Excel (.xlsx) file.
@@ -175,6 +178,7 @@ async def upload_marks(
     course_id: int,
     request: MarksUploadRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Upload student marks per CO per evaluation component (JSON body).
@@ -200,6 +204,7 @@ async def upload_marks(
 async def get_marks(
     course_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Return all student marks records for a course as a list of dicts.
@@ -225,6 +230,7 @@ async def update_student_marks(
     student_id: str,
     request: MarksUploadRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Update marks for a single student in a course.
@@ -257,7 +263,7 @@ async def update_student_marks(
 
 
 @router.get("/documents/{course_id}")
-async def list_documents(course_id: int):
+async def list_documents(course_id: int, current_user: User = Depends(require_auth)):
     """
     List all generated documents for a course (session plan, evaluation plan,
     attainment report, NBA report, question papers).
@@ -308,6 +314,7 @@ async def list_documents(course_id: int):
 async def calculate_attainment(
     course_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Calculate and return CO + PO attainment as JSON (no file generated).
@@ -329,6 +336,7 @@ async def generate_attainment_report(
     course_id: int,
     template: Optional[UploadFile] = File(None, description="Optional .docx template to guide report structure"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Generate a formatted Word document attainment report.
@@ -353,7 +361,7 @@ async def generate_attainment_report(
 
 
 @router.get("/download/{course_id}")
-async def download_attainment_report(course_id: int):
+async def download_attainment_report(course_id: int, current_user: User = Depends(require_auth)):
     """Download the generated attainment report Word document."""
     filepath = AttainmentService.get_filepath(course_id)
     if not os.path.exists(filepath):
@@ -375,6 +383,7 @@ async def generate_nba_report(
     course_id: int,
     template: Optional[UploadFile] = File(None, description="Optional .docx template to guide report structure"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Generate a full NBA/NAAC-format PDF report with:
@@ -404,7 +413,7 @@ async def generate_nba_report(
 
 
 @router.get("/nba-report/download/{course_id}")
-async def download_nba_report(course_id: int):
+async def download_nba_report(course_id: int, current_user: User = Depends(require_auth)):
     """Download the generated NBA/NAAC PDF report."""
     filepath = NBAReportService.get_filepath(course_id)
     if not os.path.exists(filepath):
@@ -423,6 +432,7 @@ async def download_nba_report(course_id: int):
 async def get_gap_analysis(
     course_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Preview the CO-PO gap analysis as JSON without generating the PDF.

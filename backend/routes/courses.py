@@ -70,7 +70,8 @@ class CourseUpdateRequest(BaseModel):
 @router.post("/setup", status_code=201)
 async def setup_course(
     request: CourseSetupRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Faculty submits all start-of-semester data.
@@ -97,7 +98,8 @@ async def setup_course(
 @router.get("/{course_id}")
 async def get_course(
     course_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """Retrieve full course data by ID."""
     try:
@@ -112,7 +114,7 @@ async def get_course(
 
 
 @router.get("/")
-async def list_courses(db: AsyncSession = Depends(get_db)):
+async def list_courses(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_auth)):
     """List all courses."""
     try:
         service = CourseService(db)
@@ -127,6 +129,7 @@ async def update_course(
     course_id: int,
     request: CourseUpdateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """Update an existing course's fields (partial update — only non-None fields applied)."""
     logger.info(f"Course update request for id={course_id}")

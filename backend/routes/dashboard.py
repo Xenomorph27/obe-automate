@@ -2,6 +2,8 @@
 import io
 import json
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from backend.core.auth import require_auth
+from backend.database.user_models import User
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.logger import get_logger
@@ -116,7 +118,7 @@ def _build_day_schedule(day_slots: dict, time_slots: list) -> list:
 # ── Routes ──────────────────────────────────────────────────────────────
 
 @router.get("/department")
-async def get_department_dashboard(db: AsyncSession = Depends(get_db)):
+async def get_department_dashboard(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_auth)):
     svc = DashboardService(db)
     return await svc.get_department_summary()
 
@@ -124,6 +126,7 @@ async def get_department_dashboard(db: AsyncSession = Depends(get_db)):
 @router.post("/timetable/upload", status_code=201)
 async def upload_timetable(
     file: UploadFile = File(..., description="Individual timetable .docx file"),
+    current_user: User = Depends(require_auth),
 ):
     """Upload faculty individual timetable (.docx). Parses and stores it."""
     if not file.filename.endswith('.docx'):
@@ -145,7 +148,7 @@ async def upload_timetable(
 
 
 @router.get("/timetable")
-async def get_timetable():
+async def get_timetable(current_user: User = Depends(require_auth)):
     """Get the currently uploaded timetable. Returns null if none uploaded."""
     try:
         storage = get_storage()

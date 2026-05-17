@@ -1,5 +1,7 @@
 # backend/routes/questions.py
 from fastapi import APIRouter, Depends, Query
+from backend.core.auth import require_auth
+from backend.database.user_models import User
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -73,7 +75,7 @@ class DeleteRequest(BaseModel):
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @router.post("/generate-single")
-async def generate_single(req: GenerateSingleRequest, db: AsyncSession = Depends(get_db)):
+async def generate_single(req: GenerateSingleRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_auth)):
     svc = QuestionService()
     q = await svc.generate_single(
         topic=req.topic, bloom_level=req.bloom_level,
@@ -91,7 +93,7 @@ async def generate_single(req: GenerateSingleRequest, db: AsyncSession = Depends
 
 
 @router.post("/generate-paper/{course_id}")
-async def generate_paper(course_id: int, req: GeneratePaperRequest, db: AsyncSession = Depends(get_db)):
+async def generate_paper(course_id: int, req: GeneratePaperRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_auth)):
     svc = QuestionService()
     questions = await svc.generate_paper(
         course_name=req.course_name, course_code=req.course_code,
@@ -130,13 +132,13 @@ async def get_bank(
 
 
 @router.delete("/bank/{question_id}")
-async def delete_question(question_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_question(question_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_auth)):
     bank = QuestionBankService(db)
     return await bank.delete_question(question_id)
 
 
 @router.post("/classify")
-async def classify_question(req: ClassifyRequest, db: AsyncSession = Depends(get_db)):
+async def classify_question(req: ClassifyRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_auth)):
     svc = QuestionClassifierService()
     result = await svc.classify(
         question_text=req.question_text, course_name=req.course_name,
@@ -159,7 +161,7 @@ async def classify_question(req: ClassifyRequest, db: AsyncSession = Depends(get
 
 
 @router.post("/manipulate")
-async def manipulate_question(req: ManipulateRequest):
+async def manipulate_question(req: ManipulateRequest, current_user: User = Depends(require_auth)):
     svc = QuestionManipulatorService()
     result = await svc.manipulate(
         original_question=req.original_question,
@@ -172,7 +174,7 @@ async def manipulate_question(req: ManipulateRequest):
 
 
 @router.post("/manipulate/save")
-async def save_manipulated(req: SaveManipulatedRequest, db: AsyncSession = Depends(get_db)):
+async def save_manipulated(req: SaveManipulatedRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_auth)):
     bank = QuestionBankService(db)
     saved = await bank.save_question({
         "course_id": req.course_id,
@@ -190,7 +192,7 @@ async def save_manipulated(req: SaveManipulatedRequest, db: AsyncSession = Depen
 
 
 @router.get("/paper/download/{course_id}/docx")
-async def download_paper_docx(course_id: int):
+async def download_paper_docx(course_id: int, current_user: User = Depends(require_auth)):
     svc = QuestionPaperService()
     paths = svc.get_latest_paths(course_id)
     if not paths["docx_path"]:
@@ -201,7 +203,7 @@ async def download_paper_docx(course_id: int):
 
 
 @router.get("/paper/download/{course_id}/pdf")
-async def download_paper_pdf(course_id: int):
+async def download_paper_pdf(course_id: int, current_user: User = Depends(require_auth)):
     svc = QuestionPaperService()
     paths = svc.get_latest_paths(course_id)
     if not paths["pdf_path"]:
@@ -212,5 +214,5 @@ async def download_paper_pdf(course_id: int):
 
 
 @router.get("/bloom-levels")
-async def get_bloom_levels():
+async def get_bloom_levels(current_user: User = Depends(require_auth)):
     return [{"level": k, "label": v} for k, v in BLOOM_LEVELS.items()]

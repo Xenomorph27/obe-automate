@@ -32,6 +32,7 @@ class SavePlanRequest(BaseModel):
 async def generate_session_plan(
     course_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Generates a unit-wise session plan for the course using Gemini AI.
@@ -51,7 +52,7 @@ async def generate_session_plan(
 
 
 @router.get("/download/{course_id}")
-async def download_session_plan(course_id: int):
+async def download_session_plan(course_id: int, current_user: User = Depends(require_auth)):
     """Download the generated session plan Word document."""
     filepath = SessionPlanService.get_filepath(course_id)
     if not os.path.exists(filepath):
@@ -71,6 +72,7 @@ async def save_session_plan(
     course_id: int,
     payload: SavePlanRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
 ):
     """
     Saves the user-edited table (cols + rows) for a session plan.
@@ -165,7 +167,7 @@ async def save_session_plan(
 
 
 @router.get("/materials/{course_id}")
-async def get_session_materials(course_id: int):
+async def get_session_materials(course_id: int, current_user: User = Depends(require_auth)):
     """
     Returns study materials extracted from the session plan.
     Reads the stored edited JSON first; falls back to the raw generated plan structure.

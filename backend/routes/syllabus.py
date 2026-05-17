@@ -1,8 +1,10 @@
 # backend/routes/syllabus.py
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from backend.services.syllabus_service import SyllabusService
 from backend.core.exceptions import OBEException
 from backend.core.logger import get_logger
+from backend.core.auth import require_auth
+from backend.database.user_models import User
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/syllabus", tags=["Syllabus"])
@@ -11,7 +13,7 @@ syllabus_service = SyllabusService()
 
 
 @router.post("/upload")
-async def upload_syllabus(file: UploadFile = File(...)):
+async def upload_syllabus(file: UploadFile = File(...), current_user: User = Depends(require_auth)):
     """
     Upload a syllabus PDF.
     Extracts topics and Course Outcomes using Gemini AI.
