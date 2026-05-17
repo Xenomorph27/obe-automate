@@ -33,10 +33,10 @@
   --amber2:#fef3c7;
   --red:#ef4444;
   --red2:#fee2e2;
-  --purple:#8b5cf6;
+  --purple:#78716C;
   --purple2:#ede9fe;
-  --teal:#14b8a6;
-  --teal2:#ccfbf1;
+  --teal:#78716C;
+  --teal2:#E8E3D9;
   --pink:#ec4899;
   --pink2:#fce7f3;
   --sidebar-w:250px;
@@ -130,11 +130,13 @@ html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg
 .stat-card.teal::before{background:var(--teal)}
 .stat-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;margin-bottom:.875rem}
 .stat-icon.blue{background:#FFEDD5;color:#C2410C}
-.stat-icon.green{background:#6ee7b7;color:#065f46}
-.stat-icon.purple{background:#c4b5fd;color:#5b21b6}
-.stat-icon.amber{background:#fcd34d;color:#92400e}
-.stat-icon.teal{background:#5eead4;color:#0f766e}
-.stat-icon.pink{background:#f9a8d4;color:#9d174d}
+.stat-icon.green{background:#D4FAE8;color:#065f46}
+.stat-icon.purple{background:#E8E3D9;color:#57534E}
+.stat-icon.amber{background:#FFEDD5;color:#C2410C}
+.stat-icon.teal{background:#E8E3D9;color:#44403C}
+.stat-icon.pink{background:#FFE4E1;color:#BE123C}
+.stat-icon.orange{background:#FFEDD5;color:#C2410C}
+.stat-icon.stone{background:#E8E3D9;color:#57534E}
 .stat-val{font-size:1.75rem;font-weight:700;color:var(--text);line-height:1;font-family:'DM Serif Display',serif}
 .stat-label{font-size:.78rem;color:var(--text2);margin-top:.25rem;font-weight:500}
 .stat-change{font-size:.75rem;margin-top:.5rem;display:flex;align-items:center;gap:.25rem}
@@ -173,8 +175,8 @@ tbody tr:hover{background:var(--bg)}
 .b-green{background:var(--green2);color:#059669}
 .b-amber{background:var(--amber2);color:#b45309}
 .b-red{background:var(--red2);color:#dc2626}
-.b-purple{background:var(--purple2);color:#7c3aed}
-.b-teal{background:var(--teal2);color:var(--teal)}
+.b-purple{background:#F5F3F0;color:#57534E}
+.b-teal{background:#E8E3D9;color:#57534E}
 .b-pink{background:var(--pink2);color:var(--pink)}
 .b-gray{background:var(--bg2);color:var(--text2)}
 
@@ -193,7 +195,7 @@ tbody tr:hover{background:var(--bg)}
 
 /* ── PROGRESS ── */
 .pbar{height:7px;background:var(--bg2);border-radius:10px;overflow:hidden}
-.pfill{height:100%;border-radius:10px;transition:width .6s ease}
+.pfill{height:100%;border-radius:10px;transition:width .6s ease;background:var(--blue)}
 
 /* ── TABS ── */
 .tabs{display:flex;gap:0;border-bottom:1.5px solid var(--border);margin-bottom:1.5rem}
@@ -201,7 +203,7 @@ tbody tr:hover{background:var(--bg)}
 .tab:hover{color:var(--text)}.tab.on{color:var(--blue2);border-bottom-color:var(--blue2)}
 
 /* ── BLOOM BADGES ── */
-.bl1{background:#eff6ff;color:#1d4ed8}
+.bl1{background:#FFF7ED;color:#C2410C}
 .bl2{background:#f0fdf4;color:#166534}
 .bl3{background:#fefce8;color:#854d0e}
 .bl4{background:#faf5ff;color:#6b21a8}
@@ -213,7 +215,7 @@ tbody tr:hover{background:var(--bg)}
 
 /* ── DASHBOARD SPECIFIC ── */
 .dash-grid{display:grid;grid-template-columns:1fr 320px;gap:1.5rem}
-.welcome-card{background:linear-gradient(135deg,#1e3a5f 0%,#1e40af 50%,#312e81 100%);border-radius:var(--radius);padding:1.75rem;color:#fff;margin-bottom:1.5rem;position:relative;overflow:hidden}
+.welcome-card{background:linear-gradient(135deg,#0A0A0A 0%,#1A1A1A 60%,#2A1500 100%);border-radius:var(--radius);padding:1.75rem;color:#fff;margin-bottom:1.5rem;position:relative;overflow:hidden}
 .welcome-card::after{content:'';position:absolute;top:-40px;right:-40px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.05)}
 .welcome-card::before{content:'';position:absolute;bottom:-60px;right:60px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.04)}
 .welcome-name{font-family:'DM Serif Display',serif;font-size:1.75rem;line-height:1.2;margin-bottom:.35rem}
@@ -289,7 +291,7 @@ tbody tr:hover{background:var(--bg)}
   justify-content:center;
   gap:.65rem;
   font-size:.78rem;
-  color:#1e40af;
+  color:#2A1500;
   font-weight:500;
   letter-spacing:.01em;
   flex-shrink:0;
@@ -315,9 +317,9 @@ tbody tr:hover{background:var(--bg)}
 }
 .main .btn:hover,
 .main button.btn:hover{
-  background:#1d4ed8 !important;
+  background:#EA580C !important;
   color:#fff !important;
-  border-color:#1d4ed8 !important;
+  border-color:#EA580C !important;
   box-shadow:0 4px 14px rgba(29,78,216,.4) !important;
 }
 .main .btn-red:hover{
@@ -332,9 +334,9 @@ tbody tr:hover{background:var(--bg)}
   border-color:#047857 !important;
 }
 .main a.btn:hover{
-  background:#1d4ed8 !important;
+  background:#EA580C !important;
   color:#fff !important;
-  border-color:#1d4ed8 !important;
+  border-color:#EA580C !important;
   box-shadow:0 4px 14px rgba(29,78,216,.4) !important;
 }
 .main .quick-action:hover{
@@ -344,7 +346,7 @@ tbody tr:hover{background:var(--bg)}
   transform:translateY(-3px);
 }
 .main .quick-action:hover .qa-label{
-  color:#1d4ed8 !important;
+  color:#EA580C !important;
 }
 .main .quick-action:hover .qa-icon,
 .main .quick-action:hover .stat-icon{
@@ -383,7 +385,7 @@ async function api(path,opts={}){
 const Spin=()=><span className="spin"/>;
 const Skel=({n=4})=><div style={{display:'flex',flexDirection:'column',gap:'.75rem'}}>{Array.from({length:n}).map((_,i)=><div key={i} className="skel" style={{width:`${55+Math.random()*40}%`}}/>)}</div>;
 const Alrt=({t='info',msg})=>msg?<div className={`alert a-${t}`}><span>{t==='error'?'✕':t==='success'?'✓':t==='warning'?'⚠':'ℹ'}</span>{msg}</div>:null;
-const PBar=({pct,c})=>{const col=c||(pct>=70?'#10b981':pct>=50?'#f59e0b':'#ef4444');return<div style={{display:'flex',alignItems:'center',gap:'.5rem'}}><div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${pct}%`,background:col}}/></div><span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:'36px'}}>{pct}%</span></div>};
+const PBar=({pct,c})=>{const col=c||(pct>=70?'#F97316':pct>=50?'#f59e0b':'#ef4444');return<div style={{display:'flex',alignItems:'center',gap:'.5rem'}}><div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${pct}%`,background:col}}/></div><span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:'36px'}}>{pct}%</span></div>};
 const BloomB=({l,n})=>{const b=BLOOM.find(x=>x.l===l)||BLOOM[0];return<span className={`badge ${b.c}`}>L{l} {n||b.n}</span>};
 const LvlB=({l})=>{const c=l==='High'?'b-green':l==='Medium'?'b-amber':'b-red';return<span className={`badge ${c}`}>{l}</span>};
 
@@ -583,9 +585,9 @@ function HomePage({go,setCourse}){
       <div className="stat-row">
         {[{i:'📚',ic:'blue',v:totalCourses,l:'Total Courses',sub:'from database'},
           {i:'👥',ic:'green',v:totalStudents,l:'Total Students',sub:'marks uploaded'},
-          {i:'📊',ic:'purple',v:avgCO,l:'Avg CO Attainment',sub:'dept average'},
+          {i:'📊',ic:'orange',v:avgCO,l:'Avg CO Attainment',sub:'dept average'},
           {i:'📋',ic:'amber',v:totalQ,l:'Questions in Bank',sub:'this course'},
-          {i:'🏆',ic:'teal',v:coursesAbove,l:'Above Target',sub:'≥70% attainment'}].map((s,i)=>(
+          {i:'🏆',ic:'orange',v:coursesAbove,l:'Above Target',sub:'≥70% attainment'}].map((s,i)=>(
           <div key={i} className={`stat-card ${s.ic}`}>
             <div className={`stat-icon ${s.ic}`}>{s.i}</div>
             <div className="stat-val">{s.v}</div>
@@ -598,9 +600,9 @@ function HomePage({go,setCourse}){
       <div style={{marginBottom:'1.5rem'}}>
         <div className="section-head"><div className="section-title">Quick Actions</div></div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:'.875rem'}}>
-          {[{i:'📄',ic:'blue',n:'Upload Syllabus',p:'syllabus'},{i:'✨',ic:'purple',n:'Generate Q',p:'qgenerate'},
+          {[{i:'📄',ic:'orange',n:'Upload Syllabus',p:'syllabus'},{i:'✨',ic:'orange',n:'Generate Q',p:'qgenerate'},
             {i:'📋',ic:'green',n:'Question Paper',p:'qpaper'},{i:'📊',ic:'amber',n:'Attainment',p:'attainment'},
-            {i:'📑',ic:'teal',n:'NBA Report',p:'reports'},{i:'🔍',ic:'pink',n:'Classify Q',p:'qclassify'}].map((a,i)=>(
+            {i:'📑',ic:'orange',n:'NBA Report',p:'reports'},{i:'🔍',ic:'orange',n:'Classify Q',p:'qclassify'}].map((a,i)=>(
             <div key={i} className="quick-action" onClick={()=>go(a.p)}>
               <div className={`qa-icon stat-icon ${a.ic}`}>{a.i}</div>
               <div className="qa-label">{a.n}</div>
@@ -735,7 +737,7 @@ function HomePage({go,setCourse}){
                 return(
                   <div key={i} style={{display:'flex',alignItems:'center',gap:'.65rem',marginBottom:'.65rem'}}>
                     <span className={`badge ${b.c}`} style={{minWidth:90}}>L{b.l} {b.n}</span>
-                    <div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${Math.round(count/max*100)}%`,background:['#F97316','#10b981','#f59e0b','#8b5cf6','#ef4444','#ec4899'][i]}}/></div>
+                    <div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${Math.round(count/max*100)}%`,background:['#F97316','#F97316','#f59e0b','#78716C','#ef4444','#ec4899'][i]}}/></div>
                     <span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:24}}>{count}</span>
                   </div>);
               })
@@ -772,13 +774,13 @@ function CourseDetailPage({course,go}){
     {icon:'📅',label:'Session Plan',page:'sessions',color:'var(--blue3)',tc:'var(--blue2)'},
     {icon:'📋',label:'Evaluation Plan',page:'evaluation',color:'#f0fdf4',tc:'var(--green)'},
     {icon:'📊',label:'Upload Marks',page:'marks',color:'var(--amber2)',tc:'#b45309'},
-    {icon:'🎯',label:'CO/PO Attainment',page:'attainment',color:'var(--purple2)',tc:'#7c3aed'},
-    {icon:'🏆',label:'NBA Report',page:'reports',color:'var(--teal2)',tc:'var(--teal)'},
+    {icon:'🎯',label:'CO/PO Attainment',page:'attainment',color:'#F5F3F0',tc:'#57534E'},
+    {icon:'🏆',label:'NBA Report',page:'reports',color:'#E8E3D9',tc:'#44403C'},
     {icon:'❓',label:'Question Bank',page:'qbank',color:'var(--pink2)',tc:'var(--pink)'},
   ];
   return(<div className="page-body fade-up">
     {/* ── Header ── */}
-    <div style={{background:'linear-gradient(135deg,#1e3a5f 0%,#1d4ed8 100%)',borderRadius:14,padding:'1.5rem 1.75rem',marginBottom:'1.5rem',color:'#fff',position:'relative',overflow:'hidden'}}>
+    <div style={{background:'linear-gradient(135deg,#0A0A0A 0%,#2A1500 100%)',borderRadius:14,padding:'1.5rem 1.75rem',marginBottom:'1.5rem',color:'#fff',position:'relative',overflow:'hidden'}}>
       <div style={{position:'absolute',top:-30,right:-30,width:160,height:160,borderRadius:'50%',background:'rgba(255,255,255,.06)'}}></div>
       <div style={{position:'absolute',bottom:-50,right:80,width:100,height:100,borderRadius:'50%',background:'rgba(255,255,255,.04)'}}></div>
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:'1rem'}}>
@@ -786,7 +788,7 @@ function CourseDetailPage({course,go}){
           <div style={{fontSize:'.72rem',letterSpacing:'.1em',textTransform:'uppercase',color:'#FDBA74',marginBottom:'.3rem',fontWeight:600}}>Course Detail</div>
           <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.7rem',lineHeight:1.2,marginBottom:'.4rem'}}>{course.course_name}</div>
           <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',marginTop:'.5rem'}}>
-            <span style={{background:'rgba(255,255,255,.15)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem',fontWeight:600}}>{course.course_code}</span>
+            <span style={{background:'rgba(255,255,255,.12)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem',fontWeight:600}}>{course.course_code}</span>
             <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>{course.credits} Credits</span>
             <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>{course.total_hours} Hours</span>
             <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>Sem {course.semester}</span>
@@ -849,7 +851,7 @@ function CourseDetailPage({course,go}){
           const bc=bloomColor[co.bloom_level]||'b-gray';
           const bloomList=['Remember','Understand','Apply','Analyze','Analyse','Evaluate','Create'];
           const li=bloomList.indexOf(co.bloom_level);
-          const colors=['#6b7280','#F97316','#14b8a6','#8b5cf6','#8b5cf6','#f59e0b','#ec4899'];
+          const colors=['#A8A29E','#F97316','#D6D3D1','#57534E','#78716C','#EA580C','#C2410C'];
           const barColor=colors[li>=0?li:0]||'#F97316';
           return(<div key={i} className="card card-p" style={{borderLeft:`4px solid ${barColor}`}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem'}}>
@@ -894,7 +896,7 @@ function CourseDetailPage({course,go}){
             return(<tr key={co.co_id}>
               <td><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong></td>
               {row.map((v,i)=><td key={i} style={{textAlign:'center',background:matrixColor[v]||'',fontWeight:v?700:400,color:v?'var(--text)':'var(--text3)',fontSize:'.85rem'}}>{v||'—'}</td>)}
-              <td style={{textAlign:'center',fontWeight:700,color:'var(--teal)',background:'var(--teal2)'}}>{avg||'—'}</td>
+              <td style={{textAlign:'center',fontWeight:700,color:'#EA580C',background:'#FFF7ED'}}>{avg||'—'}</td>
             </tr>);
           })}</tbody>
         </table>
@@ -2004,7 +2006,7 @@ function StudentsPage({course}){
           <td style={{color:'var(--text3)',fontSize:'.8rem'}}>{i+1}</td>
           <td><span className="badge b-blue">{s.prn}</span></td>
           <td style={{fontWeight:500}}>{s.name}</td>
-          <td><span className={`badge ${s.section==='A'?'b-teal':s.section==='B'?'b-purple':'b-amber'}`}>Sec {s.section}</span></td>
+          <td><span className={`badge ${s.section==='A'?'b-gray':s.section==='B'?'b-gray':'b-amber'}`}>Sec {s.section}</span></td>
         </tr>)}</tbody>
       </table></div>
     </div>}
@@ -2356,7 +2358,7 @@ function AttainmentPage({course}){
         {[
           {icon:'📊',label:'Overall CO Attainment',value:data.overall_co_attainment+'%',color:'var(--blue3)',tc:'var(--blue2)',big:true},
           {icon:'✅',label:'COs Meeting Target',value:`${attainedCOs} / ${coList.length}`,color:'#f0fdf4',tc:'var(--green)'},
-          {icon:'👥',label:'Total Students',value:data.total_students,color:'var(--purple2)',tc:'#7c3aed'},
+          {icon:'👥',label:'Total Students',value:data.total_students,color:'#F5F3F0',tc:'#57534E'},
           {icon:'🎯',label:'Threshold',value:data.threshold_percentage+'%',color:'var(--amber2)',tc:'#b45309'},
         ].map((s,i)=>(
           <div key={i} style={{background:s.color,border:'1.5px solid var(--border)',borderRadius:12,padding:'1rem',boxShadow:'0 2px 8px rgba(0,0,0,.06)'}}>
@@ -2596,8 +2598,8 @@ function ReportsPage({course}){
       icon:'❓',
       title:'Question Paper (.docx + PDF)',
       desc:'Download the last generated question paper with Bloom\'s tags, PI tags, difficulty split, and CO mapping.',
-      color:'#ccfbf1',
-      tc:'#0f766e',
+      color:'#E8E3D9',
+      tc:'#57534E',
       onGen:null,
       loading:false,
       downloadHref:course?`${API}/questions/paper/download/${course.id}/docx`:null,
@@ -2614,15 +2616,15 @@ function ReportsPage({course}){
     {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
     <Alrt t="error" msg={err}/>
 
-    {course&&<div style={{background:'linear-gradient(135deg,#1e3a5f,#1d4ed8)',borderRadius:14,padding:'1.25rem 1.5rem',marginBottom:'1.5rem',color:'#fff',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+    {course&&<div style={{background:'linear-gradient(135deg,#0A0A0A,#2A1500)',borderRadius:14,padding:'1.25rem 1.5rem',marginBottom:'1.5rem',color:'#fff',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
       <div style={{flex:1}}>
         <div style={{fontWeight:700,fontSize:'1rem'}}>{course.course_name}</div>
         <div style={{fontSize:'.82rem',opacity:.75,marginTop:'.2rem'}}>{course.course_code} · {course.department} · Sem {course.semester}</div>
       </div>
       <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
-        <span style={{background:'rgba(255,255,255,.15)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{(course.cos||[]).length} COs</span>
-        <span style={{background:'rgba(255,255,255,.15)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{(course.pos||[]).length} POs</span>
-        <span style={{background:'rgba(255,255,255,.15)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{course.total_hours} hrs</span>
+        <span style={{background:'rgba(255,255,255,.12)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{(course.cos||[]).length} COs</span>
+        <span style={{background:'rgba(255,255,255,.12)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{(course.pos||[]).length} POs</span>
+        <span style={{background:'rgba(255,255,255,.12)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{course.total_hours} hrs</span>
       </div>
     </div>}
 
@@ -2665,8 +2667,8 @@ function HodPage(){
     <Alrt t="error" msg={err}/>
     {data&&<><div className="stat-row">
       {[{i:'📚',ic:'blue',v:data.total_courses,l:'Total Courses'},{i:'📊',ic:'green',v:data.courses_with_data,l:'With Data'},
-        {i:'🎯',ic:'purple',v:data.summary.avg_co_attainment+'%',l:'Avg CO Attainment'},
-        {i:'🏆',ic:'amber',v:data.summary.courses_above_target,l:'Above Target'},{i:'👥',ic:'teal',v:data.summary.total_students,l:'Students'}].map((s,i)=>(
+        {i:'🎯',ic:'orange',v:data.summary.avg_co_attainment+'%',l:'Avg CO Attainment'},
+        {i:'🏆',ic:'orange',v:data.summary.courses_above_target,l:'Above Target'},{i:'👥',ic:'stone',v:data.summary.total_students,l:'Students'}].map((s,i)=>(
         <div key={i} className={`stat-card ${s.ic}`}><div className={`stat-icon ${s.ic}`}>{s.i}</div><div className="stat-val">{s.v}</div><div className="stat-label">{s.l}</div></div>))}
     </div>
     {data.courses_with_data===0?<Alrt t="info" msg="No marks uploaded yet."/>:<>
@@ -2856,7 +2858,7 @@ function QBankPage({course,go}){
     </div>
     {!course&&<Alrt t="warning" msg="Select a course first."/>}
     {stats&&<div className="stat-row" style={{marginBottom:'1.25rem'}}>
-      {[{i:'🗄',ic:'blue',v:stats.total,l:'Total'},{i:'🧠',ic:'purple',v:Object.keys(stats.by_bloom).length,l:'Bloom Levels'},
+      {[{i:'🗄',ic:'orange',v:stats.total,l:'Total'},{i:'🧠',ic:'orange',v:Object.keys(stats.by_bloom).length,l:'Bloom Levels'},
         {i:'🎯',ic:'green',v:Object.keys(stats.by_co).length,l:'COs Covered'},{i:'⚡',ic:'amber',v:Object.keys(stats.by_source).length,l:'Sources'}].map((s,i)=>(
         <div key={i} className={`stat-card ${s.ic}`}><div className={`stat-icon ${s.ic}`}>{s.i}</div><div className="stat-val" style={{fontSize:'1.4rem'}}>{s.v}</div><div className="stat-label">{s.l}</div></div>))}
     </div>}
@@ -3068,7 +3070,7 @@ function StudentPortalPage({course}){
     {/* Results */}
     {searched&&!loading&&data&&<div className="fade-up">
       {/* Student info */}
-      {data.student&&<div style={{background:'linear-gradient(135deg,#1e3a5f,#1d4ed8)',borderRadius:12,padding:'1.25rem 1.5rem',marginBottom:'1.25rem',color:'#fff',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+      {data.student&&<div style={{background:'linear-gradient(135deg,#0A0A0A,#2A1500)',borderRadius:12,padding:'1.25rem 1.5rem',marginBottom:'1.25rem',color:'#fff',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
         <div style={{width:48,height:48,borderRadius:'50%',background:'rgba(255,255,255,.2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',flexShrink:0}}>👤</div>
         <div style={{flex:1}}>
           <div style={{fontWeight:700,fontSize:'1.1rem'}}>{data.student.name}</div>
@@ -3114,10 +3116,10 @@ function StudentPortalPage({course}){
               <span style={{fontSize:'.78rem',color:'#b91c1c',fontWeight:600}}>Gap: {(60-co.attainment_percentage).toFixed(1)}%</span>
             </div>
             <div style={{fontSize:'.82rem',color:'var(--text)',marginBottom:'.625rem',lineHeight:1.5}}>{co.statement}</div>
-            <div style={{fontWeight:600,fontSize:'.78rem',color:'#7c3aed',marginBottom:'.4rem',textTransform:'uppercase',letterSpacing:'.04em'}}>📚 Remediation Steps:</div>
+            <div style={{fontWeight:600,fontSize:'.78rem',color:'#57534E',marginBottom:'.4rem',textTransform:'uppercase',letterSpacing:'.04em'}}>📚 Remediation Steps:</div>
             {(remedialMap[co.co_id]||['Review course material for this CO','Attend extra sessions','Practice additional problems']).map((step,j)=>(
               <div key={j} style={{display:'flex',gap:'.5rem',alignItems:'flex-start',marginBottom:'.3rem',fontSize:'.82rem',color:'var(--text)'}}>
-                <span style={{color:'#7c3aed',flexShrink:0,fontWeight:700}}>{j+1}.</span>{step}
+                <span style={{color:'#57534E',flexShrink:0,fontWeight:700}}>{j+1}.</span>{step}
               </div>
             ))}
           </div>
@@ -3195,7 +3197,7 @@ function ProfilePage({user,logout}){
       <Alrt t="success" msg={ok}/>
       <div className="card" style={{maxWidth:520,marginBottom:'1.25rem'}}>
         <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1.5rem'}}>
-          <div style={{width:56,height:56,borderRadius:'50%',background:'linear-gradient(135deg,var(--blue),var(--indigo))',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'1.4rem',fontWeight:700}}>
+          <div style={{width:56,height:56,borderRadius:'50%',background:'linear-gradient(135deg,#F97316,#C2410C)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'1.4rem',fontWeight:700}}>
             {user?.full_name?.[0]||user?.username?.[0]||'U'}
           </div>
           <div>
@@ -3315,7 +3317,7 @@ function UserMgmtPage({currentUser}){
         {loading?<Skel/>:<div style={{display:'flex',flexDirection:'column',gap:'.75rem'}}>
           {users.map(u=>(
             <div key={u.id} style={{display:'flex',alignItems:'center',gap:'1rem',padding:'.875rem 1rem',background:'var(--bg)',borderRadius:10,border:'1px solid var(--border)',opacity:u.is_active?1:.55}}>
-              <div style={{width:38,height:38,borderRadius:'50%',background:'linear-gradient(135deg,var(--blue),var(--indigo))',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:700,flexShrink:0}}>
+              <div style={{width:38,height:38,borderRadius:'50%',background:'linear-gradient(135deg,#F97316,#C2410C)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:700,flexShrink:0}}>
                 {u.full_name?.[0]||u.username?.[0]||'U'}
               </div>
               <div style={{flex:1,minWidth:0}}>
@@ -3437,7 +3439,7 @@ function App(){
         </div>
         <div style={{display:'flex',alignItems:'center',gap:'.875rem'}}>
           {course&&<span className="badge b-blue" style={{fontSize:'.8rem'}}>📚 {course.course_code}</span>}
-          <div style={{width:34,height:34,borderRadius:'50%',background:'linear-gradient(135deg,var(--blue),var(--indigo))',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'.8rem',fontWeight:700}}>{user?.full_name?.[0]?.toUpperCase()||user?.username?.[0]?.toUpperCase()||'U'}</div>
+          <div style={{width:34,height:34,borderRadius:'50%',background:'linear-gradient(135deg,#F97316,#C2410C)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'.8rem',fontWeight:700}}>{user?.full_name?.[0]?.toUpperCase()||user?.username?.[0]?.toUpperCase()||'U'}</div>
         </div>
       </div>
       <EB key={page}>{pages[page]||<div className="page-body"><Alrt t="error" msg="Page not found."/></div>}</EB>
