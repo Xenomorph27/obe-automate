@@ -2021,6 +2021,19 @@ function StudyMaterialsPage({course}){
   const [err,setErr]=useState('');
   const [tab,setTab]=useState('textbooks');
 
+  // User-owned entries per tab, persisted in sessionStorage
+  const SK=course?`mat_user_${course.id}`:'mat_user_none';
+  const loadUser=()=>{try{return JSON.parse(sessionStorage.getItem(SK)||'null')||{textbooks:[],web:[],journals:[],moocs:[]};}catch{return{textbooks:[],web:[],journals:[],moocs:[]}}};
+  const [userMats,setUserMats]=useState(loadUser);
+  const saveUser=u=>{setUserMats(u);try{sessionStorage.setItem(SK,JSON.stringify(u));}catch{}};
+
+  // Add-form state per tab
+  const emptyForm={title:'',author:'',publisher:'',url:'',platform:'',duration:'',unit:'',note:''};
+  const [form,setForm]=useState(emptyForm);
+  const [showForm,setShowForm]=useState(false);
+  const [fileLabel,setFileLabel]=useState('');
+  const [addMsg,setAddMsg]=useState('');
+
   const fetch_=async()=>{
     if(!course)return;
     setLoading(true);setErr('');
@@ -2028,25 +2041,129 @@ function StudyMaterialsPage({course}){
       const d=await api(`/session-plan/materials/${course.id}`);
       setData(d.data||d);
     }catch(e){
-      // If endpoint doesn't exist yet, fall back to what's in the session plan
       try{
         const sp=await api(`/session-plan/generate/${course.id}`,{method:'POST'});
         const plan=sp.data||sp;
         setData(plan?.study_materials||plan?.materials||null);
-      }catch{setErr('Generate the session plan first to see study materials.');}
+      }catch{setErr('Generate the session plan first to see AI recommendations.');}
     }
     setLoading(false);
   };
 
   useEffect(()=>{fetch_();},[course]);
+  useEffect(()=>{setUserMats(loadUser());setShowForm(false);setForm(emptyForm);},[course]);
 
-  // Flatten materials from all units if data is a session plan structure
-  const textbooks=data?.textbooks||data?.reference_books||[];
-  const webLinks=data?.web_links||data?.online_links||data?.nptel_links||[];
-  const journals=data?.journals||data?.research_papers||[];
-  const moocs=data?.mooc_courses||data?.moocs||[];
+  // AI-sourced
+  const aiTextbooks=data?.textbooks||data?.reference_books||[];
+  const aiWeb=data?.web_links||data?.online_links||data?.nptel_links||[];
+  const aiJournals=data?.journals||data?.research_papers||[];
+  const aiMoocs=data?.mooc_courses||data?.moocs||[];
 
-  const hasAny=textbooks.length||webLinks.length||journals.length||moocs.length;
+  const total=(a,k)=>a.length+(userMats[k]||[]).length;
+
+  const handleFile=e=>{
+    const f=e.target.files[0];
+    if(!f)return;
+    setFileLabel(f.name);
+    // Parse simple text/csv files for bulk import
+    const r=new FileReader();
+    r.onload=ev=>{
+      const lines=ev.target.result.split('\n').map(l=>l.trim()).filter(Boolean);
+      const newItems=lines.map(l=>({id:Date.now()+Math.random(),title:l,_source:'user',_file:f.name}));
+      if(!newItems.length)return;
+      const u={...userMats,[tab]:[...(userMats[tab]||[]),...newItems]};
+      saveUser(u);
+      setAddMsg(`Imported ${newItems.length} items from ${f.name}`);
+      setTimeout(()=>setAddMsg(''),3000);
+    };
+    r.readAsText(f);
+    e.target.value='';
+  };
+
+  const handleAdd=()=>{
+    if(!form.title.trim()){setAddMsg('Title is required.');setTimeout(()=>setAddMsg(''),2500);return;}
+    const entry={id:Date.now(),_source:'user',...Object.fromEntries(Object.entries(form).filter(([,v])=>v.trim()))};
+    const u={...userMats,[tab]:[...(userMats[tab]||[]),entry]};
+    saveUser(u);
+    setForm(emptyForm);setShowForm(false);
+    setAddMsg('Entry added.');setTimeout(()=>setAddMsg(''),2000);
+  };
+
+  const handleDelete=(id,isAI,aiArr,aiKey)=>{
+    if(isAI){
+      // Move AI item to a "hidden" list for this course
+      const hk=`mat_hidden_${course.id}`;
+      const hidden=JSON.parse(sessionStorage.getItem(hk)||'[]');
+      sessionStorage.setItem(hk,JSON.stringify([...hidden,id]));
+      setData(prev=>{
+        const copy={...prev};
+        copy[aiKey]=(copy[aiKey]||[]).filter((_,i)=>i!==id);
+        return copy;
+      });
+    } else {
+      const u={...userMats,[tab]:(userMats[tab]||[]).filter(x=>x.id!==id)};
+      saveUser(u);
+    }
+  };
+
+  const BtnAdd=()=>(
+    <div style={{display:'flex',alignItems:'center',gap:'.5rem',flexWrap:'wrap',marginBottom:'1rem'}}>
+      <button className="btn btn-primary btn-sm" onClick={()=>{setShowForm(f=>!f);setForm(emptyForm);}}>
+        {showForm?'✕ Cancel':'+ Add Manually'}
+      </button>
+      <label style={{cursor:'pointer'}}>
+        <span className="btn btn-outline btn-sm">⬆ Import from File</span>
+        <input type="file" accept=".txt,.csv" style={{display:'none'}} onChange={handleFile}/>
+      </label>
+      {fileLabel&&<span style={{fontSize:'.75rem',color:'var(--text3)'}}>{fileLabel}</span>}
+      {addMsg&&<span style={{fontSize:'.8rem',color:'var(--blue2)',fontWeight:500}}>{addMsg}</span>}
+    </div>
+  );
+
+  const DelBtn=({onClick})=>(
+    <button onClick={onClick} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:'1rem',padding:'2px 6px',borderRadius:4,lineHeight:1}} title="Delete">✕</button>
+  );
+
+  // Form fields per tab
+  const FormPanel=()=>{
+    if(!showForm)return null;
+    const isWeb=tab==='web',isMooc=tab==='moocs',isJournal=tab==='journals';
+    return(
+      <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem',marginBottom:'1rem'}}>
+        <div style={{fontWeight:600,fontSize:'.85rem',marginBottom:'.75rem',color:'var(--text)'}}>Add {tab==='textbooks'?'Textbook':tab==='web'?'Web Resource':tab==='journals'?'Journal':'MOOC'}</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.65rem'}}>
+          <div style={{gridColumn:'1/-1'}}>
+            <label className="fl">Title / Name *</label>
+            <input className="fi" value={form.title} onChange={e=>setForm(p=>({...p,title:e.target.value}))} placeholder={tab==='textbooks'?'e.g. Introduction to Algorithms':tab==='web'?'e.g. NPTEL - Design and Analysis':tab==='journals'?'e.g. IEEE Journal of...':'e.g. Deep Learning Specialization'}/>
+          </div>
+          {tab==='textbooks'&&<>
+            <div><label className="fl">Author(s)</label><input className="fi" value={form.author} onChange={e=>setForm(p=>({...p,author:e.target.value}))} placeholder="e.g. Cormen et al."/></div>
+            <div><label className="fl">Publisher / Edition</label><input className="fi" value={form.publisher} onChange={e=>setForm(p=>({...p,publisher:e.target.value}))} placeholder="e.g. MIT Press, 3rd Ed."/></div>
+          </>}
+          {isWeb&&<>
+            <div style={{gridColumn:'1/-1'}}><label className="fl">URL</label><input className="fi" value={form.url} onChange={e=>setForm(p=>({...p,url:e.target.value}))} placeholder="https://..."/></div>
+            <div><label className="fl">Unit / Module</label><input className="fi" value={form.unit} onChange={e=>setForm(p=>({...p,unit:e.target.value}))} placeholder="e.g. Unit 3"/></div>
+          </>}
+          {isJournal&&<>
+            <div style={{gridColumn:'1/-1'}}><label className="fl">DOI / URL</label><input className="fi" value={form.url} onChange={e=>setForm(p=>({...p,url:e.target.value}))} placeholder="https://doi.org/..."/></div>
+          </>}
+          {isMooc&&<>
+            <div><label className="fl">Platform</label><input className="fi" value={form.platform} onChange={e=>setForm(p=>({...p,platform:e.target.value}))} placeholder="e.g. Coursera, NPTEL"/></div>
+            <div><label className="fl">Duration</label><input className="fi" value={form.duration} onChange={e=>setForm(p=>({...p,duration:e.target.value}))} placeholder="e.g. 8 weeks"/></div>
+            <div style={{gridColumn:'1/-1'}}><label className="fl">Enroll URL</label><input className="fi" value={form.url} onChange={e=>setForm(p=>({...p,url:e.target.value}))} placeholder="https://..."/></div>
+          </>}
+          <div style={{gridColumn:'1/-1'}}><label className="fl">Note (optional)</label><input className="fi" value={form.note} onChange={e=>setForm(p=>({...p,note:e.target.value}))} placeholder="Any additional context…"/></div>
+        </div>
+        <button className="btn btn-primary btn-sm" style={{marginTop:'.75rem'}} onClick={handleAdd}>Add Entry</button>
+      </div>
+    );
+  };
+
+  const AiBadge=()=><span style={{fontSize:'.65rem',background:'#FFEDD5',color:'#C2410C',borderRadius:20,padding:'1px 7px',fontWeight:600,marginLeft:6}}>AI</span>;
+  const UserBadge=()=><span style={{fontSize:'.65rem',background:'var(--bg2)',color:'var(--text2)',borderRadius:20,padding:'1px 7px',fontWeight:600,marginLeft:6}}>You</span>;
+
+  const hasAny=aiTextbooks.length||aiWeb.length||aiJournals.length||aiMoocs.length||
+    (userMats.textbooks||[]).length||(userMats.web||[]).length||(userMats.journals||[]).length||(userMats.moocs||[]).length;
 
   return(<div className="page-body fade-up">
     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
@@ -2055,7 +2172,7 @@ function StudyMaterialsPage({course}){
         {course&&<div style={{fontSize:'.82rem',color:'var(--text2)',marginTop:'.2rem'}}>{course.course_name} · {course.course_code}</div>}
       </div>
       <button className="btn btn-outline" onClick={fetch_} disabled={loading||!course}>
-        {loading?<><Spin/>Loading…</>:'↻ Refresh'}
+        {loading?<><Spin/>Loading…</>:'↻ Refresh AI'}
       </button>
     </div>
 
@@ -2063,81 +2180,91 @@ function StudyMaterialsPage({course}){
     <Alrt t="error" msg={err}/>
 
     {loading&&<div className="card card-p" style={{textAlign:'center',padding:'3rem'}}>
-      <Spin/><span style={{color:'var(--text2)',marginLeft:'.5rem'}}>Loading materials…</span>
+      <Spin/><span style={{color:'var(--text2)',marginLeft:'.5rem'}}>Loading AI recommendations…</span>
     </div>}
 
-    {!loading&&!hasAny&&!err&&course&&<div className="card card-p" style={{textAlign:'center',padding:'3rem',color:'var(--text2)'}}>
-      <div style={{fontSize:'2rem',marginBottom:'1rem'}}>📚</div>
-      <div style={{fontWeight:600,marginBottom:'.5rem'}}>No study materials found</div>
-      <div style={{fontSize:'.855rem'}}>Generate the Session Plan first — materials are extracted from it automatically.</div>
-    </div>}
-
-    {!loading&&hasAny&&<>
-      <div className="tabs">
-        {[['textbooks',`📚 Textbooks (${textbooks.length})`],['web',`🔗 Web / NPTEL (${webLinks.length})`],['journals',`📰 Journals (${journals.length})`],['moocs',`🎓 MOOCs (${moocs.length})`]].map(([t,l])=>(
-          <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{l}</div>
+    {!loading&&<>
+      <div className="tabs" style={{marginBottom:0}}>
+        {[['textbooks',`📚 Textbooks (${total(aiTextbooks,'textbooks')})`],['web',`🔗 Web / NPTEL (${total(aiWeb,'web')})`],['journals',`📰 Journals (${total(aiJournals,'journals')})`],['moocs',`🎓 MOOCs (${total(aiMoocs,'moocs')})`]].map(([t,l])=>(
+          <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>{setTab(t);setShowForm(false);setForm(emptyForm);}}>{l}</div>
         ))}
       </div>
 
-      {tab==='textbooks'&&<div className="card card-p">
-        {textbooks.length===0
-          ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No textbooks found in the session plan.</div>
-          :<div className="tbl-wrap"><table>
-            <thead><tr><th>#</th><th>Title</th><th>Author</th><th>Publisher</th></tr></thead>
-            <tbody>{textbooks.map((b,i)=><tr key={i}>
-              <td style={{color:'var(--text3)'}}>{i+1}</td>
-              <td style={{fontWeight:600,fontSize:'.855rem'}}>{b.title||b.name||b}</td>
-              <td style={{fontSize:'.82rem'}}>{b.author||'—'}</td>
-              <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{b.publisher||b.edition||'—'}</td>
-            </tr>)}</tbody>
-          </table></div>
-        }
-      </div>}
+      <div className="card card-p" style={{borderTopLeftRadius:0,borderTopRightRadius:0,borderTop:'none'}}>
+        <BtnAdd/>
+        <FormPanel/>
 
-      {tab==='web'&&<div className="card card-p">
-        {webLinks.length===0
-          ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No web links found.</div>
-          :<div className="tbl-wrap"><table>
-            <thead><tr><th>Sr.</th><th>Resource</th><th>Unit / Module</th><th>Link</th></tr></thead>
-            <tbody>{webLinks.map((w,i)=><tr key={i}>
-              <td style={{color:'var(--text3)'}}>{i+1}</td>
-              <td style={{fontWeight:500,fontSize:'.855rem'}}>{w.title||w.name||w.link||w}</td>
-              <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{w.unit||w.module||'—'}</td>
-              <td>{(w.url||w.link_url||w.href)?<a href={w.url||w.link_url||w.href} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
-            </tr>)}</tbody>
-          </table></div>
-        }
-      </div>}
+        {tab==='textbooks'&&(()=>{
+          const all=[...aiTextbooks.map((b,i)=>({...( typeof b==='string'?{title:b}:b),_id:'ai_'+i,_isAI:true})),...(userMats.textbooks||[])];
+          return all.length===0
+            ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No textbooks yet. Add one above or generate the session plan for AI suggestions.</div>
+            :<div className="tbl-wrap"><table>
+              <thead><tr><th>#</th><th>Title</th><th>Author</th><th>Publisher</th><th>Source</th><th></th></tr></thead>
+              <tbody>{all.map((b,i)=><tr key={b._id||b.id||i}>
+                <td style={{color:'var(--text3)'}}>{i+1}</td>
+                <td style={{fontWeight:600,fontSize:'.855rem'}}>{b.title||b.name||b}{b.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{b.note}</div>}</td>
+                <td style={{fontSize:'.82rem'}}>{b.author||'—'}</td>
+                <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{b.publisher||b.edition||'—'}</td>
+                <td>{b._isAI?<AiBadge/>:<UserBadge/>}</td>
+                <td><DelBtn onClick={()=>b._isAI?handleDelete(i,true,aiTextbooks,'textbooks'):handleDelete(b.id,false)}/></td>
+              </tr>)}</tbody>
+            </table></div>;
+        })()}
 
-      {tab==='journals'&&<div className="card card-p">
-        {journals.length===0
-          ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No journals or research papers found.</div>
-          :<div className="tbl-wrap"><table>
-            <thead><tr><th>Sr.</th><th>Title</th><th>Link</th></tr></thead>
-            <tbody>{journals.map((j,i)=><tr key={i}>
-              <td style={{color:'var(--text3)'}}>{i+1}</td>
-              <td style={{fontWeight:500,fontSize:'.855rem'}}>{j.title||j.name||j}</td>
-              <td>{(j.url||j.doi)?<a href={j.url||j.doi} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
-            </tr>)}</tbody>
-          </table></div>
-        }
-      </div>}
+        {tab==='web'&&(()=>{
+          const all=[...aiWeb.map((w,i)=>({...(typeof w==='string'?{title:w}:w),_id:'ai_'+i,_isAI:true})),...(userMats.web||[])];
+          return all.length===0
+            ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No web resources yet. Add one above.</div>
+            :<div className="tbl-wrap"><table>
+              <thead><tr><th>Sr.</th><th>Resource</th><th>Unit</th><th>Link</th><th>Source</th><th></th></tr></thead>
+              <tbody>{all.map((w,i)=><tr key={w._id||w.id||i}>
+                <td style={{color:'var(--text3)'}}>{i+1}</td>
+                <td style={{fontWeight:500,fontSize:'.855rem'}}>{w.title||w.name||w.link||w}{w.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{w.note}</div>}</td>
+                <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{w.unit||w.module||'—'}</td>
+                <td>{(w.url||w.link_url||w.href)?<a href={w.url||w.link_url||w.href} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
+                <td>{w._isAI?<AiBadge/>:<UserBadge/>}</td>
+                <td><DelBtn onClick={()=>w._isAI?handleDelete(i,true,aiWeb,'web'):handleDelete(w.id,false)}/></td>
+              </tr>)}</tbody>
+            </table></div>;
+        })()}
 
-      {tab==='moocs'&&<div className="card card-p">
-        {moocs.length===0
-          ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No MOOC recommendations found.</div>
-          :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'1rem'}}>
-            {moocs.map((m,i)=>(
-              <div key={i} style={{padding:'1rem',border:'1px solid var(--border)',borderRadius:10,background:'var(--bg)'}}>
-                <div style={{fontWeight:600,fontSize:'.875rem',marginBottom:'.35rem'}}>{m.title||m.name||m.course||m}</div>
-                {m.platform&&<div style={{fontSize:'.78rem',color:'var(--blue2)',marginBottom:'.35rem'}}>{m.platform}</div>}
-                {m.duration&&<div style={{fontSize:'.75rem',color:'var(--text3)'}}>⏱ {m.duration}</div>}
-                {(m.url||m.link)&&<a href={m.url||m.link} target="_blank" rel="noreferrer" style={{display:'inline-block',marginTop:'.5rem',fontSize:'.78rem',color:'var(--blue2)'}}>Enroll →</a>}
-              </div>
-            ))}
-          </div>
-        }
-      </div>}
+        {tab==='journals'&&(()=>{
+          const all=[...aiJournals.map((j,i)=>({...(typeof j==='string'?{title:j}:j),_id:'ai_'+i,_isAI:true})),...(userMats.journals||[])];
+          return all.length===0
+            ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No journals yet. Add one above.</div>
+            :<div className="tbl-wrap"><table>
+              <thead><tr><th>Sr.</th><th>Title</th><th>DOI / URL</th><th>Source</th><th></th></tr></thead>
+              <tbody>{all.map((j,i)=><tr key={j._id||j.id||i}>
+                <td style={{color:'var(--text3)'}}>{i+1}</td>
+                <td style={{fontWeight:500,fontSize:'.855rem'}}>{j.title||j.name||j}{j.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{j.note}</div>}</td>
+                <td>{(j.url||j.doi)?<a href={j.url||j.doi} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
+                <td>{j._isAI?<AiBadge/>:<UserBadge/>}</td>
+                <td><DelBtn onClick={()=>j._isAI?handleDelete(i,true,aiJournals,'journals'):handleDelete(j.id,false)}/></td>
+              </tr>)}</tbody>
+            </table></div>;
+        })()}
+
+        {tab==='moocs'&&(()=>{
+          const all=[...aiMoocs.map((m,i)=>({...(typeof m==='string'?{title:m}:m),_id:'ai_'+i,_isAI:true})),...(userMats.moocs||[])];
+          return all.length===0
+            ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No MOOCs yet. Add one above.</div>
+            :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(270px,1fr))',gap:'1rem'}}>
+              {all.map((m,i)=>(
+                <div key={m._id||m.id||i} style={{padding:'1rem',border:'1px solid var(--border)',borderRadius:10,background:'var(--bg)',position:'relative'}}>
+                  <div style={{position:'absolute',top:8,right:8,display:'flex',alignItems:'center',gap:4}}>
+                    {m._isAI?<AiBadge/>:<UserBadge/>}
+                    <DelBtn onClick={()=>m._isAI?handleDelete(i,true,aiMoocs,'moocs'):handleDelete(m.id,false)}/>
+                  </div>
+                  <div style={{fontWeight:600,fontSize:'.875rem',marginBottom:'.35rem',paddingRight:'4rem'}}>{m.title||m.name||m.course||m}</div>
+                  {m.platform&&<div style={{fontSize:'.78rem',color:'var(--blue2)',marginBottom:'.25rem'}}>{m.platform}</div>}
+                  {m.duration&&<div style={{fontSize:'.75rem',color:'var(--text3)'}}>⏱ {m.duration}</div>}
+                  {m.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',marginTop:'.25rem'}}>{m.note}</div>}
+                  {(m.url||m.link)&&<a href={m.url||m.link} target="_blank" rel="noreferrer" style={{display:'inline-block',marginTop:'.5rem',fontSize:'.78rem',color:'var(--blue2)'}}>Enroll →</a>}
+                </div>
+              ))}
+            </div>;
+        })()}
+      </div>
     </>}
   </div>);
 }
