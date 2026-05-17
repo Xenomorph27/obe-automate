@@ -17,6 +17,7 @@ from backend.routes.students import router as students_router
 from backend.database.connection import init_db
 from backend.core.config import APP_NAME, APP_VERSION, STORAGE_PATH
 from backend.core.logger import get_logger
+from backend.routes.ai_chat import router as ai_chat_router
 
 logger = get_logger(__name__)
 FRONTEND_DIR = Path("frontend")
@@ -47,6 +48,7 @@ app.include_router(dashboard_router)
 app.include_router(questions_router)
 app.include_router(auth_router)
 app.include_router(students_router)
+app.include_router(ai_chat_router)
 
 @app.get("/health")
 def health_check():

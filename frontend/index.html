@@ -1507,31 +1507,23 @@ function SessionPlanPage({course}){
   const sendLiveMsg=async()=>{
     const txt=liveInp.trim();if(!txt||liveAiLoading)return;
     addLiveMsg('user',txt);setLiveInp('');setLiveAiLoading(true);
-    const tableCtx=`Columns: ${liveCols.map(c=>c.label).join(', ')}\nTotal rows: ${liveRows.length}\nSample (first 4 rows):\n${liveRows.slice(0,4).map(r=>liveCols.map(c=>r[c.key]||'').join(' | ')).join('\n')}`;
-    const sys=`You are an AI assistant editing a session plan table for an OBE engineering college platform.
-Respond ONLY with a JSON object — no prose, no markdown.
-
-Table:\n${tableCtx}
-
-Actions:
-- add_column: {"action":"add_column","label":"Name","values":["row0","row1",...]} — must have exactly ${liveRows.length} values
-- remove_column: {"action":"remove_column","label":"exact label"}
-- rename_column: {"action":"rename_column","old_label":"Old","new_label":"New"}
-- fill_column: {"action":"fill_column","label":"Name","values":["row0","row1",...]} — exactly ${liveRows.length} values
-- add_row: {"action":"add_row","data":{"Column Label":"value"}}
-- remove_rows: {"action":"remove_rows","indices":[0,1]}
-- update_cell: {"action":"update_cell","row_index":0,"col_label":"Column","value":"val"}
-- message: {"action":"message","text":"reply"}
-
-NBA context: PIs map to POs (PO1-PO12). CO column has CO1-CO6. Type: Lecture/Exp. Learning/Evaluation.
-Respond ONLY with JSON.`;
     try{
-      const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,system:sys,messages:[{role:'user',content:txt}]})});
-      const data=await resp.json();
-      const raw=data.content?.find(b=>b.type==='text')?.text||'{}';
-      let act;try{act=JSON.parse(raw.replace(/```json|```/g,'').trim());}catch{addLiveMsg('ai','Could not parse response. Try rephrasing.');setLiveAiLoading(false);return;}
+      const resp=await api('/ai/table-chat',{
+        method:'POST',
+        body:JSON.stringify({
+          user_message:txt,
+          cols:liveCols.map(c=>({key:c.key,label:c.label})),
+          rows:liveRows,
+          plan_type:'session',
+        }),
+      });
+      let act;
+      try{act=JSON.parse(resp.raw);}
+      catch{addLiveMsg('ai','Could not parse AI response. Try rephrasing.');setLiveAiLoading(false);return;}
       applyLiveAction(act);
-    }catch(e){simulateLive(txt);}
+    }catch(e){
+      addLiveMsg('ai',`Error: ${e.message||'Could not reach the AI. Check your connection.'}`);
+    }
     setLiveAiLoading(false);
   };
 
@@ -1726,29 +1718,23 @@ function EvalPlanPage({course}){
   const sendLiveMsg=async()=>{
     const txt=liveInp.trim();if(!txt||liveAiLoading)return;
     addLiveMsg('user',txt);setLiveInp('');setLiveAiLoading(true);
-    const tableCtx=`Columns: ${liveCols.map(c=>c.label).join(', ')}\nRows:\n${liveRows.map(r=>liveCols.map(c=>r[c.key]||'').join(' | ')).join('\n')}`;
-    const sys=`You are an AI assistant editing an evaluation plan table for OBE engineering college.
-Respond ONLY with JSON — no prose, no markdown fences.
-
-Table:\n${tableCtx}
-
-Actions:
-- add_column: {"action":"add_column","label":"Name","values":["row0","row1",...]} — must have exactly ${liveRows.length} values
-- remove_column: {"action":"remove_column","label":"exact label"}
-- rename_column: {"action":"rename_column","old_label":"Old","new_label":"New"}
-- fill_column: {"action":"fill_column","label":"Name","values":["row0","row1",...]}
-- add_row: {"action":"add_row","data":{"Column Label":"value"}}
-- remove_rows: {"action":"remove_rows","indices":[0,1]}
-- update_cell: {"action":"update_cell","row_index":0,"col_label":"Column","value":"val"}
-- message: {"action":"message","text":"reply"}
-Respond ONLY with JSON.`;
     try{
-      const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,system:sys,messages:[{role:'user',content:txt}]})});
-      const data=await resp.json();
-      const raw=data.content?.find(b=>b.type==='text')?.text||'{}';
-      let act;try{act=JSON.parse(raw.replace(/```json|```/g,'').trim());}catch{addLiveMsg('ai','Could not parse. Try rephrasing.');setLiveAiLoading(false);return;}
+      const resp=await api('/ai/table-chat',{
+        method:'POST',
+        body:JSON.stringify({
+          user_message:txt,
+          cols:liveCols.map(c=>({key:c.key,label:c.label})),
+          rows:liveRows,
+          plan_type:'evaluation',
+        }),
+      });
+      let act;
+      try{act=JSON.parse(resp.raw);}
+      catch{addLiveMsg('ai','Could not parse AI response. Try rephrasing.');setLiveAiLoading(false);return;}
       applyLiveAction3(act);
-    }catch(e){simulateLive3(txt);}
+    }catch(e){
+      addLiveMsg('ai',`Error: ${e.message||'Could not reach the AI. Check your connection.'}`);
+    }
     setLiveAiLoading(false);
   };
 
