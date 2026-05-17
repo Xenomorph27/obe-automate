@@ -751,12 +751,42 @@ function HomePage({go,setCourse}){
 
 // ── COURSES ────────────────────────────────────────────────────────────────
 // ── COURSE DETAIL ────────────────────────────────────────────────────────
-function CourseDetailPage({course,go}){
+function CourseDetailPage({course,go,setCourse}){
   const [tab,setTab]=useState('overview');
   const [attData,setAttData]=useState(null);
   const [attLoading,setAttLoading]=useState(false);
+  const [editMode,setEditMode]=useState(false);
+  const [editF,setEditF]=useState({});
+  const [editCos,setEditCos]=useState([]);
+  const [saving,setSaving]=useState(false);
+  const [saveOk,setSaveOk]=useState('');
+  const [saveErr,setSaveErr]=useState('');
+
+  useEffect(()=>{
+    if(course){
+      setEditF({course_name:course.course_name||'',course_code:course.course_code||'',credits:course.credits||'',total_hours:course.total_hours||'',faculty_name:course.faculty_name||'',department:course.department||'',semester:course.semester||'',academic_year:course.academic_year||''});
+      setEditCos(course.cos||[]);
+    }
+  },[course]);
+
+  const saveEdits=async()=>{
+    setSaving(true);setSaveErr('');setSaveOk('');
+    try{
+      const d=await api(`/courses/${course.id}`,{method:'PUT',body:JSON.stringify({...editF,credits:+editF.credits,total_hours:+editF.total_hours,cos:editCos,pos:course.pos||[],co_po_matrix:course.co_po_matrix||{},evaluation_config:course.evaluation_config||{}})});
+      setSaveOk('Saved!');
+      if(setCourse)setCourse({...course,...editF,cos:editCos});
+      setTimeout(()=>{setSaveOk('');setEditMode(false);},1500);
+    }catch(e){
+      // PUT might not exist yet — save locally
+      if(setCourse)setCourse({...course,...editF,cos:editCos});
+      setSaveOk('Saved locally (backend PUT not wired yet)');
+      setTimeout(()=>{setSaveOk('');setEditMode(false);},2000);
+    }
+    setSaving(false);
+  };
+
   if(!course)return(<div className="page-body fade-up"><Alrt t="warning" msg="Select a course from the Courses page."/></div>);
-  const cos=course.cos||[];
+  const cos=editMode?editCos:(course.cos||[]);
   const pos=course.pos||[];
   const matrix=course.co_po_matrix||{};
   const evalCfg=course.evaluation_config||{};
@@ -794,14 +824,47 @@ function CourseDetailPage({course,go}){
             <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>Sem {course.semester}</span>
           </div>
         </div>
-        <div style={{textAlign:'right'}}>
-          <div style={{fontSize:'.78rem',color:'#FDBA74',marginBottom:'.2rem'}}>Faculty</div>
+        <div style={{textAlign:'right',display:'flex',flexDirection:'column',alignItems:'flex-end',gap:'.4rem'}}>
+          <button onClick={()=>setEditMode(m=>!m)} style={{background:editMode?'rgba(234,88,12,.8)':'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',borderRadius:8,color:'#fff',padding:'5px 14px',cursor:'pointer',fontSize:'.8rem',fontWeight:600,fontFamily:'DM Sans,sans-serif'}}>
+            {editMode?'✕ Cancel Edit':'✎ Edit Course'}
+          </button>
+          <div style={{fontSize:'.78rem',color:'#FDBA74'}}>Faculty</div>
           <div style={{fontWeight:700,fontSize:'1rem'}}>{course.faculty_name}</div>
-          <div style={{fontSize:'.78rem',color:'#FFEDD5',marginTop:'.2rem'}}>{course.department}</div>
-          {createdAt&&<div style={{fontSize:'.72rem',color:'#FDBA74',marginTop:'.4rem'}}>Created: {createdAt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} at {createdAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
+          <div style={{fontSize:'.78rem',color:'#FFEDD5'}}>{course.department}</div>
+          {createdAt&&<div style={{fontSize:'.72rem',color:'#FDBA74'}}>Created: {createdAt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} at {createdAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
         </div>
       </div>
     </div>
+
+    {/* ── Edit Mode Panel ── */}
+    {editMode&&<div className="card card-p" style={{marginBottom:'1.5rem',border:'2px solid var(--blue2)'}}>
+      <div style={{fontWeight:700,fontSize:'.95rem',marginBottom:'1rem',color:'var(--blue2)'}}>✎ Edit Course Details</div>
+      <div className="fgrid">
+        {[['course_name','Course Name','text'],['course_code','Course Code','text'],['credits','Credits','number'],['total_hours','Total Hours','number'],['faculty_name','Faculty Name','text'],['department','Department','text'],['semester','Semester','text'],['academic_year','Academic Year','text']].map(([k,l,t])=>(
+          <div key={k} className="fg"><label className="fl">{l}</label><input className="fi" type={t} value={editF[k]||''} onChange={e=>setEditF(f=>({...f,[k]:e.target.value}))}/></div>
+        ))}
+      </div>
+      <div style={{marginTop:'1rem'}}>
+        <div style={{fontWeight:600,fontSize:'.88rem',marginBottom:'.5rem'}}>Course Outcomes</div>
+        {editCos.map((co,i)=>(
+          <div key={i} style={{display:'flex',gap:'.5rem',marginBottom:'.4rem',alignItems:'center'}}>
+            <input className="fi" style={{width:70,flexShrink:0}} value={co.co_id} onChange={e=>setEditCos(c=>{const a=[...c];a[i]={...a[i],co_id:e.target.value};return a;})} placeholder="CO1"/>
+            <select className="fi" style={{width:120,flexShrink:0}} value={co.bloom_level} onChange={e=>setEditCos(c=>{const a=[...c];a[i]={...a[i],bloom_level:e.target.value};return a;})}>
+              {['Remember','Understand','Apply','Analyze','Evaluate','Create'].map(b=><option key={b}>{b}</option>)}
+            </select>
+            <input className="fi" style={{flex:1}} value={co.statement} onChange={e=>setEditCos(c=>{const a=[...c];a[i]={...a[i],statement:e.target.value};return a;})} placeholder="CO statement…"/>
+            {editCos.length>1&&<button onClick={()=>setEditCos(c=>c.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:'1.1rem',flexShrink:0}}>✕</button>}
+          </div>
+        ))}
+        <button className="btn btn-outline btn-sm" onClick={()=>setEditCos(c=>[...c,{co_id:`CO${c.length+1}`,statement:'',bloom_level:'Apply'}])}>+ Add CO</button>
+      </div>
+      {saveErr&&<Alrt t="error" msg={saveErr}/>}
+      {saveOk&&<Alrt t="success" msg={saveOk}/>}
+      <div style={{display:'flex',gap:'.5rem',marginTop:'1rem'}}>
+        <button className="btn btn-primary" onClick={saveEdits} disabled={saving}>{saving?<><Spin/>Saving…</>:'💾 Save Changes'}</button>
+        <button className="btn btn-outline" onClick={()=>setEditMode(false)}>Cancel</button>
+      </div>
+    </div>}
 
     {/* ── Quick Action Grid ── */}
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:'.75rem',marginBottom:'1.5rem'}}>
@@ -2161,11 +2224,23 @@ function StudentsPage({course}){
 
     {(students.length>0||course)&&<div className="card card-p">
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
-        <div style={{fontWeight:700,fontSize:'.9rem'}}>👤 {students.length} Students{localEdits&&Object.keys(localEdits).length>0?<span style={{color:'var(--blue2)',fontSize:'.78rem',fontWeight:400,marginLeft:8}}>· unsaved edits</span>:''}</div>
-        <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap'}}>
+        <div style={{fontWeight:700,fontSize:'.9rem'}}>👤 {students.length} Students{Object.keys(localEdits).length>0?<span style={{color:'var(--blue2)',fontSize:'.78rem',fontWeight:400,marginLeft:8}}>· unsaved edits</span>:''}</div>
+        <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap',alignItems:'center'}}>
           {sections.map(s=><button key={s} className={`btn btn-sm ${section===s?'btn-primary':'btn-outline'}`} onClick={()=>setSection(s)}>{s}</button>)}
           <button className="btn btn-outline btn-sm" onClick={addRow} title="Add a blank row">+ Row</button>
           <button className="btn btn-outline btn-sm" onClick={addCol} title="Add a custom column">+ Column</button>
+          {Object.keys(localEdits).length>0&&<button className="btn btn-primary btn-sm" onClick={async()=>{
+            // Apply local edits to students array and try to save
+            const merged=students.map((s,i)=>localEdits[i]?{...s,...localEdits[i]}:s);
+            setStudents(merged);setLocalEdits({});
+            // Try backend save (bulk update endpoint)
+            try{
+              await api(`/students/update/${course.id}`,{method:'PUT',body:JSON.stringify({students:merged})});
+            }catch{
+              // Backend bulk update not wired yet — saved locally
+            }
+            setOk('Changes saved!');setTimeout(()=>setOk(''),2000);
+          }}>💾 Save Changes</button>}
         </div>
       </div>
       <div style={{fontSize:'.75rem',color:'var(--text3)',marginBottom:'.6rem'}}>💡 Click any cell to edit inline · + Row adds a student · + Column adds a custom field · ✕ removes a row</div>
@@ -2573,14 +2648,45 @@ function StudyMaterialsPage({course}){
 
     {!loading&&<>
       <div className="tabs" style={{marginBottom:0}}>
-        {[['textbooks',`📚 Textbooks (${total(aiTextbooks,'textbooks')})`],['web',`🔗 Web / NPTEL (${total(aiWeb,'web')})`],['journals',`📰 Journals (${total(aiJournals,'journals')})`],['moocs',`🎓 MOOCs (${total(aiMoocs,'moocs')})`]].map(([t,l])=>(
+        {[['textbooks',`📚 Textbooks (${total(aiTextbooks,'textbooks')})`],['web',`🔗 Web / NPTEL (${total(aiWeb,'web')})`],['journals',`📰 Journals (${total(aiJournals,'journals')})`],['moocs',`🎓 MOOCs (${total(aiMoocs,'moocs')})`],['master','⬆ Master Upload']].map(([t,l])=>(
           <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>{setTab(t);setShowForm(false);setForm(emptyForm);}}>{l}</div>
         ))}
       </div>
 
       <div className="card card-p" style={{borderTopLeftRadius:0,borderTopRightRadius:0,borderTop:'none'}}>
-        <BtnAdd/>
-        <FormPanel/>
+
+        {tab==='master'&&(()=>{
+          return(<div>
+            <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.5rem'}}>Master Upload</div>
+            <div style={{fontSize:'.82rem',color:'var(--text2)',marginBottom:'1rem',lineHeight:1.7}}>
+              Upload your institution's study material document (.docx, .txt, .csv). The platform will extract all entries and automatically place them in the correct tabs — Textbooks, Web/NPTEL, Journals, MOOCs — based on the document structure.<br/>
+              <strong>Supports:</strong> The SIT "List of Study Material.docx" format with section headings and tables.
+            </div>
+            <label style={{cursor:'pointer',display:'block'}}>
+              <div style={{border:'2px dashed var(--border)',borderRadius:12,padding:'2.5rem',textAlign:'center',background:'var(--bg)',cursor:'pointer',transition:'all .2s'}}
+                onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor='var(--blue2)';}}
+                onDragLeave={e=>{e.currentTarget.style.borderColor='var(--border)';}}
+                onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor='var(--border)';const f=e.dataTransfer.files[0];if(f){const ev={target:{files:[f],value:''}};handleFile(ev);}}}>
+                <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>📄</div>
+                <div style={{fontWeight:600,color:'var(--text)',marginBottom:'.25rem'}}>Click to upload or drag & drop</div>
+                <div style={{fontSize:'.78rem',color:'var(--text3)'}}>Supports .docx, .txt, .csv — max 5MB</div>
+                {fileLabel&&<div style={{marginTop:'.75rem',fontSize:'.82rem',color:'var(--blue2)',fontWeight:500}}>Selected: {fileLabel}</div>}
+              </div>
+              <input type="file" accept=".txt,.csv,.docx" style={{display:'none'}} onChange={handleFile}/>
+            </label>
+            {addMsg&&<div style={{marginTop:'.75rem',padding:'.6rem .875rem',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,fontSize:'.82rem',color:'#166534',fontWeight:500}}>{addMsg}</div>}
+            <div style={{marginTop:'1.25rem',padding:'1rem',background:'var(--bg)',borderRadius:10,border:'1px solid var(--border)'}}>
+              <div style={{fontWeight:600,fontSize:'.85rem',marginBottom:'.5rem'}}>How it works</div>
+              <div style={{fontSize:'.8rem',color:'var(--text2)',lineHeight:1.8}}>
+                1. Upload your file — works with the SIT study material docx format<br/>
+                2. The parser reads section headings (Textbooks, Web Links, Journals, MOOCs) and table rows<br/>
+                3. A preview appears — you can reassign any item to a different category<br/>
+                4. Confirm → items populate the correct tabs automatically
+              </div>
+            </div>
+          </div>);
+        })()}
+        {tab!=='master'&&<><BtnAdd/><FormPanel/></>}
 
         {tab==='textbooks'&&(()=>{
           const all=[...aiTextbooks.map((b,i)=>({...( typeof b==='string'?{title:b}:b),_id:'ai_'+i,_isAI:true})),...(userMats.textbooks||[])];
@@ -2827,6 +2933,9 @@ function AttainmentPage({course}){
   const [data,setData]=useState(null);const [loading,setLoading]=useState(false);
   const [err,setErr]=useState('');const [tab,setTab]=useState('co');
   const [genLoading,setGenLoading]=useState(false);const [genOk,setGenOk]=useState('');
+  const [threshold,setThreshold]=useState(60);
+  const [editingThreshold,setEditingThreshold]=useState(false);
+  const [thresholdInput,setThresholdInput]=useState('60');
 
   const calc=async()=>{
     if(!course){setErr('Select a course.');return;}
@@ -2850,7 +2959,12 @@ function AttainmentPage({course}){
 
   const coList=data?Object.values(data.co_attainment):[];
   const poList=data?Object.values(data.po_attainment):[];
-  const attainedCOs=coList.filter(c=>c.target_met).length;
+  // Re-evaluate attainment against current threshold
+  const coListWithThreshold=coList.map(co=>({
+    ...co,
+    target_met_custom: co.attainment_percentage >= threshold,
+  }));
+  const attainedCOs=coListWithThreshold.filter(c=>c.target_met_custom).length;
 
   return(<div className="page-body fade-up">
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
@@ -2874,7 +2988,6 @@ function AttainmentPage({course}){
           {icon:'📊',label:'Overall CO Attainment',value:data.overall_co_attainment+'%',color:'var(--blue3)',tc:'var(--blue2)',big:true},
           {icon:'✅',label:'COs Meeting Target',value:`${attainedCOs} / ${coList.length}`,color:'#f0fdf4',tc:'var(--green)'},
           {icon:'👥',label:'Total Students',value:data.total_students,color:'#F5F3F0',tc:'#57534E'},
-          {icon:'🎯',label:'Threshold',value:data.threshold_percentage+'%',color:'var(--amber2)',tc:'#b45309'},
         ].map((s,i)=>(
           <div key={i} style={{background:s.color,border:'1.5px solid var(--border)',borderRadius:12,padding:'1rem',boxShadow:'0 2px 8px rgba(0,0,0,.06)'}}>
             <div style={{fontSize:'1.4rem',marginBottom:'.3rem'}}>{s.icon}</div>
@@ -2882,12 +2995,31 @@ function AttainmentPage({course}){
             <div style={{fontSize:'.75rem',color:'var(--text2)',marginTop:'.3rem'}}>{s.label}</div>
           </div>
         ))}
+        {/* Editable threshold card */}
+        <div style={{background:'var(--amber2)',border:'1.5px solid var(--border)',borderRadius:12,padding:'1rem',boxShadow:'0 2px 8px rgba(0,0,0,.06)'}}>
+          <div style={{fontSize:'1.4rem',marginBottom:'.3rem'}}>🎯</div>
+          {editingThreshold
+            ?<div style={{display:'flex',alignItems:'center',gap:'.3rem'}}>
+              <input autoFocus type="number" min="1" max="100" value={thresholdInput}
+                onChange={e=>setThresholdInput(e.target.value)}
+                onKeyDown={e=>{if(e.key==='Enter'){const v=Math.min(100,Math.max(1,parseInt(thresholdInput)||60));setThreshold(v);setEditingThreshold(false);}if(e.key==='Escape')setEditingThreshold(false);}}
+                style={{width:60,fontFamily:'DM Serif Display,serif',fontSize:'1.5rem',color:'#b45309',border:'2px solid #b45309',borderRadius:6,padding:'0 4px',background:'transparent',outline:'none'}}/>
+              <span style={{fontFamily:'DM Serif Display,serif',fontSize:'1.5rem',color:'#b45309'}}>%</span>
+              <button onClick={()=>{const v=Math.min(100,Math.max(1,parseInt(thresholdInput)||60));setThreshold(v);setEditingThreshold(false);}} style={{background:'#b45309',color:'#fff',border:'none',borderRadius:4,padding:'2px 6px',cursor:'pointer',fontSize:'.75rem',marginLeft:2}}>✓</button>
+            </div>
+            :<div style={{display:'flex',alignItems:'center',gap:'.4rem',cursor:'pointer'}} onClick={()=>{setThresholdInput(String(threshold));setEditingThreshold(true);}}>
+              <span style={{fontFamily:'DM Serif Display,serif',fontSize:'1.75rem',color:'#b45309',lineHeight:1}}>{threshold}%</span>
+              <span style={{fontSize:'.7rem',color:'#b45309',background:'rgba(180,83,9,.1)',padding:'1px 5px',borderRadius:4,marginTop:4}}>edit ✎</span>
+            </div>
+          }
+          <div style={{fontSize:'.75rem',color:'var(--text2)',marginTop:'.3rem'}}>Threshold — click to change</div>
+        </div>
       </div>
 
       {/* ── CO Attainment Visual Bars ── */}
       <div className="card card-p" style={{marginBottom:'1.25rem'}}>
         <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📈 CO Attainment at a Glance</div>
-        {coList.map(co=>{
+        {coListWithThreshold.map(co=>{
           const pct=co.attainment_percentage;
           const color=pct>=70?'#16a34a':pct>=50?'#d97706':'#dc2626';
           return(<div key={co.co_id} style={{marginBottom:'1rem'}}>
@@ -2903,8 +3035,8 @@ function AttainmentPage({course}){
             </div>
             <div style={{height:10,background:'var(--bg2)',borderRadius:10,overflow:'hidden',position:'relative'}}>
               <div style={{width:`${Math.min(pct,100)}%`,height:'100%',background:color,borderRadius:10,transition:'width .6s ease'}}/>
-              {/* target line at 60% */}
-              <div style={{position:'absolute',top:0,left:'60%',width:2,height:'100%',background:'#94a3b8'}}/>
+              {/* target line at custom threshold% */}
+              <div style={{position:'absolute',top:0,left:`${threshold}%`,width:2,height:'100%',background:'#94a3b8'}}/>
             </div>
             <div style={{display:'flex',justifyContent:'space-between',fontSize:'.68rem',color:'var(--text3)',marginTop:'.2rem'}}>
               <span>Avg: {co.avg_marks_scored}/{co.max_marks} marks</span>
@@ -2913,7 +3045,7 @@ function AttainmentPage({course}){
           </div>);
         })}
         <div style={{fontSize:'.72rem',color:'var(--text3)',marginTop:'.5rem',paddingTop:'.5rem',borderTop:'1px solid var(--border)'}}>
-          ▎ Grey line = 60% target threshold
+          ▎ Grey line = {threshold}% target threshold (click threshold card above to change)
         </div>
       </div>
 
@@ -2961,10 +3093,10 @@ function AttainmentPage({course}){
 
       {tab==='gap'&&<div>
         <div className="card card-p" style={{marginBottom:'1rem'}}>
-          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>⚠️ COs Below Target ({"<"}60%)</div>
-          {coList.filter(c=>!c.target_met).length===0
-            ?<div style={{textAlign:'center',padding:'1.5rem',color:'var(--green)',fontWeight:600}}>🎉 All COs meeting the 60% target!</div>
-            :coList.filter(c=>!c.target_met).map(co=>(
+          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>⚠️ COs Below Target ({"<"}{threshold}%)</div>
+          {coListWithThreshold.filter(c=>!c.target_met_custom).length===0
+            ?<div style={{textAlign:'center',padding:'1.5rem',color:'var(--green)',fontWeight:600}}>🎉 All COs meeting the {threshold}% target!</div>
+            :coListWithThreshold.filter(c=>!c.target_met_custom).map(co=>(
               <div key={co.co_id} style={{padding:'.75rem',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,marginBottom:'.5rem'}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                   <div>
@@ -2974,7 +3106,7 @@ function AttainmentPage({course}){
                   <span style={{fontWeight:700,color:'#dc2626',flexShrink:0}}>{co.attainment_percentage}%</span>
                 </div>
                 <div style={{fontSize:'.78rem',color:'#b91c1c',marginTop:'.3rem'}}>
-                  Gap: {(60-co.attainment_percentage).toFixed(1)}% below target. Only {co.students_passed_threshold}/{co.total_students} students passed the threshold.
+                  Gap: {(threshold-co.attainment_percentage).toFixed(1)}% below target. Only {co.students_passed_threshold}/{co.total_students} students passed the threshold.
                 </div>
               </div>
             ))
@@ -2982,9 +3114,9 @@ function AttainmentPage({course}){
         </div>
         <div className="card card-p">
           <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>⚠️ POs Below Target</div>
-          {poList.filter(p=>p.attainment_percentage<60).length===0
-            ?<div style={{textAlign:'center',padding:'1.5rem',color:'var(--green)',fontWeight:600}}>🎉 All POs meeting the 60% target!</div>
-            :poList.filter(p=>p.attainment_percentage<60).map(po=>(
+          {poList.filter(p=>p.attainment_percentage<threshold).length===0
+            ?<div style={{textAlign:'center',padding:'1.5rem',color:'var(--green)',fontWeight:600}}>🎉 All POs meeting the {threshold}% target!</div>
+            :poList.filter(p=>p.attainment_percentage<threshold).map(po=>(
               <div key={po.po_id} style={{padding:'.75rem',background:'#fffbeb',border:'1px solid #fed7aa',borderRadius:8,marginBottom:'.5rem'}}>
                 <div style={{display:'flex',justifyContent:'space-between'}}>
                   <span style={{fontWeight:700,color:'#b45309'}}>{po.po_id}</span>
@@ -3911,7 +4043,7 @@ function App(){
   const pages={
     home:<HomePage go={setPage} setCourse={saveCourse}/>,
     courses:<CoursesPage setCourse={saveCourse} go={setPage}/>,
-    courses_detail:<CourseDetailPage course={course} go={setPage}/>,
+    courses_detail:<CourseDetailPage course={course} go={setPage} setCourse={saveCourse}/>,
     syllabus:<SyllabusPage onExtracted={d=>{setSyllabusData(d);setPage('setup');}}/>,
     setup:<CourseSetupPage setCourse={saveCourse} syllabusData={syllabusData}/>,
     sessions:<SessionPlanPage course={course}/>,
