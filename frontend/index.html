@@ -1102,7 +1102,18 @@ function CourseSetupPage({setCourse,syllabusData}){
     faculty_name:'',department:'',semester:'',academic_year:''
   });
   const [cos,setCos]=useState(initCos.length>0?initCos:[{co_id:'CO1',statement:'',bloom_level:'Apply'}]);
+  const [customFields,setCustomFields]=useState([]); // [{id, label, values:[{id,text}]}]
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
+
+  const addCustomField=()=>{
+    const label=window.prompt('Field name (e.g. "Program Outcomes", "Program Specific Outcomes"):');
+    if(!label?.trim())return;
+    setCustomFields(f=>[...f,{id:Date.now(),label:label.trim(),values:[{id:Date.now()+1,text:''}]}]);
+  };
+  const removeCustomField=(id)=>setCustomFields(f=>f.filter(x=>x.id!==id));
+  const addCustomValue=(fid)=>setCustomFields(f=>f.map(x=>x.id===fid?{...x,values:[...x.values,{id:Date.now(),text:''}]}:x));
+  const removeCustomValue=(fid,vid)=>setCustomFields(f=>f.map(x=>x.id===fid?{...x,values:x.values.filter(v=>v.id!==vid)}:x));
+  const setCustomValue=(fid,vid,text)=>setCustomFields(f=>f.map(x=>x.id===fid?{...x,values:x.values.map(v=>v.id===vid?{...v,text}:v)}:x));
   const s=(k,v)=>setF(x=>({...x,[k]:v}));
   const setCo=(i,k,v)=>setCos(x=>{const a=[...x];a[i]={...a[i],[k]:v};return a;});
   const addCo=()=>setCos(x=>[...x,{co_id:`CO${x.length+1}`,statement:'',bloom_level:'Apply'}]);
@@ -1123,10 +1134,11 @@ function CourseSetupPage({setCourse,syllabusData}){
         cos,
         pos:defaultPos,
         co_po_matrix:matrix,
-        evaluation_config:{continuous_assessment_total:40,end_sem_total:60,components:{Quiz:10,'Unit Test':20,Assignment:10}}
+        evaluation_config:{continuous_assessment_total:40,end_sem_total:60,components:{Quiz:10,'Unit Test':20,Assignment:10}},
+        custom_fields:customFields.map(cf=>({label:cf.label,values:cf.values.map(v=>v.text).filter(Boolean)}))
       })});
       setOk(`Course created! ID: ${d.course_id} - Go to Session Plan to generate your first plan.`);
-      setCourse({...f,id:d.course_id,cos,pos:defaultPos});
+      setCourse({...f,id:d.course_id,cos,pos:defaultPos,custom_fields:customFields});
     }catch(e){setErr(e.message);}setLoading(false);
   };
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Course Setup</div>
@@ -1155,6 +1167,45 @@ function CourseSetupPage({setCourse,syllabusData}){
           </div>
         ))}
         <button className="btn btn-outline btn-sm" onClick={addCo} style={{marginTop:'.25rem'}}>+ Add CO</button>
+      </div>
+    </div>
+
+    {/* Custom Fields */}
+    <div style={{maxWidth:980,marginTop:'1.5rem'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.75rem'}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:'.95rem'}}>Additional Fields</div>
+          <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.15rem'}}>Add institution-specific fields — Program Specific Outcomes, PSOs, Elective tracks, etc.</div>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={addCustomField}>+ Add Field</button>
+      </div>
+      {customFields.length===0&&<div style={{padding:'1.25rem',background:'var(--card)',borderRadius:'var(--radius)',border:'1px dashed var(--border)',textAlign:'center',color:'var(--text3)',fontSize:'.85rem'}}>
+        No additional fields yet. Click <strong>+ Add Field</strong> to add fields like "Program Specific Outcomes", "Program Outcomes", etc.
+      </div>}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(440px,1fr))',gap:'1rem'}}>
+        {customFields.map(cf=>(
+          <div key={cf.id} className="card card-p" style={{padding:'1rem'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.75rem'}}>
+              <input className="fi" style={{flex:1,fontWeight:600,fontSize:'.9rem'}} value={cf.label}
+                onChange={e=>setCustomFields(f=>f.map(x=>x.id===cf.id?{...x,label:e.target.value}:x))}
+                placeholder="Field name e.g. Program Specific Outcomes"/>
+              <button onClick={()=>removeCustomField(cf.id)} style={{marginLeft:'.5rem',background:'none',border:'none',color:'var(--text3)',cursor:'pointer',fontSize:'1.1rem',padding:'2px 6px'}}>✕</button>
+            </div>
+            {cf.values.map((v,vi)=>(
+              <div key={v.id} style={{display:'flex',gap:'.4rem',alignItems:'center',marginBottom:'.4rem'}}>
+                <span style={{fontSize:'.75rem',color:'var(--text3)',width:28,flexShrink:0,textAlign:'right'}}>{vi+1}.</span>
+                <input className="fi" style={{flex:1,fontSize:'.855rem'}} value={v.text}
+                  onChange={e=>setCustomValue(cf.id,v.id,e.target.value)}
+                  placeholder={`${cf.label} ${vi+1} statement…`}/>
+                {cf.values.length>1&&<button onClick={()=>removeCustomValue(cf.id,v.id)}
+                  style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:'.9rem',flexShrink:0}}>✕</button>}
+              </div>
+            ))}
+            <button className="btn btn-outline btn-sm" style={{marginTop:'.25rem',width:'100%'}} onClick={()=>addCustomValue(cf.id)}>
+              + Add value
+            </button>
+          </div>
+        ))}
       </div>
     </div>
     <div className="card card-p" style={{maxWidth:980,marginTop:'1.5rem'}}>
@@ -1690,10 +1741,15 @@ function SessionPlanPage({course}){
                 reader.onload=ev=>{
                   const name=f.name;
                   const blankRow=()=>{const o={};DEFAULT_COLS.forEach(c=>{o[c.key]='';});return o;};
-                  // Pre-fill 10 blank rows as a starting point for the template
                   const rows=Array.from({length:10},(_,i)=>({...blankRow(),lect:String(i+1),type:'Lecture',faculty:course.faculty_name||''}));
                   setLiveRows(rows);setLiveCols(DEFAULT_COLS);setGenerated(true);
-                  addLiveMsg('ai',`📄 Template "${name}" loaded as a blank structure.\n\nThe backend template parser is not yet wired up — you can fill the table manually or ask AI to populate it.\n\nTry: "Fill topic column based on ${course.course_name} syllabus"`);
+                  const autoPrompt=`Fill all rows with topic-wise session plan for the course "${course.course_name}" (${course.course_code}). Use the syllabus COs and units to generate realistic session topics, methodology, and CO mappings for ${rows.length} sessions.`;
+                  addLiveMsg('ai',`📄 Template "${name}" loaded. Auto-filling from your syllabus now…`);
+                  // Auto-trigger AI fill
+                  setTimeout(()=>{
+                    setLiveInp(autoPrompt);
+                    setTimeout(()=>sendLiveMsg(),100);
+                  },300);
                 };
                 reader.readAsArrayBuffer(f);
               } else {
@@ -1921,7 +1977,7 @@ function EvalPlanPage({course}){
                 const EVAL_COLS=[{key:'comp',label:'Component',width:'140px',type:'text'},{key:'marks',label:'Max Marks',width:'90px',type:'text'},{key:'co',label:'CO Mapped',width:'100px',type:'text'},{key:'weightage',label:'Weightage %',width:'100px',type:'text'},{key:'date',label:'Scheduled Date',width:'120px',type:'text'},{key:'remarks',label:'Remarks',width:'auto',type:'text'}];
                 const EVAL_ROWS=[{comp:'Quiz 1',marks:'10',co:'CO1, CO2',weightage:'10',date:'',remarks:''},{comp:'Unit Test 1',marks:'20',co:'CO1, CO2',weightage:'20',date:'',remarks:''},{comp:'Unit Test 2',marks:'20',co:'CO3, CO4',weightage:'20',date:'',remarks:''},{comp:'Assignment',marks:'10',co:'CO5',weightage:'10',date:'',remarks:''},{comp:'End Semester',marks:'50',co:'CO1-CO5',weightage:'40',date:'',remarks:''}];
                 setLiveCols(EVAL_COLS);setLiveRows(EVAL_ROWS);setGenerated(true);
-                addLiveMsg('ai',`📄 Template "${f.name}" loaded.\n\nBackend parser not yet wired — a default eval structure is pre-filled. Edit it to match your college's format, or ask AI:\n\n"Add a Bloom's Level column"\n"Change marks for Unit Test 1 to 30"`);
+                addLiveMsg('ai',`📄 Template "${f.name}" loaded with default eval structure. Ask me to customise it:\n\n"Change Unit Test marks to 30"\n"Add a Viva component worth 10 marks"\n"Map CO3 to Unit Test 2"`);
               } else {
                 const d=await r.json();const plan=d.data||d;
                 const rows=(plan?.components||[]).map(c=>({comp:c.name||'',marks:String(c.max_marks||''),co:c.co_mapped||'',weightage:String(c.weightage||''),date:c.date||'',remarks:c.remarks||''}));
@@ -2208,40 +2264,153 @@ function StudyMaterialsPage({course}){
     const isDocx=f.name.endsWith('.docx');
     const r=new FileReader();
     r.onload=ev=>{
-      let lines=[];
+      let parsedItems=[];
       if(isDocx){
-        // docx: binary — extract readable text via basic string scan (works for simple docx)
-        const arr=new Uint8Array(ev.target.result);
-        let text='';
-        // Extract text from XML inside docx (w:t elements)
         try{
           const decoder=new TextDecoder('utf-8');
-          const raw=decoder.decode(arr);
-          const matches=raw.match(/<w:t[^>]*>([^<]+)<\/w:t>/g)||[];
-          text=matches.map(m=>m.replace(/<[^>]+>/g,'')).join(' ');
-        }catch{}
-        // Split into meaningful lines
-        lines=text.split(/\s{3,}|\n/).map(l=>l.trim()).filter(l=>l.length>5&&l.length<300);
+          const raw=decoder.decode(new Uint8Array(ev.target.result));
+
+          // Extract all paragraph text (headings + body)
+          const allParas=[];
+          const paraMatches=raw.match(/<w:p[ >][\s\S]*?<\/w:p>/g)||[];
+          paraMatches.forEach(p=>{
+            const tMatches=p.match(/<w:t[^>]*>([^<]*)<\/w:t>/g)||[];
+            const text=tMatches.map(t=>t.replace(/<[^>]+>/g,'')).join('').trim();
+            if(text)allParas.push(text);
+          });
+
+          // Extract all table rows
+          const tableRows=[];
+          const rowMatches=raw.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g)||[];
+          rowMatches.forEach(tr=>{
+            const cells=[];
+            const cellMatches=tr.match(/<w:tc>[\s\S]*?<\/w:tc>/g)||[];
+            cellMatches.forEach(tc=>{
+              const tMatches=tc.match(/<w:t[^>]*>([^<]*)<\/w:t>/g)||[];
+              const text=tMatches.map(t=>t.replace(/<[^>]+>/g,'')).join('').trim();
+              cells.push(text);
+            });
+            if(cells.some(c=>c.length>2))tableRows.push(cells);
+          });
+
+          // Determine section context from headings in allParas
+          // Walk through paragraphs and rows together to assign category
+          let currentCat='textbooks';
+          const catKeywords={
+            textbooks:['textbook','reference book','beyond gap','book'],
+            web:['web','online','youtube','nptel','blog','video','link'],
+            journals:['journal','magazine','e-journal','paper','article'],
+            moocs:['mooc','coursera','swayam','edx','udemy','online course'],
+          };
+          const detectCat=(text)=>{
+            const t=text.toLowerCase();
+            for(const[cat,kws]of Object.entries(catKeywords)){if(kws.some(k=>t.includes(k)))return cat;}
+            return null;
+          };
+
+          // First pass — find section headings in paragraphs
+          const sectionMap=[];
+          allParas.forEach(p=>{
+            const cat=detectCat(p);
+            if(cat)currentCat=cat;
+          });
+
+          // Second pass — map table rows to categories based on their order
+          // Re-walk: track section changes as we see heading-like paragraphs
+          currentCat='textbooks';
+          // Use the fact that heading paragraphs appear before their tables in docx XML
+          // Split raw by heading markers to assign table rows
+          const sections=raw.split(/<w:p[ >]/);
+          let tableIdx=0;
+          const rowCatMap=[];
+
+          // Simpler approach: assign each table row a category based on which section heading came before it in XML order
+          const allNodes=[];
+          // Extract all paragraphs and rows in document order
+          const nodeRe=/<(w:p|w:tr)[ >]([\s\S]*?)<\/\1>/g;
+          let match;
+          while((match=nodeRe.exec(raw))!==null){
+            const tag=match[1];
+            const content=match[0];
+            const tTexts=(content.match(/<w:t[^>]*>([^<]*)<\/w:t>/g)||[]).map(t=>t.replace(/<[^>]+>/g,'')).join('').trim();
+            allNodes.push({tag,text:tTexts});
+          }
+
+          currentCat='textbooks';
+          allNodes.forEach(node=>{
+            if(node.tag==='w:p'){
+              const cat=detectCat(node.text);
+              if(cat)currentCat=cat;
+            } else if(node.tag==='w:tr'&&node.text.length>3){
+              // Skip header rows (first row of each table, usually contains "Book","Author" etc)
+              const isHeader=['book','author','publisher','sr','web link','module','journal','s.no'].some(h=>node.text.toLowerCase().startsWith(h)||node.text.toLowerCase().includes(h+''));
+              if(!isHeader)rowCatMap.push({text:node.text,cat:currentCat});
+            }
+          });
+
+          // Now build items from rowCatMap — each row's full text as title
+          // Also try to split cells: for table rows extract per-cell data
+          const processedRows=new Set();
+          rowMatches.forEach((tr,ri)=>{
+            const cells=[];
+            const cellMatches=tr.match(/<w:tc>[\s\S]*?<\/w:tc>/g)||[];
+            cellMatches.forEach(tc=>{
+              const tMatches=tc.match(/<w:t[^>]*>([^<]*)<\/w:t>/g)||[];
+              cells.push(tMatches.map(t=>t.replace(/<[^>]+>/g,'')).join('').trim());
+            });
+            const rowText=cells.join(' ').trim();
+            if(!rowText||processedRows.has(rowText))return;
+            if(['book','author','publisher','sr.','web link','module','journal','s.no','sr no'].some(h=>rowText.toLowerCase().startsWith(h)))return;
+            processedRows.add(rowText);
+
+            const mapped=rowCatMap.find(r=>r.text.includes(cells[0])||cells[0].includes(r.text.slice(0,20)));
+            const cat=mapped?.cat||'textbooks';
+
+            // Build structured item based on category + cell count
+            let item={id:Date.now()+ri+Math.random(),_source:'user',_file:f.name};
+            if(cat==='textbooks'&&cells.length>=2){
+              item={...item,title:cells[0]||rowText,author:cells[1]||'',publisher:cells[2]||''};
+            } else if(cat==='web'&&cells.length>=2){
+              // detect URL in any cell
+              const urlCell=cells.find(c=>c.startsWith('http')||c.includes('nptel')||c.includes('youtube')||c.includes('www.'));
+              const titleCell=cells.find(c=>c!==urlCell&&c.length>3);
+              item={...item,title:titleCell||cells[0]||rowText,url:urlCell||'',unit:cells[cells.length-1]||''};
+            } else if(cat==='journals'){
+              const urlCell=cells.find(c=>c.startsWith('http')||c.includes('arxiv')||c.includes('doi'));
+              item={...item,title:cells.find(c=>c!==urlCell&&c.length>3)||rowText,url:urlCell||''};
+            } else if(cat==='moocs'){
+              item={...item,title:cells[0]||rowText,platform:cells[1]||'',url:cells.find(c=>c.startsWith('http'))||''};
+            } else {
+              item={...item,title:rowText};
+            }
+            parsedItems.push({...item,_cat:cat});
+          });
+
+        }catch(ex){console.error('docx parse error',ex);}
       } else {
         const text=typeof ev.target.result==='string'?ev.target.result:new TextDecoder().decode(ev.target.result);
-        lines=text.split('\n').map(l=>l.trim()).filter(l=>l.length>3);
+        const lines=text.split('\n').map(l=>l.trim()).filter(l=>l.length>3);
+        parsedItems=lines.map((l,i)=>({id:Date.now()+i,title:l,_source:'user',_file:f.name,_cat:null}));
       }
-      if(!lines.length){setAddMsg('No readable content found.');setTimeout(()=>setAddMsg(''),3000);return;}
-      const items=lines.map((l,i)=>({id:i,title:l}));
-      // Auto-guess category per item
+
+      if(!parsedItems.length){setAddMsg('No readable content found in file.');setTimeout(()=>setAddMsg(''),3000);return;}
+
+      // Build initial allocations: use _cat if detected, else guess from text
+      const items=parsedItems.map((it,i)=>({...it,id:it.id||Date.now()+i}));
       const guessed={};
       items.forEach((it,i)=>{
-        const t=it.title.toLowerCase();
-        if(t.includes('http')||t.includes('nptel')||t.includes('youtube')||t.includes('blog')||t.includes('www.'))guessed[i]='web';
-        else if(t.includes('journal')||t.includes('arxiv')||t.includes('doi')||t.includes('ieee')||t.includes('vidhya')||t.includes('medium'))guessed[i]='journals';
-        else if(t.includes('coursera')||t.includes('mooc')||t.includes('udemy')||t.includes('swayam')||t.includes('edx'))guessed[i]='moocs';
+        if(it._cat){guessed[i]=it._cat;return;}
+        const t=(it.title||'').toLowerCase();
+        if(t.includes('http')||t.includes('nptel')||t.includes('youtube')||t.includes('www.'))guessed[i]='web';
+        else if(t.includes('arxiv')||t.includes('doi')||t.includes('ieee')||t.includes('vidhya')||t.includes('medium'))guessed[i]='journals';
+        else if(t.includes('coursera')||t.includes('mooc')||t.includes('udemy')||t.includes('swayam'))guessed[i]='moocs';
         else guessed[i]='textbooks';
       });
       setPendingImport({items,fileName:f.name});
       setAllocations(guessed);
       setShowAlloc(true);
     };
-    if(f.name.endsWith('.docx'))r.readAsArrayBuffer(f);
+    if(isDocx)r.readAsArrayBuffer(f);
     else r.readAsText(f);
     e.target.value='';
   };
@@ -2250,7 +2419,9 @@ function StudyMaterialsPage({course}){
     const grouped={textbooks:[],web:[],journals:[],moocs:[]};
     pendingImport.items.forEach((it,i)=>{
       const cat=allocations[i]||'textbooks';
-      grouped[cat].push({id:Date.now()+i+Math.random(),title:it.title,_source:'user',_file:pendingImport.fileName});
+      // Preserve all structured fields (author, publisher, url, unit etc.)
+      const {_cat,...rest}=it;
+      grouped[cat].push({...rest,id:Date.now()+i+Math.random(),_source:'user',_file:pendingImport.fileName});
     });
     const u={
       textbooks:[...(userMats.textbooks||[]),...grouped.textbooks],
@@ -2260,8 +2431,8 @@ function StudyMaterialsPage({course}){
     };
     saveUser(u);
     const total=Object.values(grouped).reduce((a,b)=>a+b.length,0);
-    setAddMsg(`Imported ${total} items from ${pendingImport.fileName}`);
-    setTimeout(()=>setAddMsg(''),3000);
+    setAddMsg(`Imported ${total} items — ${grouped.textbooks.length} textbooks, ${grouped.web.length} web, ${grouped.journals.length} journals, ${grouped.moocs.length} MOOCs`);
+    setTimeout(()=>setAddMsg(''),5000);
     setShowAlloc(false);setPendingImport(null);setAllocations({});setFileLabel('');
   };
 
