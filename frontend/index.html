@@ -917,10 +917,11 @@ function CourseDetailPage({course,go,setCourse}){
       <div className="card card-p">
         <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>🎯 Course Outcomes Summary</div>
         {cos.map((co,i)=>{
-          const bc=bloomColor[co.bloom_level]||'b-gray';
+          const bl=inferBloom(co.statement||'')||co.bloom_level||'Understand';
+          const bc=bloomColor[bl]||'b-gray';
           return(<div key={i} style={{display:'flex',gap:'.65rem',alignItems:'flex-start',padding:'.5rem 0',borderBottom:'1px solid var(--border)'}}>
             <span style={{fontWeight:700,color:'var(--blue2)',fontSize:'.855rem',minWidth:32,paddingTop:1}}>{co.co_id}</span>
-            <span className={`badge ${bc}`} style={{flexShrink:0,fontSize:'.68rem'}}>{co.bloom_level}</span>
+            <span className={`badge ${bc}`} style={{flexShrink:0,fontSize:'.68rem'}}>{bl}</span>
             <span style={{fontSize:'.82rem',color:'var(--text)',lineHeight:1.4}}>{co.statement}</span>
           </div>);
         })}
@@ -931,15 +932,16 @@ function CourseDetailPage({course,go,setCourse}){
     {tab==='cos'&&<div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'1rem'}}>
         {cos.map((co,i)=>{
-          const bc=bloomColor[co.bloom_level]||'b-gray';
+          const bl=inferBloom(co.statement||'')||co.bloom_level||'Understand';
+          const bc=bloomColor[bl]||'b-gray';
           const bloomList=['Remember','Understand','Apply','Analyze','Evaluate','Create'];
-          const li=bloomList.indexOf(co.bloom_level);
+          const li=bloomList.indexOf(bl);
           const colors=['#A8A29E','#F97316','#D6D3D1','#57534E','#78716C','#EA580C','#C2410C'];
           const barColor=colors[li>=0?li:0]||'#F97316';
           return(<div key={i} className="card card-p" style={{borderLeft:`4px solid ${barColor}`}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem'}}>
               <span style={{fontWeight:700,fontSize:'1rem',color:'var(--blue2)'}}>{co.co_id}</span>
-              <span className={`badge ${bc}`}>{co.bloom_level}</span>
+              <span className={`badge ${bc}`}>{bl}</span>
             </div>
             <div style={{fontSize:'.875rem',color:'var(--text)',lineHeight:1.6,marginBottom:'.75rem'}}>{co.statement}</div>
             <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
