@@ -366,21 +366,69 @@ let _token = sessionStorage.getItem('obe_token') || '';
 function setToken(t){ _token=t; if(t) sessionStorage.setItem('obe_token',t); else sessionStorage.removeItem('obe_token'); }
 function getToken(){ return _token; }
 const BLOOM=[{l:1,n:'Remember',c:'bl1'},{l:2,n:'Understand',c:'bl2'},{l:3,n:'Apply',c:'bl3'},{l:4,n:'Analyze',c:'bl4'},{l:5,n:'Evaluate',c:'bl5'},{l:6,n:'Create',c:'bl6'}];
-// Auto-infer Bloom's level from a CO statement using keyword matching
-const inferBloom=(statement='')=>{
+// ── BLOOM INFERENCE ─────────────────────────────────────────────────────────
+// Fast regex fallback — used instantly while AI call is in flight
+const inferBloomSync=(statement='')=>{
   const s=statement.toLowerCase();
-  // L6 Create — highest priority
-  if(/\b(design|formulate|construct|create|produce|develop|invent|compose|generate|build|assemble|plan|devise|synthesize|combine|originate)\b/.test(s))return'Create';
-  // L5 Evaluate
-  if(/\b(evaluate|justify|critique|judge|defend|assess|appraise|argue|rate|select|prioritize|recommend|support|validate)\b/.test(s))return'Evaluate';
-  // L4 Analyze
-  if(/\b(analyz|analyse|compare|contrast|differentiate|distinguish|examine|break down|classify|organize|categorize|relate|infer|attribute|dissect)\b/.test(s))return'Analyze';
-  // L3 Apply
-  if(/\b(apply|implement|execute|use|solve|demonstrate|calculate|operate|perform|carry out|illustrate|interpret|employ|utilize)\b/.test(s))return'Apply';
-  // L2 Understand
-  if(/\b(understand|explain|describe|summarize|paraphrase|classify|discuss|identify|recognize|translate|interpret|report|restate|review)\b/.test(s))return'Understand';
-  // L1 Remember (default)
-  return'Remember';
+  if(/\b(design|formulate|construct|create|produce|develop|invent|compose|generate|build|assemble|plan|devise|synthesize|combine|originate|propose|hypothesize|compile|modify|arrange|prepare)\b/.test(s))return'Create';
+  if(/\b(evaluate|justify|critique|judge|defend|assess|appraise|argue|prioritize|recommend|validate|debate|conclude|determine|measure|verify|rank)\b/.test(s))return'Evaluate';
+  if(/\b(analyz|analyse|compare|contrast|differentiate|distinguish|examine|categorize|relate|infer|attribute|dissect|investigate|separate|inspect|outline)\b/.test(s))return'Analyze';
+  if(/\b(apply|implement|execute|solve|demonstrate|calculate|operate|perform|illustrate|employ|utilize|compute|practice|simulate|experiment)\b/.test(s))return'Apply';
+  if(/\b(understand|explain|summarize|paraphrase|discuss|identify|recognize|translate|interpret|report|restate|review|express|generalize|clarify|represent)\b/.test(s))return'Understand';
+  if(/\b(define|list|recall|name|state|memorize|repeat|record|match|label|describe|enumerate|reproduce|duplicate|quote|tabulate|mention)\b/.test(s))return'Remember';
+  return'Understand';
+};
+// Keep simple alias for sync-only call sites (onChange typing)
+const inferBloom=inferBloomSync;
+
+// AI-powered Bloom classification — calls Claude API for accurate context-aware mapping
+// Returns a promise resolving to one of the 6 Bloom level names
+const inferBloomAI=async(statements=[])=>{
+  if(!statements.length)return[];
+  try{
+    const prompt=`You are a Bloom's Taxonomy expert for university-level engineering courses.
+
+Classify each of the following Course Outcome (CO) statements into exactly one of these 6 Bloom's Taxonomy levels:
+- Remember (L1): Recalling facts, terms, basic concepts — verbs: list, define, state, recall, name, describe, memorize, enumerate
+- Understand (L2): Explaining ideas or concepts in own words — verbs: explain, summarize, discuss, identify, recognize, interpret, classify, paraphrase
+- Apply (L3): Using learned info in new or real-world situations — verbs: apply, solve, implement, demonstrate, calculate, use, execute, perform
+- Analyze (L4): Drawing connections, breaking info into parts — verbs: analyze, compare, contrast, differentiate, examine, dissect, distinguish, investigate
+- Evaluate (L5): Justifying a decision or argument based on criteria — verbs: evaluate, assess, justify, critique, judge, defend, recommend, validate
+- Create (L6): Producing new original work — verbs: design, formulate, construct, create, develop, synthesize, build, generate, plan, compose
+
+IMPORTANT RULES:
+1. Look at the ACTION VERB first — it is the strongest signal
+2. Context matters — "describe the architecture" = Remember, "describe how you would design" = Create
+3. "Discuss" without deeper analysis = Understand; "Discuss and compare tradeoffs" = Analyze
+4. If a statement has multiple verbs, pick the HIGHEST level verb
+5. Reply ONLY with a JSON array of strings, one per CO, in the same order. No explanation, no markdown, no extra text.
+
+CO statements:
+${statements.map((s,i)=>`${i+1}. ${s}`).join('\n')}
+
+Reply format example (for 3 COs): ["Understand","Remember","Apply"]`;
+
+    const res=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:200,
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+    if(!res.ok)throw new Error('API error');
+    const data=await res.json();
+    const text=(data.content||[]).map(b=>b.text||'').join('').trim();
+    const clean=text.replace(/```json|```/g,'').trim();
+    const parsed=JSON.parse(clean);
+    const valid=['Remember','Understand','Apply','Analyze','Evaluate','Create'];
+    // Validate each returned level
+    return parsed.map((l,i)=>valid.includes(l)?l:inferBloomSync(statements[i]||''));
+  }catch(ex){
+    console.warn('AI Bloom inference failed, using regex fallback:',ex.message);
+    return statements.map(s=>inferBloomSync(s));
+  }
 };
 const QTYPES=['Short Answer','Long Answer','MCQ','Case Study'];
 
@@ -782,7 +830,12 @@ function CourseDetailPage({course,go,setCourse}){
   useEffect(()=>{
     if(course){
       setEditF({course_name:course.course_name||'',course_code:course.course_code||'',credits:course.credits||'',total_hours:course.total_hours||'',faculty_name:course.faculty_name||'',department:course.department||'',semester:course.semester||'',academic_year:course.academic_year||''});
-      setEditCos((course.cos||[]).map(co=>({...co,bloom_level:co.bloom_level||inferBloom(co.statement||'')})));
+      const rawCos=(course.cos||[]).map(co=>({...co,bloom_level:co.bloom_level||inferBloomSync(co.statement||'')}));
+      setEditCos(rawCos);
+      // Refine with AI in background
+      inferBloomAI(rawCos.map(co=>co.statement||'')).then(levels=>{
+        setEditCos(rawCos.map((co,i)=>({...co,bloom_level:levels[i]||co.bloom_level})));
+      });
     }
   },[course]);
 
@@ -1131,7 +1184,12 @@ function SyllabusPage({onExtracted}){
     try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;
       setRes(d);
       setEditRes({course_name:d.course_name||'',course_code:d.course_code||'',credits:d.credits||4});
-      setEditingCos((d.course_outcomes||d.cos||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')})));
+      const rawCos=(d.course_outcomes||d.cos||[]).map(co=>({...co}));
+      // Set immediately with sync fallback, then refine with AI
+      setEditingCos(rawCos.map(co=>({...co,bloom_level:inferBloomSync(co.statement||'')})));
+      inferBloomAI(rawCos.map(co=>co.statement||'')).then(levels=>{
+        setEditingCos(rawCos.map((co,i)=>({...co,bloom_level:levels[i]||inferBloomSync(co.statement||'')})));
+      });
       setEditingUnits((d.units||[]).map(u=>({...u})));
     }catch(e){setErr(e.message);}setLoading(false);};
 
@@ -1215,7 +1273,7 @@ function SyllabusPage({onExtracted}){
 }
 // ── COURSE SETUP ───────────────────────────────────────────────────────────
 function CourseSetupPage({setCourse,syllabusData}){
-  const initCos=(syllabusData?.course_outcomes||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')}));
+  const initCos=(syllabusData?.course_outcomes||[]).map(co=>({...co,bloom_level:inferBloomSync(co.statement||'')}));
   const defaultPos=[{po_id:'PO1',statement:'Engineering Knowledge'},{po_id:'PO2',statement:'Problem Analysis'},{po_id:'PO3',statement:'Design Solutions'},{po_id:'PO4',statement:'Conduct investigations of complex problems'},{po_id:'PO5',statement:'Modern Tool Usage'},{po_id:'PO6',statement:'The Engineer and Society'},{po_id:'PO7',statement:'Environment and Sustainability'},{po_id:'PO8',statement:'Ethics'},{po_id:'PO9',statement:'Individual and Team Work'},{po_id:'PO10',statement:'Communication'},{po_id:'PO11',statement:'Project Management and Finance'},{po_id:'PO12',statement:'Life-long Learning'}];
   const [f,setF]=useState({
     course_name:syllabusData?.course_name||'',
@@ -1227,6 +1285,15 @@ function CourseSetupPage({setCourse,syllabusData}){
   const [cos,setCos]=useState(initCos.length>0?initCos:[{co_id:'CO1',statement:'',bloom_level:'Apply'}]);
   const [customFields,setCustomFields]=useState([]); // [{id, label, values:[{id,text}]}]
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
+
+  // Refine Bloom levels with AI after mount (sync regex was applied instantly above)
+  React.useEffect(()=>{
+    if(initCos.length>0){
+      inferBloomAI(initCos.map(co=>co.statement||'')).then(levels=>{
+        setCos(prev=>prev.map((co,i)=>levels[i]?{...co,bloom_level:levels[i]}:co));
+      });
+    }
+  },[]);
 
   const addCustomField=()=>{
     const label=window.prompt('Field name (e.g. "Program Outcomes", "Program Specific Outcomes"):');
