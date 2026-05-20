@@ -381,50 +381,20 @@ const inferBloomSync=(statement='')=>{
 // Keep simple alias for sync-only call sites (onChange typing)
 const inferBloom=inferBloomSync;
 
-// AI-powered Bloom classification — calls Claude API for accurate context-aware mapping
-// Returns a promise resolving to one of the 6 Bloom level names
+// AI-powered Bloom classification — calls backend which uses Gemini/Groq/OpenAI
 const inferBloomAI=async(statements=[])=>{
   if(!statements.length)return[];
   try{
-    const prompt=`You are a Bloom's Taxonomy expert for university-level engineering courses.
-
-Classify each of the following Course Outcome (CO) statements into exactly one of these 6 Bloom's Taxonomy levels:
-- Remember (L1): Recalling facts, terms, basic concepts — verbs: list, define, state, recall, name, describe, memorize, enumerate
-- Understand (L2): Explaining ideas or concepts in own words — verbs: explain, summarize, discuss, identify, recognize, interpret, classify, paraphrase
-- Apply (L3): Using learned info in new or real-world situations — verbs: apply, solve, implement, demonstrate, calculate, use, execute, perform
-- Analyze (L4): Drawing connections, breaking info into parts — verbs: analyze, compare, contrast, differentiate, examine, dissect, distinguish, investigate
-- Evaluate (L5): Justifying a decision or argument based on criteria — verbs: evaluate, assess, justify, critique, judge, defend, recommend, validate
-- Create (L6): Producing new original work — verbs: design, formulate, construct, create, develop, synthesize, build, generate, plan, compose
-
-IMPORTANT RULES:
-1. Look at the ACTION VERB first — it is the strongest signal
-2. Context matters — "describe the architecture" = Remember, "describe how you would design" = Create
-3. "Discuss" without deeper analysis = Understand; "Discuss and compare tradeoffs" = Analyze
-4. If a statement has multiple verbs, pick the HIGHEST level verb
-5. Reply ONLY with a JSON array of strings, one per CO, in the same order. No explanation, no markdown, no extra text.
-
-CO statements:
-${statements.map((s,i)=>`${i+1}. ${s}`).join('\n')}
-
-Reply format example (for 3 COs): ["Understand","Remember","Apply"]`;
-
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
+    const tok=sessionStorage.getItem('obe_token');
+    const r=await fetch(API+'/syllabus/classify-bloom',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:200,
-        messages:[{role:'user',content:prompt}]
-      })
+      headers:{'Content-Type':'application/json',...(tok?{Authorization:`Bearer ${tok}`}:{})},
+      body:JSON.stringify({statements})
     });
-    if(!res.ok)throw new Error('API error');
-    const data=await res.json();
-    const text=(data.content||[]).map(b=>b.text||'').join('').trim();
-    const clean=text.replace(/```json|```/g,'').trim();
-    const parsed=JSON.parse(clean);
+    if(!r.ok)throw new Error('Backend error');
+    const d=await r.json();
     const valid=['Remember','Understand','Apply','Analyze','Evaluate','Create'];
-    // Validate each returned level
-    return parsed.map((l,i)=>valid.includes(l)?l:inferBloomSync(statements[i]||''));
+    return(d.levels||[]).map((l,i)=>valid.includes(l)?l:inferBloomSync(statements[i]||''));
   }catch(ex){
     console.warn('AI Bloom inference failed, using regex fallback:',ex.message);
     return statements.map(s=>inferBloomSync(s));
