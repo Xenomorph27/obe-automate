@@ -367,39 +367,24 @@ function setToken(t){ _token=t; if(t) sessionStorage.setItem('obe_token',t); els
 function getToken(){ return _token; }
 const BLOOM=[{l:1,n:'Remember',c:'bl1'},{l:2,n:'Understand',c:'bl2'},{l:3,n:'Apply',c:'bl3'},{l:4,n:'Analyze',c:'bl4'},{l:5,n:'Evaluate',c:'bl5'},{l:6,n:'Create',c:'bl6'}];
 // ── BLOOM INFERENCE ─────────────────────────────────────────────────────────
-// Fast regex fallback — used instantly while AI call is in flight
-const inferBloomSync=(statement='')=>{
+// Sync regex — covers all standard Bloom's action verbs used in engineering COs
+const inferBloom=(statement='')=>{
   const s=statement.toLowerCase();
+  // L6 Create
   if(/\b(design|formulate|construct|create|produce|develop|invent|compose|generate|build|assemble|plan|devise|synthesize|combine|originate|propose|hypothesize|compile|modify|arrange|prepare)\b/.test(s))return'Create';
+  // L5 Evaluate
   if(/\b(evaluate|justify|critique|judge|defend|assess|appraise|argue|prioritize|recommend|validate|debate|conclude|determine|measure|verify|rank)\b/.test(s))return'Evaluate';
+  // L4 Analyze
   if(/\b(analyz|analyse|compare|contrast|differentiate|distinguish|examine|categorize|relate|infer|attribute|dissect|investigate|separate|inspect|outline)\b/.test(s))return'Analyze';
+  // L3 Apply
   if(/\b(apply|implement|execute|solve|demonstrate|calculate|operate|perform|illustrate|employ|utilize|compute|practice|simulate|experiment)\b/.test(s))return'Apply';
-  if(/\b(understand|explain|summarize|paraphrase|discuss|identify|recognize|translate|interpret|report|restate|review|express|generalize|clarify|represent)\b/.test(s))return'Understand';
+  // L1 Remember — checked BEFORE Understand because describe/define/list are often misclassified
   if(/\b(define|list|recall|name|state|memorize|repeat|record|match|label|describe|enumerate|reproduce|duplicate|quote|tabulate|mention)\b/.test(s))return'Remember';
+  // L2 Understand — default for explain/discuss/identify etc
+  if(/\b(understand|explain|summarize|paraphrase|discuss|identify|recognize|translate|interpret|report|restate|review|express|generalize|clarify|represent)\b/.test(s))return'Understand';
   return'Understand';
 };
-// Keep simple alias for sync-only call sites (onChange typing)
-const inferBloom=inferBloomSync;
-
-// AI-powered Bloom classification — calls backend which uses Gemini/Groq/OpenAI
-const inferBloomAI=async(statements=[])=>{
-  if(!statements.length)return[];
-  try{
-    const tok=sessionStorage.getItem('obe_token');
-    const r=await fetch(API+'/syllabus/classify-bloom',{
-      method:'POST',
-      headers:{'Content-Type':'application/json',...(tok?{Authorization:`Bearer ${tok}`}:{})},
-      body:JSON.stringify({statements})
-    });
-    if(!r.ok)throw new Error('Backend error');
-    const d=await r.json();
-    const valid=['Remember','Understand','Apply','Analyze','Evaluate','Create'];
-    return(d.levels||[]).map((l,i)=>valid.includes(l)?l:inferBloomSync(statements[i]||''));
-  }catch(ex){
-    console.warn('AI Bloom inference failed, using regex fallback:',ex.message);
-    return statements.map(s=>inferBloomSync(s));
-  }
-};
+const inferBloomSync=inferBloom;
 const QTYPES=['Short Answer','Long Answer','MCQ','Case Study'];
 
 class EB extends React.Component{
@@ -800,12 +785,7 @@ function CourseDetailPage({course,go,setCourse}){
   useEffect(()=>{
     if(course){
       setEditF({course_name:course.course_name||'',course_code:course.course_code||'',credits:course.credits||'',total_hours:course.total_hours||'',faculty_name:course.faculty_name||'',department:course.department||'',semester:course.semester||'',academic_year:course.academic_year||''});
-      const rawCos=(course.cos||[]).map(co=>({...co,bloom_level:co.bloom_level||inferBloomSync(co.statement||'')}));
-      setEditCos(rawCos);
-      // Refine with AI in background
-      inferBloomAI(rawCos.map(co=>co.statement||'')).then(levels=>{
-        setEditCos(rawCos.map((co,i)=>({...co,bloom_level:levels[i]||co.bloom_level})));
-      });
+      setEditCos((course.cos||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')})));
     }
   },[course]);
 
@@ -1154,12 +1134,8 @@ function SyllabusPage({onExtracted}){
     try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;
       setRes(d);
       setEditRes({course_name:d.course_name||'',course_code:d.course_code||'',credits:d.credits||4});
-      const rawCos=(d.course_outcomes||d.cos||[]).map(co=>({...co}));
-      // Set immediately with sync fallback, then refine with AI
-      setEditingCos(rawCos.map(co=>({...co,bloom_level:inferBloomSync(co.statement||'')})));
-      inferBloomAI(rawCos.map(co=>co.statement||'')).then(levels=>{
-        setEditingCos(rawCos.map((co,i)=>({...co,bloom_level:levels[i]||inferBloomSync(co.statement||'')})));
-      });
+      const rawCos=(d.course_outcomes||d.cos||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')}));
+      setEditingCos(rawCos);
       setEditingUnits((d.units||[]).map(u=>({...u})));
     }catch(e){setErr(e.message);}setLoading(false);};
 
@@ -1255,15 +1231,6 @@ function CourseSetupPage({setCourse,syllabusData}){
   const [cos,setCos]=useState(initCos.length>0?initCos:[{co_id:'CO1',statement:'',bloom_level:'Apply'}]);
   const [customFields,setCustomFields]=useState([]); // [{id, label, values:[{id,text}]}]
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
-
-  // Refine Bloom levels with AI after mount (sync regex was applied instantly above)
-  React.useEffect(()=>{
-    if(initCos.length>0){
-      inferBloomAI(initCos.map(co=>co.statement||'')).then(levels=>{
-        setCos(prev=>prev.map((co,i)=>levels[i]?{...co,bloom_level:levels[i]}:co));
-      });
-    }
-  },[]);
 
   const addCustomField=()=>{
     const label=window.prompt('Field name (e.g. "Program Outcomes", "Program Specific Outcomes"):');
