@@ -782,7 +782,7 @@ function CourseDetailPage({course,go,setCourse}){
   useEffect(()=>{
     if(course){
       setEditF({course_name:course.course_name||'',course_code:course.course_code||'',credits:course.credits||'',total_hours:course.total_hours||'',faculty_name:course.faculty_name||'',department:course.department||'',semester:course.semester||'',academic_year:course.academic_year||''});
-      setEditCos(course.cos||[]);
+      setEditCos((course.cos||[]).map(co=>({...co,bloom_level:co.bloom_level||inferBloom(co.statement||'')})));
     }
   },[course]);
 
@@ -1131,7 +1131,7 @@ function SyllabusPage({onExtracted}){
     try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;
       setRes(d);
       setEditRes({course_name:d.course_name||'',course_code:d.course_code||'',credits:d.credits||4});
-      setEditingCos((d.course_outcomes||d.cos||[]).map(co=>({...co})));
+      setEditingCos((d.course_outcomes||d.cos||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')})));
       setEditingUnits((d.units||[]).map(u=>({...u})));
     }catch(e){setErr(e.message);}setLoading(false);};
 
@@ -1215,7 +1215,7 @@ function SyllabusPage({onExtracted}){
 }
 // ── COURSE SETUP ───────────────────────────────────────────────────────────
 function CourseSetupPage({setCourse,syllabusData}){
-  const initCos=syllabusData?.course_outcomes||[];
+  const initCos=(syllabusData?.course_outcomes||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')}));
   const defaultPos=[{po_id:'PO1',statement:'Engineering Knowledge'},{po_id:'PO2',statement:'Problem Analysis'},{po_id:'PO3',statement:'Design Solutions'},{po_id:'PO4',statement:'Conduct investigations of complex problems'},{po_id:'PO5',statement:'Modern Tool Usage'},{po_id:'PO6',statement:'The Engineer and Society'},{po_id:'PO7',statement:'Environment and Sustainability'},{po_id:'PO8',statement:'Ethics'},{po_id:'PO9',statement:'Individual and Team Work'},{po_id:'PO10',statement:'Communication'},{po_id:'PO11',statement:'Project Management and Finance'},{po_id:'PO12',statement:'Life-long Learning'}];
   const [f,setF]=useState({
     course_name:syllabusData?.course_name||'',
