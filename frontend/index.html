@@ -528,7 +528,7 @@ function Sidebar({page,go,course,user,logout,open,close}){
     {s:'STUDENTS & MATERIALS'},
     {p:'students',i:'👥',n:'Students Roster'},{p:'materials',i:'📚',n:'Study Materials'},{p:'student_portal',i:'🎓',n:'Student Portal'},
     {s:'ATTAINMENT'},
-    {p:'marks',i:'✏',n:'Upload Marks'},{p:'attainment',i:'📊',n:'CO/PO Attainment'},{p:'reports',i:'📑',n:'Reports'},
+    {p:'marks',i:'✏',n:'Upload Marks'},{p:'attainment',i:'📊',n:'CO/PO Attainment'},{p:'reports',i:'📑',n:'Reports'},{p:'master_attainment',i:'📊',n:'Master Attainment File'},
     {s:'QUESTIONS'},
     {p:'qgenerate',i:'✨',n:'Generate Question'},{p:'qpaper',i:'📋',n:'Question Paper'},
     {p:'qbank',i:'🗄',n:'Question Bank'},{p:'qclassify',i:'🔍',n:'Classify Question'},{p:'qmanipulate',i:'🔄',n:'Manipulate Level'},
@@ -3648,6 +3648,579 @@ function ReportsPage({course}){
 }
 
 // ── HOD DASHBOARD ─────────────────────────────────────────────────────────
+// ── MASTER ATTAINMENT FILE ─────────────────────────────────────────────────
+function MasterAttainmentPage({course}){
+  const API=window.API||'';
+  const tok=()=>sessionStorage.getItem('obe_token');
+  const hdr=()=>({Authorization:'Bearer '+tok(),'Content-Type':'application/json'});
+  const hdrForm=()=>({Authorization:'Bearer '+tok()});
+
+  const [activeTab,setActiveTab]=React.useState('course_info');
+  const [loading,setLoading]=React.useState(false);
+  const [generating,setGenerating]=React.useState(false);
+  const [downloading,setDownloading]=React.useState(false);
+  const [err,setErr]=React.useState('');
+  const [ok,setOk]=React.useState('');
+  const [qpSource,setQpSource]=React.useState('blank');
+  const [generated,setGenerated]=React.useState(false);
+
+  const [courseInfo,setCourseInfo]=React.useState(null);
+  const [students,setStudents]=React.useState([]);
+  const [coList,setCoList]=React.useState([]);
+  const [caSheets,setCaSheets]=React.useState({});
+  const [caNames,setCaNames]=React.useState([]);
+  const [eseQP,setEseQP]=React.useState([]);
+  const [eseMarks,setEseMarks]=React.useState({});
+  const [coPoMatrix,setCoPoMatrix]=React.useState({});
+  const [poList,setPoList]=React.useState([]);
+  const [finalAttn,setFinalAttn]=React.useState({});
+
+  React.useEffect(()=>{
+    if(!course) return;
+    setCourseInfo({
+      department:course.department||'',academic_year:course.academic_year||'',
+      course_name:course.course_name||'',course_code:course.course_code||'',
+      semester:course.semester||'',credits:course.credits||'',faculty_name:course.faculty_name||'',
+    });
+    setCoList((course.cos||[]).map(c=>({...c,target:60})));
+    setPoList(course.pos||[]);
+    setCoPoMatrix(course.co_po_matrix||{});
+    const comps=course.evaluation_config?.components||{};
+    const cas=Object.keys(comps).filter(k=>k.match(/ca\d+/i)).slice(0,5);
+    const caList=cas.length?cas:['CA1','CA2','CA3'];
+    setCaNames(caList);
+    const sheets={};caList.forEach(ca=>{sheets[ca]={qp:[],marks:{}};});
+    setCaSheets(sheets);
+    fetch(API+'/students/'+course.id,{headers:hdrForm()})
+      .then(r=>r.json()).then(d=>{if(d.data)setStudents(d.data);}).catch(()=>{});
+  },[course?.id]);
+
+  React.useEffect(()=>{
+    if(!coList.length||!students.length)return;
+    const attn={};
+    coList.forEach(co=>{
+      const cid=co.co_id;
+      let total=0,count=0;
+      caNames.forEach(ca=>{
+        const mks=caSheets[ca]?.marks||{};
+        const qp=(caSheets[ca]?.qp||[]).filter(q=>q.co_id===cid);
+        const max=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+        if(!max)return;
+        const passed=students.filter(s=>{
+          const sm=mks[s.prn]||{};
+          return qp.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0)/max*100>=60;
+        }).length;
+        total+=(passed/students.length)*100;count++;
+      });
+      attn[cid]=count?Math.round(total/count):0;
+    });
+    setFinalAttn(attn);
+  },[caSheets,students,coList,caNames]);
+
+  const generate=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setGenerating(true);setErr('');setOk('');
+    try{
+      const r=await fetch(API+'/co-po-template/generate/'+course.id,{
+        method:'POST',headers:hdr(),body:JSON.stringify({qp_source:qpSource})
+      });
+      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
+      setGenerated(true);
+      setOk('✓ Master file generated! Download it below.');
+    }catch(e){setErr(e.message);}
+    setGenerating(false);
+  };
+
+  const download=()=>{
+    if(!course)return;
+    setDownloading(true);
+    fetch(API+'/co-po-template/download/'+course.id,{headers:{Authorization:'Bearer '+tok()}})
+      .then(r=>{if(!r.ok)throw new Error('File not ready');return r.blob();})
+      .then(blob=>{
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');a.href=url;
+        a.download='CO_PO_Attainment_'+course.course_code+'.xlsx';
+        a.click();URL.revokeObjectURL(url);setDownloading(false);
+      })
+      .catch(()=>{setErr('Generate the file first, then download.');setDownloading(false);});
+  };
+
+  const uploadQP=async(ca,file)=>{
+    if(!file||!course)return;
+    setLoading(true);setErr('');
+    try{
+      const fd=new FormData();fd.append('file',file);
+      const r=await fetch(API+'/co-po-template/upload-qp/'+course.id+'/'+ca,{method:'POST',headers:hdrForm(),body:fd});
+      const d=await r.json();
+      if(!r.ok)throw new Error(d.detail||r.statusText);
+      const qs=(d.questions||[]).map((q,i)=>({q_no:i+1,...q}));
+      setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qs}}));
+      setOk('✓ Parsed '+d.extracted+' questions from '+file.name);
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const tabs=[
+    {id:'course_info',label:'📋 Course Info'},{id:'co_list',label:'🎯 CO List'},{id:'roll_list',label:'👥 Roll List'},
+    ...caNames.map(ca=>({id:'ca_'+ca,label:'📝 '+ca})),
+    {id:'ese',label:'📄 ESE'},{id:'final_attn',label:'📊 CO Attainment'},{id:'po_attn',label:'🔗 PO Attainment'},
+  ];
+
+  if(!course)return(
+    <div className="page-body fade-up">
+      <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.5rem'}}>Master Attainment File</div>
+      <Alrt t="warning" msg="Select a course from the Courses page first."/>
+    </div>
+  );
+
+  const EditCell=({value,onChange,type='text',small})=>(
+    <input type={type} value={value??''} onChange={e=>onChange(e.target.value)}
+      style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:small?'2px 4px':'4px 6px',
+        fontSize:small?'.75rem':'.82rem',fontFamily:'DM Sans,sans-serif',background:'var(--white)',color:'var(--text)'}}/>
+  );
+  const TH=({children,w})=>(
+    <th style={{background:'#1F3864',color:'#fff',padding:'7px 10px',fontSize:'.75rem',fontWeight:600,
+      textAlign:'center',whiteSpace:'nowrap',minWidth:w||80}}>{children}</th>
+  );
+  const TD=({children,center})=>(
+    <td style={{padding:'5px 8px',borderBottom:'1px solid var(--border)',fontSize:'.8rem',
+      textAlign:center?'center':'left',verticalAlign:'middle'}}>{children}</td>
+  );
+
+  const renderCourseInfo=()=>(
+    <div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem',marginBottom:'1rem'}}>
+        {[['Department','department'],['Academic Year','academic_year'],['Course Name','course_name'],
+          ['Course Code','course_code'],['Semester','semester'],['Credits','credits'],['Faculty Name','faculty_name']].map(([label,key])=>(
+          <div key={key} className="form-group" style={{marginBottom:0}}>
+            <label className="form-label">{label}</label>
+            <EditCell value={courseInfo?.[key]||''} onChange={v=>setCourseInfo(p=>({...p,[key]:v}))}/>
+          </div>
+        ))}
+      </div>
+      <div style={{background:'var(--bg2)',borderRadius:8,padding:'1rem',marginTop:'1rem'}}>
+        <div style={{fontWeight:600,fontSize:'.82rem',marginBottom:'.5rem',color:'var(--text2)'}}>ATTAINMENT RUBRIC</div>
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead><tr><TH>Condition</TH><TH>Range</TH><TH>Level</TH></tr></thead>
+          <tbody>
+            {[['≤ 40% of students scored ≥ 60%','≤ 40%',1],['> 40% and < 70% scored ≥ 60%','> 40% & < 70%',2],['≥ 70% of students scored ≥ 60%','≥ 70%',3]].map(([c,r,l])=>(
+              <tr key={l}><TD>{c}</TD><TD center>{r}</TD><TD center>{l}</TD></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const renderCOList=()=>(
+    <div>
+      <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',alignItems:'center'}}>
+        <span style={{fontWeight:600,fontSize:'.85rem'}}>Course Outcomes</span>
+        <button className="btn btn-primary btn-sm" onClick={()=>setCoList(p=>[...p,{co_id:'CO'+(p.length+1),statement:'',bloom_level:'L1',target:60}])}>+ Add CO</button>
+      </div>
+      <div className="tbl-wrap">
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead><tr><TH w={60}>CO No</TH><TH w={400}>Statement</TH><TH w={80}>Bloom Level</TH><TH w={80}>Target %</TH><TH w={50}></TH></tr></thead>
+          <tbody>
+            {coList.map((co,i)=>(
+              <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                <TD center><EditCell value={co.co_id} onChange={v=>setCoList(p=>p.map((c,j)=>j===i?{...c,co_id:v}:c))} small/></TD>
+                <TD><EditCell value={co.statement} onChange={v=>setCoList(p=>p.map((c,j)=>j===i?{...c,statement:v}:c))}/></TD>
+                <TD center>
+                  <select value={co.bloom_level||'L1'} onChange={e=>setCoList(p=>p.map((c,j)=>j===i?{...c,bloom_level:e.target.value}:c))}
+                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px'}}>
+                    {['L1','L2','L3','L4','L5','L6'].map(l=><option key={l}>{l}</option>)}
+                  </select>
+                </TD>
+                <TD center><EditCell value={co.target??60} type="number" onChange={v=>setCoList(p=>p.map((c,j)=>j===i?{...c,target:v}:c))} small/></TD>
+                <TD center><span onClick={()=>setCoList(p=>p.filter((_,j)=>j!==i))} style={{cursor:'pointer',color:'var(--red)',fontSize:'1rem'}}>×</span></TD>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const renderRollList=()=>(
+    <div>
+      <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',alignItems:'center',flexWrap:'wrap'}}>
+        <span style={{fontWeight:600,fontSize:'.85rem'}}>{students.length} Students</span>
+        <button className="btn btn-primary btn-sm" onClick={()=>setStudents(p=>[...p,{prn:'',name:'',section:'A'}])}>+ Add Row</button>
+        <span style={{fontSize:'.78rem',color:'var(--text2)'}}>Synced from Students Roster</span>
+      </div>
+      <div className="tbl-wrap" style={{maxHeight:500,overflowY:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead><tr><TH w={40}>#</TH><TH w={140}>PRN</TH><TH w={280}>Name</TH><TH w={80}>Section</TH><TH w={40}></TH></tr></thead>
+          <tbody>
+            {students.map((s,i)=>(
+              <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                <TD center>{i+1}</TD>
+                <TD><EditCell value={s.prn} onChange={v=>setStudents(p=>p.map((x,j)=>j===i?{...x,prn:v}:x))} small/></TD>
+                <TD><EditCell value={s.name} onChange={v=>setStudents(p=>p.map((x,j)=>j===i?{...x,name:v}:x))}/></TD>
+                <TD center>
+                  <select value={s.section||'A'} onChange={e=>setStudents(p=>p.map((x,j)=>j===i?{...x,section:e.target.value}:x))}
+                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px'}}>
+                    {['A','B','C'].map(sec=><option key={sec}>{sec}</option>)}
+                  </select>
+                </TD>
+                <TD center><span onClick={()=>setStudents(p=>p.filter((_,j)=>j!==i))} style={{cursor:'pointer',color:'var(--red)'}}>×</span></TD>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const renderCASheet=(ca)=>{
+    const sheet=caSheets[ca]||{qp:[],marks:{}};
+    const qp=sheet.qp||[];
+    const marks=sheet.marks||{};
+    const fileRef=React.createRef();
+    const addQ=()=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:[...qp,{q_no:qp.length+1,question_text:'',marks:5,co_id:coList[0]?.co_id||'CO1',bloom_level:1}]}}));
+    const updQ=(i,field,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.map((q,j)=>j===i?{...q,[field]:val}:q)}}));
+    const delQ=(i)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.filter((_,j)=>j!==i)}}));
+    const updMark=(prn,qno,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...marks,[prn]:{...(marks[prn]||{}),[qno]:val}}}}));
+    return(
+      <div>
+        <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1rem',flexWrap:'wrap'}}>
+          <span style={{fontWeight:700,fontSize:'.9rem'}}>📄 {ca} — Question Paper</span>
+          <button className="btn btn-primary btn-sm" onClick={addQ}>+ Add Question</button>
+          <div style={{display:'flex',alignItems:'center',gap:'.4rem'}}>
+            <input type="file" accept=".xlsx,.xls,.pdf" style={{display:'none'}} ref={fileRef}
+              onChange={e=>e.target.files[0]&&uploadQP(ca,e.target.files[0])}/>
+            <button className="btn btn-outline btn-sm" onClick={()=>fileRef.current&&fileRef.current.click()}>
+              {loading?'Parsing…':'⬆ Upload QP'}
+            </button>
+          </div>
+        </div>
+        <div className="tbl-wrap" style={{marginBottom:'1.5rem'}}>
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead><tr><TH w={40}>Q#</TH><TH w={380}>Question</TH><TH w={70}>Marks</TH><TH w={80}>CO</TH><TH w={80}>Bloom</TH><TH w={40}></TH></tr></thead>
+            <tbody>
+              {qp.map((q,i)=>(
+                <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                  <TD center><EditCell value={q.q_no} type="number" onChange={v=>updQ(i,'q_no',v)} small/></TD>
+                  <TD><EditCell value={q.question_text} onChange={v=>updQ(i,'question_text',v)}/></TD>
+                  <TD center><EditCell value={q.marks} type="number" onChange={v=>updQ(i,'marks',v)} small/></TD>
+                  <TD center>
+                    <select value={q.co_id||''} onChange={e=>updQ(i,'co_id',e.target.value)}
+                      style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',width:'100%'}}>
+                      {coList.map(c=><option key={c.co_id} value={c.co_id}>{c.co_id}</option>)}
+                    </select>
+                  </TD>
+                  <TD center>
+                    <select value={q.bloom_level||1} onChange={e=>updQ(i,'bloom_level',parseInt(e.target.value))}
+                      style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',width:'100%'}}>
+                      {[1,2,3,4,5,6].map(l=><option key={l} value={l}>L{l}</option>)}
+                    </select>
+                  </TD>
+                  <TD center><span onClick={()=>delQ(i)} style={{cursor:'pointer',color:'var(--red)'}}>×</span></TD>
+                </tr>
+              ))}
+              {!qp.length&&<tr><td colSpan={6} style={{padding:'1.5rem',textAlign:'center',color:'var(--text3)',fontSize:'.85rem'}}>No questions yet. Add manually or upload a QP file.</td></tr>}
+            </tbody>
+            {qp.length>0&&<tfoot><tr>
+              <td colSpan={2} style={{padding:'6px 8px',fontWeight:700,fontSize:'.8rem',textAlign:'right'}}>Total:</td>
+              <td style={{padding:'6px 8px',fontWeight:700,fontSize:'.8rem',textAlign:'center',background:'#d1fae5'}}>{qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0)}</td>
+              <td colSpan={3}/>
+            </tr></tfoot>}
+          </table>
+        </div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>✏ {ca} — Marks Entry</div>
+        {!students.length&&<Alrt t="warning" msg="No students found. Import from Students Roster first."/>}
+        {!qp.length&&<Alrt t="info" msg="Add questions above to enable marks entry."/>}
+        {students.length>0&&qp.length>0&&(
+          <div className="tbl-wrap" style={{maxHeight:500,overflowY:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr>
+                  <TH w={40}>#</TH><TH w={130}>PRN</TH><TH w={220}>Name</TH>
+                  {qp.map(q=><TH key={q.q_no} w={70}>Q{q.q_no}<br/><span style={{fontWeight:400,fontSize:'.68rem',opacity:.8}}>{q.co_id}/{q.marks}M</span></TH>)}
+                  <TH w={70}>Total</TH>
+                </tr>
+                <tr>
+                  <td colSpan={3} style={{background:'#E2EFDA',padding:'4px 8px',fontSize:'.75rem',fontWeight:600}}>Max:</td>
+                  {qp.map(q=><td key={q.q_no} style={{background:'#E2EFDA',textAlign:'center',fontSize:'.75rem',fontWeight:600,padding:'4px'}}>{q.marks}</td>)}
+                  <td style={{background:'#E2EFDA',textAlign:'center',fontWeight:700,fontSize:'.75rem',padding:'4px'}}>{qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0)}</td>
+                </tr>
+              </thead>
+              <tbody>
+                {students.map((s,si)=>{
+                  const sm=marks[s.prn]||{};
+                  const total=qp.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0);
+                  return(
+                    <tr key={si} style={{background:si%2===0?'var(--bg)':'var(--white)'}}>
+                      <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
+                      {qp.map(q=>(
+                        <TD key={q.q_no} center>
+                          <input type="number" min="0" max={q.marks} step="0.5"
+                            value={sm[q.q_no]??''} onChange={e=>updMark(s.prn,q.q_no,e.target.value)}
+                            style={{width:52,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px',
+                              textAlign:'center',fontSize:'.78rem',fontFamily:'DM Sans,sans-serif'}}/>
+                        </TD>
+                      ))}
+                      <TD center><span style={{fontWeight:700,color:total>0?'var(--green)':'var(--text3)'}}>{total||'—'}</span></TD>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderESE=()=>(
+    <div>
+      <div style={{display:'flex',gap:'1rem',alignItems:'center',marginBottom:'1rem'}}>
+        <span style={{fontWeight:700,fontSize:'.9rem'}}>📄 End Semester Exam (ESE)</span>
+        <button className="btn btn-primary btn-sm" onClick={()=>setEseQP(p=>[...p,{q_no:p.length+1,question_text:'',marks:10,co_id:coList[0]?.co_id||'CO1',bloom_level:3}])}>+ Add Question</button>
+      </div>
+      <div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
+        ℹ ESE marks are typically from the university. Enter question paper structure here for CO mapping; marks can be entered per student below.
+      </div>
+      <div className="tbl-wrap">
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead><tr><TH w={40}>Q#</TH><TH w={380}>Question</TH><TH w={70}>Marks</TH><TH w={80}>CO</TH><TH w={80}>Bloom</TH><TH w={40}></TH></tr></thead>
+          <tbody>
+            {eseQP.map((q,i)=>(
+              <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                <TD center>{q.q_no}</TD>
+                <TD><input value={q.question_text} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,question_text:e.target.value}:x))}
+                  style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:'.82rem'}}/></TD>
+                <TD center><input type="number" value={q.marks} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,marks:e.target.value}:x))}
+                  style={{width:52,border:'1px solid var(--border)',borderRadius:4,padding:'3px',textAlign:'center',fontSize:'.78rem'}}/></TD>
+                <TD center>
+                  <select value={q.co_id} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,co_id:e.target.value}:x))}
+                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px'}}>
+                    {coList.map(c=><option key={c.co_id} value={c.co_id}>{c.co_id}</option>)}
+                  </select>
+                </TD>
+                <TD center>
+                  <select value={q.bloom_level} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,bloom_level:parseInt(e.target.value)}:x))}
+                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px'}}>
+                    {[1,2,3,4,5,6].map(l=><option key={l} value={l}>L{l}</option>)}
+                  </select>
+                </TD>
+                <TD center><span onClick={()=>setEseQP(p=>p.filter((_,j)=>j!==i))} style={{cursor:'pointer',color:'var(--red)'}}>×</span></TD>
+              </tr>
+            ))}
+            {!eseQP.length&&<tr><td colSpan={6} style={{padding:'1.5rem',textAlign:'center',color:'var(--text3)',fontSize:'.85rem'}}>No ESE questions yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {students.length>0&&eseQP.length>0&&(
+        <div style={{marginTop:'1.5rem'}}>
+          <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>✏ ESE Marks Entry</div>
+          <div className="tbl-wrap" style={{maxHeight:400,overflowY:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr><TH>#</TH><TH>PRN</TH><TH w={220}>Name</TH>
+                {eseQP.map(q=><TH key={q.q_no} w={70}>Q{q.q_no}<br/><span style={{fontSize:'.68rem',fontWeight:400}}>{q.co_id}/{q.marks}M</span></TH>)}
+                <TH>Total</TH>
+              </tr></thead>
+              <tbody>
+                {students.map((s,si)=>{
+                  const sm=eseMarks[s.prn]||{};
+                  const tot=eseQP.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0);
+                  return(<tr key={si} style={{background:si%2===0?'var(--bg)':'var(--white)'}}>
+                    <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
+                    {eseQP.map(q=>(
+                      <TD key={q.q_no} center>
+                        <input type="number" min="0" max={q.marks} step="0.5" value={sm[q.q_no]??''}
+                          onChange={e=>setEseMarks(p=>({...p,[s.prn]:{...(p[s.prn]||{}),[q.q_no]:e.target.value}}))}
+                          style={{width:50,border:'1px solid var(--border)',borderRadius:4,padding:'2px',textAlign:'center',fontSize:'.78rem'}}/>
+                      </TD>
+                    ))}
+                    <TD center><b>{tot||'—'}</b></TD>
+                  </tr>);
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderFinalAttn=()=>{
+    const getLvl=p=>p<=40?1:p<70?2:3;
+    return(
+      <div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>📊 Final CO Attainment (auto-calculated)</div>
+        <div style={{background:'var(--bg2)',borderRadius:8,padding:'1rem',marginBottom:'1rem',fontSize:'.82rem',color:'var(--text2)'}}>
+          Attainment = % of students scoring ≥ 60% in questions mapped to each CO, averaged across CAs and combined with ESE (40:60).
+        </div>
+        <div className="tbl-wrap">
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead><tr>
+              <TH w={70}>CO</TH>
+              {caNames.map(ca=><TH key={ca} w={90}>{ca} Attn%</TH>)}
+              <TH w={100}>Internal Avg</TH><TH w={100}>ESE Attn%</TH><TH w={100}>Final (40:60)</TH><TH w={80}>Level</TH>
+            </tr></thead>
+            <tbody>
+              {coList.map((co,i)=>{
+                const cid=co.co_id;
+                const caAttn=caNames.map(ca=>{
+                  const mks=caSheets[ca]?.marks||{};
+                  const qp=(caSheets[ca]?.qp||[]).filter(q=>q.co_id===cid);
+                  const max=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                  if(!max||!students.length)return null;
+                  const passed=students.filter(s=>{
+                    const sm=mks[s.prn]||{};
+                    return qp.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0)/max*100>=60;
+                  }).length;
+                  return Math.round(passed/students.length*100);
+                });
+                const valid=caAttn.filter(v=>v!==null);
+                const intAvg=valid.length?Math.round(valid.reduce((s,v)=>s+v,0)/valid.length):null;
+                const eCoQs=(eseQP||[]).filter(q=>q.co_id===cid);
+                const eMax=eCoQs.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                let eAttn=null;
+                if(eMax&&students.length){
+                  const p=students.filter(s=>{
+                    const sm=eseMarks[s.prn]||{};
+                    return eCoQs.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0)/eMax*100>=60;
+                  }).length;
+                  eAttn=Math.round(p/students.length*100);
+                }
+                const fin=(intAvg!==null&&eAttn!==null)?Math.round(intAvg*0.4+eAttn*0.6):(intAvg!==null?Math.round(intAvg*0.4):null);
+                const lvl=fin!==null?getLvl(fin):null;
+                const lvlBg=lvl===3?'#d1fae5':lvl===2?'#fef3c7':'#fee2e2';
+                return(
+                  <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                    <TD center><b>{cid}</b></TD>
+                    {caAttn.map((v,j)=><TD key={j} center><span style={{color:v!==null?(v>=70?'var(--green)':v>=40?'var(--amber)':'var(--red)'):'var(--text3)'}}>{v!==null?v+'%':'—'}</span></TD>)}
+                    <TD center><b>{intAvg!==null?intAvg+'%':'—'}</b></TD>
+                    <TD center><span style={{color:eAttn!==null?(eAttn>=70?'var(--green)':'var(--amber)'):'var(--text3)'}}>{eAttn!==null?eAttn+'%':'—'}</span></TD>
+                    <TD center><b>{fin!==null?fin+'%':'—'}</b></TD>
+                    <TD center>{lvl&&<span style={{background:lvlBg,padding:'2px 10px',borderRadius:20,fontWeight:700,fontSize:'.78rem'}}>Level {lvl}</span>}</TD>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderPOAttn=()=>{
+    const poIds=poList.length?poList.map(p=>p.po_id||p):[...Array(12)].map((_,i)=>'PO'+(i+1));
+    return(
+      <div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>🔗 CO-PO Mapping & PO Attainment</div>
+        <div style={{background:'var(--bg2)',borderRadius:8,padding:'1rem',marginBottom:'1rem',fontSize:'.82rem',color:'var(--text2)'}}>
+          Edit correlation weights (0 = none, 1 = low, 2 = medium, 3 = high). PO attainment is auto-calculated from CO attainment × weights.
+        </div>
+        {!poList.length&&<Alrt t="warning" msg="No PO/PSO data found. Add POs in Course Setup → CO-PO Matrix, or the default PO1–PO12 columns are shown below."/>}
+        <div className="tbl-wrap" style={{overflowX:'auto'}}>
+          <table style={{borderCollapse:'collapse',minWidth:600}}>
+            <thead>
+              <tr>
+                <TH w={70}>CO</TH><TH w={80}>Attn%</TH>
+                {poIds.map(p=><TH key={p} w={55}>{p}</TH>)}
+              </tr>
+            </thead>
+            <tbody>
+              {coList.map((co,i)=>{
+                const cid=co.co_id;
+                const mapping=coPoMatrix[cid]||{};
+                const attn=finalAttn[cid];
+                return(
+                  <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                    <TD center><b>{cid}</b></TD>
+                    <TD center><span style={{fontWeight:700,color:attn>=70?'var(--green)':attn>=40?'var(--amber)':'var(--text3)'}}>{attn||'—'}{attn?'%':''}</span></TD>
+                    {poIds.map(po=>(
+                      <TD key={po} center>
+                        <select value={mapping[po]??''} onChange={e=>{
+                          const val=e.target.value===''?undefined:parseInt(e.target.value);
+                          setCoPoMatrix(prev=>({...prev,[cid]:{...prev[cid],[po]:val}}));
+                        }} style={{width:50,border:'1px solid var(--border)',borderRadius:4,padding:'2px',fontSize:'.78rem',textAlign:'center',
+                          background:mapping[po]?'#d1fae5':'var(--white)'}}>
+                          <option value="">—</option>
+                          <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                        </select>
+                      </TD>
+                    ))}
+                  </tr>
+                );
+              })}
+              <tr style={{background:'#1F3864'}}>
+                <td style={{padding:'7px 10px',color:'#fff',fontWeight:700,fontSize:'.78rem',textAlign:'center'}} colSpan={2}>PO Attainment</td>
+                {poIds.map(po=>{
+                  const vals=coList.map(co=>{
+                    const w=coPoMatrix[co.co_id]?.[po];
+                    const a=finalAttn[co.co_id];
+                    return w&&a?{w,a}:null;
+                  }).filter(Boolean);
+                  const a=vals.length?Math.round(vals.reduce((s,v)=>s+v.w*v.a,0)/(3*vals.length)):null;
+                  return<td key={po} style={{padding:'7px',textAlign:'center',color:'#fff',fontWeight:700,fontSize:'.82rem'}}>{a!==null?a+'%':'—'}</td>;
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const tabContent={course_info:renderCourseInfo(),co_list:renderCOList(),roll_list:renderRollList(),ese:renderESE(),final_attn:renderFinalAttn(),po_attn:renderPOAttn()};
+  caNames.forEach(ca=>{tabContent['ca_'+ca]=renderCASheet(ca);});
+
+  return(
+    <div className="page-body fade-up">
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:'1rem',marginBottom:'1.25rem'}}>
+        <div>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>Master Attainment File</div>
+          <div style={{fontSize:'.855rem',color:'var(--text2)',marginTop:'.25rem'}}>
+            {course.course_code} — {course.course_name} · Full editable CO/PO attainment workbook
+          </div>
+        </div>
+        <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',alignItems:'center'}}>
+          <div style={{display:'flex',gap:'.35rem',alignItems:'center',background:'var(--bg2)',borderRadius:8,padding:'6px 10px'}}>
+            <span style={{fontSize:'.75rem',fontWeight:600,color:'var(--text2)'}}>QP Source:</span>
+            <select value={qpSource} onChange={e=>setQpSource(e.target.value)}
+              style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',background:'var(--white)'}}>
+              <option value="blank">Blank (manual)</option>
+              <option value="question_bank">From Question Bank</option>
+            </select>
+          </div>
+          <button className="btn btn-primary" onClick={generate} disabled={generating}>
+            {generating?'Generating…':'✨ Generate Excel'}
+          </button>
+          <button className="btn btn-outline" onClick={download} disabled={downloading||!generated}>
+            {downloading?'…':'⬇ Download .xlsx'}
+          </button>
+        </div>
+      </div>
+      <Alrt t="error" msg={err}/>
+      {ok&&<div style={{background:'var(--green2)',border:'1px solid #6ee7b7',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.85rem',color:'#065f46'}}>{ok}</div>}
+      {!generated&&<div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
+        📌 Edit data on-screen, then click <b>Generate Excel</b> to bake your edits into the downloadable file.
+      </div>}
+      <div style={{display:'flex',gap:'.25rem',overflowX:'auto',marginBottom:'1.25rem',paddingBottom:'.25rem',borderBottom:'2px solid var(--border)'}}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)}
+            style={{flexShrink:0,padding:'.45rem .9rem',borderRadius:'8px 8px 0 0',border:'none',cursor:'pointer',
+              fontSize:'.78rem',fontWeight:600,fontFamily:'DM Sans,sans-serif',transition:'all .15s',
+              background:activeTab===t.id?'var(--white)':'transparent',
+              color:activeTab===t.id?'var(--blue2)':'var(--text3)',
+              borderBottom:activeTab===t.id?'2px solid var(--blue2)':'2px solid transparent',marginBottom:-2}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="card card-p">
+        {tabContent[activeTab]||<div style={{color:'var(--text3)',padding:'2rem',textAlign:'center'}}>Select a tab</div>}
+      </div>
+    </div>
+  );
+}
+
+
 function HodPage(){
   const [data,setData]=useState(null);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
   useEffect(()=>{api('/dashboard/department').then(d=>{setData(d);setLoading(false)}).catch(e=>{setErr(e.message);setLoading(false)});},[]);
@@ -4407,6 +4980,7 @@ function App(){
     qmanipulate:<ManipulatePage course={course}/>,
     usermgmt:<UserMgmtPage currentUser={user}/>,
     profile:<ProfilePage user={user} logout={()=>{setToken('');setUser(null);setPage('home');saveCourse(null);}}/>,
+    master_attainment:<MasterAttainmentPage course={course}/>,
   };
 
   return(<div className="shell">
