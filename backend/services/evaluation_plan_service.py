@@ -45,6 +45,8 @@ class EvaluationPlanService:
         academic_year = course.academic_year
         cos           = course.cos
         eval_cfg      = course.evaluation_config
+        # Inject credits into eval_cfg so _build_docx can use it
+        eval_cfg      = {**eval_cfg, "credits": str(course.credits)}
         logger.info(f"Generating evaluation plan for '{course_name}' ({course_code})")
         prompt = self._build_prompt(course_name, course_code, cos, eval_cfg)
         plan   = await self._call_llm(prompt)
@@ -103,37 +105,100 @@ Return ONLY valid JSON, no markdown:
                     semester, academic_year, cos, eval_cfg, data, _storage, _filename) -> str:
         doc = Document()
         for sec in doc.sections:
-            sec.top_margin = sec.bottom_margin = Inches(0.6)
-            sec.left_margin = sec.right_margin = Inches(0.7)
+            sec.top_margin = sec.bottom_margin = Inches(0.5)
+            sec.left_margin = sec.right_margin = Inches(0.6)
 
-        # ── HEADER ────────────────────────────────────────────────────
-        def _hdr_row(tbl, text, size=12, bold=True):
-            row = tbl.add_row()
-            c = row.cells[0]
-            for other in row.cells[1:]: c = c.merge(other)
-            self._shade(c, _NAVY)
-            p = c.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = p.add_run(text); r.bold=bold; r.font.size=Pt(size); r.font.color.rgb=_WHITE
+        cia_total = eval_cfg.get("continuous_assessment_total", 30)
+        ese_total = eval_cfg.get("end_sem_total", 45)
 
+        # ── FORMAT LABEL (top-right) ──────────────────────────────────
+        fmt_p = doc.add_paragraph()
+        fmt_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        fmt_r = fmt_p.add_run("Format 6")
+        fmt_r.font.size = Pt(9)
+        fmt_r.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+
+        # ── HEADER TABLE ──────────────────────────────────────────────
+        # 7 cols to allow left/right splits
         hdr = doc.add_table(rows=0, cols=7)
         hdr.style = "Table Grid"
-        _hdr_row(hdr, "Symbiosis Institute of Technology, Pune", size=13)
-        _hdr_row(hdr, f"Department of {department}", size=11)
-        _hdr_row(hdr, "Evaluation Plan", size=12)
-        _hdr_row(hdr, f"Course: {course_name} ({course_code})  |  Faculty: {faculty_name}  |  Semester: {semester}  |  AY: {academic_year}", size=9, bold=False)
+
+        def _full_row(text, size=11, bold=True, shade=_NAVY, color=None):
+            row = hdr.add_row()
+            c = row.cells[0]
+            for other in row.cells[1:]: c = c.merge(other)
+            self._shade(c, shade)
+            p = c.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(text); r.bold = bold; r.font.size = Pt(size)
+            r.font.color.rgb = color if color else _WHITE
+
+        def _split_row(left_text, right_text, size=10):
+            row = hdr.add_row()
+            lc = row.cells[0].merge(row.cells[3])
+            rc = row.cells[4].merge(row.cells[6])
+            self._shade(lc, "FFFFFF"); self._shade(rc, "FFFFFF")
+            lp = lc.paragraphs[0]
+            lp.add_run(left_text).font.size = Pt(size)
+            rp = rc.paragraphs[0]
+            rp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            rp.add_run(right_text).font.size = Pt(size)
+
+        # Row 1: Institute
+        _full_row("Symbiosis Institute of Technology, Pune", size=13)
+        # Row 2: Title
+        _full_row("Evaluation Plan", size=12)
+        # Row 3: Department | Batch
+        _split_row(f"Department: {department}", f"Batch: {academic_year}")
+        # Row 4: Course name | Credit
+        credits = eval_cfg.get("credits", "")
+        _split_row(f"Course name: {course_name}", f"Credit: {credits if credits else ''}")
+        # Row 5: Year | Sem
+        _split_row(f"Year: {academic_year}", f"Sem: {semester}")
+        # Row 6: Faculty (full width)
+        r6 = hdr.add_row()
+        fc = r6.cells[0].merge(r6.cells[6])
+        self._shade(fc, "FFFFFF")
+        fp = fc.paragraphs[0]
+        fb = fp.add_run("Name of the faculty member: "); fb.bold = True; fb.font.size = Pt(10)
+        fn = fp.add_run(faculty_name); fn.font.size = Pt(10)
+
+        doc.add_paragraph()
+
+        # ── CA / ESE MARKS (plain text, like template) ────────────────
+        ca_p = doc.add_paragraph()
+        ca_r = ca_p.add_run(f"CA -{cia_total} marks"); ca_r.font.size = Pt(10)
+        ese_p = doc.add_paragraph()
+        ese_r = ese_p.add_run(f"ESE – {ese_total} marks"); ese_r.font.size = Pt(10)
+
+        doc.add_paragraph()
+
+        # ── COURSE OUTCOMES LIST ──────────────────────────────────────
+        co_title = doc.add_paragraph()
+        ct = co_title.add_run("Course Outcomes-"); ct.bold = True; ct.font.size = Pt(10)
+        for co in cos:
+            co_p = doc.add_paragraph(style="List Bullet")
+            co_r = co_p.add_run(co.get("statement", ""))
+            co_r.font.size = Pt(10)
+
+        doc.add_paragraph()
+
+        # ── SECTION TITLE ─────────────────────────────────────────────
+        theory_p = doc.add_paragraph()
+        tt = theory_p.add_run("Theory Evaluation Components")
+        tt.bold = True; tt.font.size = Pt(10)
 
         doc.add_paragraph()
 
         # ── EVALUATION TABLE ──────────────────────────────────────────
-        col_headers = ["Sr. No.","Component","Unit Syllabus","CO","Marks","Weightage","Tentative Date"]
-        col_widths  = [Inches(0.5),Inches(1.5),Inches(1.8),Inches(1.0),Inches(0.55),Inches(0.75),Inches(1.4)]
+        col_headers = ["Sr. No.", "Component", "Unit Syllabus", "CO", "Marks", "Weightage", "Tentative Date"]
+        col_widths  = [Inches(0.5), Inches(1.5), Inches(1.8), Inches(1.0), Inches(0.55), Inches(0.75), Inches(1.4)]
 
         tbl = doc.add_table(rows=1, cols=7)
         tbl.style = "Table Grid"
-        for i,(cell,text) in enumerate(zip(tbl.rows[0].cells, col_headers)):
+        for i, (cell, text) in enumerate(zip(tbl.rows[0].cells, col_headers)):
             self._shade(cell, _NAVY)
             p = cell.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = p.add_run(text); r.bold=True; r.font.size=Pt(9); r.font.color.rgb=_WHITE
+            r = p.add_run(text); r.bold = True; r.font.size = Pt(9); r.font.color.rgb = _WHITE
             cell.width = col_widths[i]
 
         components = data.get("ca_components", [])
@@ -142,40 +207,40 @@ Return ONLY valid JSON, no markdown:
             if i % 2 == 1:
                 for c in row: self._shade(c, _LIGHT)
             values = [
-                comp.get("sr_no",""),
-                comp.get("component",""),
-                comp.get("unit_syllabus",""),
-                comp.get("co_mapped",""),
-                str(comp.get("marks","")),
-                comp.get("weightage",""),
-                comp.get("tentative_date",""),
+                comp.get("sr_no", ""),
+                comp.get("component", ""),
+                comp.get("unit_syllabus", ""),
+                comp.get("co_mapped", ""),
+                str(comp.get("marks", "")),
+                comp.get("weightage", ""),
+                comp.get("tentative_date", ""),
             ]
-            for j,(c,v) in enumerate(zip(row, values)):
+            for j, (c, v) in enumerate(zip(row, values)):
                 p = c.paragraphs[0]; p.clear()
-                r = p.add_run(v); r.font.size=Pt(9)
-                if j in (0,4,5): p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                r = p.add_run(v); r.font.size = Pt(9)
+                if j in (0, 4, 5): p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 c.width = col_widths[j]
-
-        # ── TOTAL ROW ─────────────────────────────────────────────────
-        total_row = tbl.add_row().cells
-        self._shade(total_row[0], _NAVY)
-        tc = total_row[0].merge(total_row[3])
-        self._shade(tc, _NAVY)
-        p = tc.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run("Total"); r.bold=True; r.font.size=Pt(9); r.font.color.rgb=_WHITE
-
-        marks_c = total_row[4]
-        self._shade(marks_c, _NAVY)
-        p2 = marks_c.paragraphs[0]; p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r2 = p2.add_run(str(eval_cfg.get("continuous_assessment_total",30)))
-        r2.bold=True; r2.font.size=Pt(9); r2.font.color.rgb=_WHITE
 
         doc.add_paragraph()
 
-        # ── CO ATTAINMENT NOTE ────────────────────────────────────────
-        note_p = doc.add_paragraph()
-        nr = note_p.add_run("CO Attainment Target: 60% of students should score ≥60% marks in each assessment component.")
-        nr.italic=True; nr.font.size=Pt(9)
+        # ── CA DETAIL NOTES (like template bullet notes) ──────────────
+        for comp in components:
+            det_p = doc.add_paragraph()
+            label_r = det_p.add_run(f"{comp.get('sr_no','')}: {comp.get('component','')} - {comp.get('marks','')} Marks ({comp.get('co_mapped','')})")
+            label_r.bold = True; label_r.font.size = Pt(9)
+            det2 = doc.add_paragraph()
+            det2_r = det2.add_run(f"{comp.get('unit_syllabus','')}"); det2_r.font.size = Pt(9)
+
+        doc.add_paragraph()
+
+        # ── SIGNATURE ROW ─────────────────────────────────────────────
+        sign_p = doc.add_paragraph()
+        sign_r = sign_p.add_run(f"Sign of the faculty member: {faculty_name}")
+        sign_r.font.size = Pt(10)
+
+        hod_p = doc.add_paragraph()
+        hod_r = hod_p.add_run("Sign of HoD:")
+        hod_r.bold = True; hod_r.font.size = Pt(10)
 
         import tempfile as _tmp
         with _tmp.TemporaryDirectory() as _t:

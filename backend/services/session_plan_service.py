@@ -106,49 +106,57 @@ Schema:
                     semester, academic_year, credits, cos, data, _storage, _filename) -> str:
         doc = Document()
         for sec in doc.sections:
-            sec.top_margin = sec.bottom_margin = Inches(0.6)
-            sec.left_margin = sec.right_margin = Inches(0.7)
+            sec.top_margin = sec.bottom_margin = Inches(0.5)
+            sec.left_margin = sec.right_margin = Inches(0.6)
 
-        # ── HEADER TABLE (merged single-column rows) ──────────────────
-        def _hdr_row(tbl, text, size=12, bold=True):
-            if len(tbl.rows) == 0:
-                row = tbl.add_row()
-            else:
-                row = tbl.add_row()
-            c = row.cells[0]
-            # merge all cols
-            for other in row.cells[1:]:
-                c = c.merge(other)
-            self._shade(c, _NAVY)
-            p = c.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = p.add_run(text); r.bold = bold
-            r.font.size = Pt(size); r.font.color.rgb = _WHITE
+        # ── FORMAT LABEL (top-right, outside table) ───────────────────
+        fmt_p = doc.add_paragraph()
+        fmt_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        fmt_r = fmt_p.add_run("Format: 5")
+        fmt_r.font.size = Pt(9)
+        fmt_r.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)  # red like template
 
+        # ── HEADER TABLE — matches template exactly ───────────────────
+        # Cols: 9 to allow fine-grained splits
         hdr = doc.add_table(rows=0, cols=9)
         hdr.style = "Table Grid"
-        _hdr_row(hdr, "Symbiosis Institute of Technology, Pune", size=13)
-        _hdr_row(hdr, f"Department of {department}", size=11)
-        _hdr_row(hdr, "Session Plan", size=12)
-        _hdr_row(hdr, f"Name of the Department – {department}", size=10, bold=False)
-        _hdr_row(hdr, f"Name of the course – {course_name}", size=10, bold=False)
 
-        # Split row: credit on right
-        cr = hdr.add_row()
-        lc = cr.cells[0].merge(cr.cells[5])
-        rc = cr.cells[6].merge(cr.cells[8])
-        self._shade(lc, "FFFFFF"); self._shade(rc, "FFFFFF")
-        lc.paragraphs[0].add_run(f"Semester – {semester}").font.size = Pt(9)
-        rc.paragraphs[0].add_run(f"Credit – {credits}").font.size = Pt(9)
+        def _full_row(text, size=11, bold=True, shade=_NAVY, color=None):
+            row = hdr.add_row()
+            c = row.cells[0]
+            for other in row.cells[1:]: c = c.merge(other)
+            self._shade(c, shade)
+            p = c.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(text); r.bold = bold; r.font.size = Pt(size)
+            r.font.color.rgb = color if color else _WHITE
 
-        br = hdr.add_row()
-        bc = br.cells[0].merge(br.cells[8])
-        self._shade(bc, "FFFFFF")
-        bc.paragraphs[0].add_run(f"Name of the faculty – {faculty_name}").font.size = Pt(9)
-
-        yr = hdr.add_row()
-        yc = yr.cells[0].merge(yr.cells[8])
-        self._shade(yc, "FFFFFF")
-        yc.paragraphs[0].add_run(f"Batch – {academic_year}").font.size = Pt(9)
+        # Row 1: Institute name
+        _full_row("Symbiosis Institute of Technology, Pune", size=13)
+        # Row 2: "Session Plan" title
+        _full_row("Session Plan", size=12)
+        # Row 3: Department
+        _full_row(f"Name of the Department – {department}", size=10, bold=False, shade="FFFFFF", color=RGBColor(0,0,0))
+        # Row 4: Course name | Credit (split)
+        r4 = hdr.add_row()
+        lc4 = r4.cells[0].merge(r4.cells[5])
+        rc4 = r4.cells[6].merge(r4.cells[8])
+        self._shade(lc4, "FFFFFF"); self._shade(rc4, "FFFFFF")
+        lp4 = lc4.paragraphs[0]; lp4.add_run(f"Name of the course– {course_name}").font.size = Pt(10)
+        rp4 = rc4.paragraphs[0]; rp4.add_run(f"Credit - {credits}").font.size = Pt(10)
+        # Row 5: Semester | Batch (split)
+        r5 = hdr.add_row()
+        lc5 = r5.cells[0].merge(r5.cells[4])
+        mc5 = r5.cells[5]
+        rc5 = r5.cells[6].merge(r5.cells[8])
+        self._shade(lc5, "FFFFFF"); self._shade(mc5, "FFFFFF"); self._shade(rc5, "FFFFFF")
+        lc5.paragraphs[0].add_run(f"Semester –").font.size = Pt(10)
+        mc5.paragraphs[0].add_run(f"{semester}").font.size = Pt(10)
+        rc5.paragraphs[0].add_run(f"Batch – {academic_year}").font.size = Pt(10)
+        # Row 6: Faculty name (full width)
+        r6 = hdr.add_row()
+        fc = r6.cells[0].merge(r6.cells[8])
+        self._shade(fc, "FFFFFF")
+        fc.paragraphs[0].add_run(f"Name of the faculty– {faculty_name}").font.size = Pt(10)
 
         doc.add_paragraph()
 
