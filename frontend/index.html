@@ -3686,8 +3686,8 @@ function MasterAttainmentPage({course}){
     setPoList(course.pos||[]);
     setCoPoMatrix(course.co_po_matrix||{});
     const comps=course.evaluation_config?.components||{};
-    const cas=Object.keys(comps).filter(k=>k.match(/ca\d+/i)).slice(0,5);
-    const caList=cas.length?cas:['CA1','CA2','CA3'];
+    // Use ALL components from eval config (Case Study, Quiz, Unit Test, etc.)
+    const caList=Object.keys(comps).length?Object.keys(comps):['CA1','CA2','CA3'];
     setCaNames(caList);
     const sheets={};caList.forEach(ca=>{sheets[ca]={qp:[],marks:{}};});
     setCaSheets(sheets);
@@ -3878,7 +3878,22 @@ function MasterAttainmentPage({course}){
     const qp=sheet.qp||[];
     const marks=sheet.marks||{};
     const fileRef=React.createRef();
-    const addQ=()=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:[...qp,{q_no:qp.length+1,question_text:'',marks:5,co_id:coList[0]?.co_id||'CO1',bloom_level:1}]}}));
+    // Bloom auto-map from CO: use the CO's bloom_level if available
+    const coBloom=(co_id)=>{
+      const co=coList.find(c=>c.co_id===co_id);
+      if(!co||!co.bloom_level) return 1;
+      const lvlMap={'Remember':1,'Remembering':1,'L1':1,'Knowledge':1,
+        'Understand':2,'Understanding':2,'L2':2,'Comprehension':2,
+        'Apply':3,'Applying':3,'L3':3,'Application':3,
+        'Analyse':4,'Analyze':4,'Analysing':4,'Analyzing':4,'L4':4,'Analysis':4,
+        'Evaluate':5,'Evaluating':5,'L5':5,'Evaluation':5,'Synthesis':5,
+        'Create':6,'Creating':6,'L6':6,'Design':6};
+      return lvlMap[co.bloom_level]||parseInt(String(co.bloom_level).replace('L',''))||1;
+    };
+    const addQ=()=>{
+      const defaultCO=coList[0]?.co_id||'CO1';
+      setCaSheets(p=>({...p,[ca]:{...p[ca],qp:[...qp,{q_no:qp.length+1,question_text:'',marks:5,co_id:defaultCO,bloom_level:coBloom(defaultCO)}]}}));
+    };
     const updQ=(i,field,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.map((q,j)=>j===i?{...q,[field]:val}:q)}}));
     const delQ=(i)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.filter((_,j)=>j!==i)}}));
     const updMark=(prn,qno,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...marks,[prn]:{...(marks[prn]||{}),[qno]:val}}}}));
@@ -3905,7 +3920,7 @@ function MasterAttainmentPage({course}){
                   <TD><EditCell value={q.question_text} onChange={v=>updQ(i,'question_text',v)}/></TD>
                   <TD center><EditCell value={q.marks} type="number" onChange={v=>updQ(i,'marks',v)} small/></TD>
                   <TD center>
-                    <select value={q.co_id||''} onChange={e=>updQ(i,'co_id',e.target.value)}
+                    <select value={q.co_id||''} onChange={e=>{updQ(i,'co_id',e.target.value);updQ(i,'bloom_level',coBloom(e.target.value));}}
                       style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',width:'100%'}}>
                       {coList.map(c=><option key={c.co_id} value={c.co_id}>{c.co_id}</option>)}
                     </select>
@@ -3977,7 +3992,13 @@ function MasterAttainmentPage({course}){
     <div>
       <div style={{display:'flex',gap:'1rem',alignItems:'center',marginBottom:'1rem'}}>
         <span style={{fontWeight:700,fontSize:'.9rem'}}>📄 End Semester Exam (ESE)</span>
-        <button className="btn btn-primary btn-sm" onClick={()=>setEseQP(p=>[...p,{q_no:p.length+1,question_text:'',marks:10,co_id:coList[0]?.co_id||'CO1',bloom_level:3}])}>+ Add Question</button>
+        <button className="btn btn-primary btn-sm" onClick={()=>{
+          const defaultCO=coList[0]?.co_id||'CO1';
+          const co=coList.find(c=>c.co_id===defaultCO);
+          const lvlMap={'Remember':1,'Remembering':1,'L1':1,'Understand':2,'Understanding':2,'L2':2,'Apply':3,'Applying':3,'L3':3,'Analyse':4,'Analyze':4,'L4':4,'Evaluate':5,'Evaluating':5,'L5':5,'Create':6,'Creating':6,'L6':6};
+          const bl=co?.bloom_level?(lvlMap[co.bloom_level]||parseInt(String(co.bloom_level).replace('L',''))||3):3;
+          setEseQP(p=>[...p,{q_no:p.length+1,question_text:'',marks:10,co_id:defaultCO,bloom_level:bl}]);
+        }}>+ Add Question</button>
       </div>
       <div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
         ℹ ESE marks are typically from the university. Enter question paper structure here for CO mapping; marks can be entered per student below.
@@ -3994,7 +4015,7 @@ function MasterAttainmentPage({course}){
                 <TD center><input type="number" value={q.marks} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,marks:e.target.value}:x))}
                   style={{width:52,border:'1px solid var(--border)',borderRadius:4,padding:'3px',textAlign:'center',fontSize:'.78rem'}}/></TD>
                 <TD center>
-                  <select value={q.co_id} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,co_id:e.target.value}:x))}
+                  <select value={q.co_id} onChange={e=>{const co2=coList.find(c=>c.co_id===e.target.value);const lvlMap2={'Remember':1,'Remembering':1,'L1':1,'Understand':2,'Understanding':2,'L2':2,'Apply':3,'Applying':3,'L3':3,'Analyse':4,'Analyze':4,'L4':4,'Evaluate':5,'Evaluating':5,'L5':5,'Create':6,'Creating':6,'L6':6};const bl2=co2?.bloom_level?(lvlMap2[co2.bloom_level]||parseInt(String(co2.bloom_level).replace('L',''))||1):1;setEseQP(p=>p.map((x,j)=>j===i?{...x,co_id:e.target.value,bloom_level:bl2}:x));}}
                     style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px'}}>
                     {coList.map(c=><option key={c.co_id} value={c.co_id}>{c.co_id}</option>)}
                   </select>
