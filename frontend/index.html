@@ -389,15 +389,21 @@ const inferBloomSync=inferBloom;
 // ── AI BLOOM CLASSIFICATION ─────────────────────────────────────────────────
 // Calls the backend /syllabus/classify-bloom endpoint to use LLM for accurate
 // Bloom's level detection. Falls back to inferBloom() if the call fails.
-const aiClassifyBloom=async(cosArr)=>{
+const aiClassifyBloom=async(cosArr,unitsArr=[])=>{
   if(!cosArr||cosArr.length===0)return cosArr;
   const statements=cosArr.map(co=>co.statement||'');
+  // Pass unit context so AI can use content depth, not just CO verbs
+  const units=(unitsArr||[]).map(u=>({
+    unit_number:u.unit_number||0,
+    unit_title:u.unit_title||'',
+    topics:Array.isArray(u.topics)?u.topics:[]
+  }));
   try{
     const tok=sessionStorage.getItem('obe_token')||'';
     const r=await fetch(API+'/syllabus/classify-bloom',{
       method:'POST',
       headers:{'Content-Type':'application/json',...(tok?{Authorization:`Bearer ${tok}`}:{})},
-      body:JSON.stringify({statements})
+      body:JSON.stringify({statements,units})
     });
     if(!r.ok)throw new Error('classify-bloom API failed');
     const j=await r.json();
@@ -1171,7 +1177,7 @@ function SyllabusPage({onExtracted}){
   const runAiClassify=async()=>{
     if(!editingCos||editingCos.length===0)return;
     setClassifying(true);
-    const classified=await aiClassifyBloom(editingCos);
+    const classified=await aiClassifyBloom(editingCos,editingUnits);
     setEditingCos(classified);
     setClassifying(false);
   };
@@ -1186,7 +1192,7 @@ function SyllabusPage({onExtracted}){
       setEditingUnits((d.units||[]).map(u=>({...u})));
       // Auto-upgrade to AI classification immediately after extraction
       setClassifying(true);
-      const aiCos=await aiClassifyBloom(rawCos);
+      const aiCos=await aiClassifyBloom(rawCos,(d.units||[]).map(u=>({...u})));
       setEditingCos(aiCos);
       setClassifying(false);
     }catch(e){setErr(e.message);setClassifying(false);}setLoading(false);};
@@ -1290,7 +1296,7 @@ function CourseSetupPage({setCourse,syllabusData}){
   const runAiClassifySetup=async()=>{
     if(!cos||cos.length===0)return;
     setClassifyingCos(true);
-    const classified=await aiClassifyBloom(cos);
+    const classified=await aiClassifyBloom(cos,syllabusData?.units||[]);
     setCos(classified);
     setClassifyingCos(false);
   };

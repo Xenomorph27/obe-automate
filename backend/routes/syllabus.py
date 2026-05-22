@@ -17,50 +17,77 @@ router = APIRouter(prefix="/syllabus", tags=["Syllabus"])
 syllabus_service = SyllabusService()
 
 
+class UnitContext(BaseModel):
+    unit_number: int
+    unit_title: str
+    topics: List[str] = []
+
 class BloomRequest(BaseModel):
     statements: List[str]
+    units: List[UnitContext] = []  # optional — used for content-aware classification
 
 
 @router.post("/classify-bloom")
 async def classify_bloom(req: BloomRequest, current_user: User = Depends(require_auth)):
     """
-    Classify a list of CO statements into Bloom's Taxonomy levels using LLM.
-    Returns a list of level names in the same order as input.
+    Classify CO statements into Bloom's Taxonomy levels using LLM.
+    When units are provided, uses unit content depth for accurate level inference
+    instead of relying solely on the CO verb (which is often poorly written).
     """
     if not req.statements:
         return {"levels": []}
 
-    prompt = f"""You are a Bloom's Taxonomy expert for university-level engineering courses.
+    # Build unit context block if units were provided
+    unit_context_block = ""
+    if req.units:
+        lines = ["\nCOURSE UNITS (use these to judge cognitive depth required):"]
+        for u in req.units:
+            topics_str = ", ".join(u.topics) if u.topics else "N/A"
+            lines.append(f"  Unit {u.unit_number} — {u.unit_title}: {topics_str}")
+        unit_context_block = "\n".join(lines)
 
-Classify each Course Outcome (CO) statement into exactly one Bloom's level:
-- Remember (L1): Recalling facts/terms — verbs: list, define, state, recall, name, describe, memorize, enumerate
-- Understand (L2): Explaining ideas in own words — verbs: explain, summarize, discuss, identify, recognize, interpret, paraphrase
-- Apply (L3): Using in real-world situations — verbs: apply, solve, implement, demonstrate, calculate, use, execute, perform
-- Analyze (L4): Breaking into parts, drawing connections — verbs: analyze, compare, contrast, differentiate, examine, dissect, distinguish
-- Evaluate (L5): Justifying decisions based on criteria — verbs: evaluate, assess, justify, critique, judge, defend, recommend
-- Create (L6): Producing new original work — verbs: design, formulate, construct, create, develop, synthesize, build, generate, plan
+    prompt = f"""You are a Bloom's Taxonomy expert for university-level engineering courses in an OBE (Outcome-Based Education) system.
 
-RULES:
-1. The ACTION VERB is the strongest signal
-2. Context matters: "describe the architecture" = Remember; "describe how you would design" = Create
-3. "Discuss" alone = Understand; "Discuss and compare tradeoffs" = Analyze
-4. Multiple verbs → pick the HIGHEST level verb
-5. Reply ONLY with a JSON array of strings, same order as input, no explanation, no markdown.
+Your task: Classify each Course Outcome (CO) into the most appropriate Bloom's level.
 
-CO statements:
+IMPORTANT: CO statements in Indian university syllabi are often written with weak verbs (explain, describe, discuss) regardless of the actual cognitive depth required. You MUST look at the UNIT CONTENT to determine the true cognitive level — not just the verb.
+
+Bloom's Taxonomy levels:
+- Remember (L1): Pure rote recall — list facts, define terms, name items. No comprehension needed.
+- Understand (L2): Comprehend concepts — describe, explain, summarize, discuss ideas. Foundation level.
+- Apply (L3): Use knowledge in real situations — implement algorithms, compute values, perform procedures, simulate, operate tools.
+- Analyze (L4): Break down and find relationships — compare algorithms, select appropriate method for a problem, examine tradeoffs, differentiate approaches.
+- Evaluate (L5): Make judgments — assess performance, justify choices, critique methods, recommend solutions with reasoning.
+- Create (L6): Produce new work — design systems, formulate new approaches, build novel solutions.
+
+CLASSIFICATION RULES:
+1. VERB IS A WEAK SIGNAL in Indian syllabi — weight unit content heavily
+2. If the unit covers: multiple algorithms + selection criteria + performance evaluation → L4 Analyze minimum
+3. If the unit covers: implementation, computation, simulation → L3 Apply minimum  
+4. If the unit covers: only definitions, types, introductions → L2 Understand
+5. "How to select the appropriate algorithm" = L4 Analyze (requires comparing and deciding)
+6. "Performance evaluation" or "comparison of algorithms" in unit = L4 Analyze
+7. Advanced/deep learning topics with practical application = L3 Apply minimum
+8. A course should ideally have a spread of levels — avoid mapping everything to L2
+9. Reply ONLY with a JSON array of strings, same order as input. No explanation, no markdown.
+{unit_context_block}
+
+CO statements to classify:
 {chr(10).join(f"{i+1}. {s}" for i, s in enumerate(req.statements))}
 
-Reply format (example for 3 COs): ["Understand","Remember","Apply"]"""
+Reply format (example for 5 COs): ["Understand","Analyze","Apply","Analyze","Apply"]"""
 
     try:
         raw = await get_llm_response(prompt)
-        # Strip markdown fences if present
         clean = re.sub(r'```json|```', '', raw).strip()
+        # Extract JSON array from response
+        start = clean.find('[')
+        end = clean.rfind(']')
+        if start != -1 and end != -1:
+            clean = clean[start:end+1]
         levels = json.loads(clean)
         valid = {'Remember', 'Understand', 'Apply', 'Analyze', 'Evaluate', 'Create'}
-        # Validate each — fallback to Understand if invalid
         safe = [l if l in valid else 'Understand' for l in levels]
-        # Pad if LLM returned fewer items
         while len(safe) < len(req.statements):
             safe.append('Understand')
         return {"levels": safe[:len(req.statements)]}
