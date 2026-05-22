@@ -88,69 +88,54 @@ async def save_session_plan(
     meta_bytes = json.dumps({"cols": payload.cols, "rows": payload.rows}, ensure_ascii=False).encode()
     storage.save(_CATEGORY, meta_filename, meta_bytes)
 
-    # 2. Rebuild docx from the edited rows using python-docx
+    # 2. Rebuild docx from the edited rows using the proper SIT-formatted service
     try:
-        from docx import Document
-        from docx.shared import Pt, RGBColor, Inches
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from backend.services.course_service import CourseService
+        from backend.services.session_plan_service import SessionPlanService
 
-        _NAVY = "1F3864"
-        _WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+        # Load course info so we can pass it to the builder
+        course_svc = CourseService(db)
+        course = await course_svc.get_course(course_id)
 
-        doc = Document()
-        for sec in doc.sections:
-            sec.top_margin = sec.bottom_margin = Inches(0.6)
-            sec.left_margin = sec.right_margin = Inches(0.7)
+        # Convert the edited rows back into the units/sessions structure
+        # the service's _build_docx expects
+        units_dict: dict = {}
+        for row_data in payload.rows:
+            unit_no = row_data.get("unit_no", row_data.get("unitNo", ""))
+            topic   = row_data.get("points_to_cover", row_data.get("pointsToCover", row_data.get("topic", "")))
+            method  = row_data.get("methodology", "Classroom Teaching")
+            stype   = row_data.get("lecture_exp_eval", row_data.get("lectureExpEval", row_data.get("type", "Lecture")))
+            co      = row_data.get("co", row_data.get("co_mapped", ""))
+            lect_no = row_data.get("lect_no", row_data.get("lectNo", ""))
 
-        # Header
-        p = doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(f"Session Plan — Course ID {course_id} (Edited)")
-        run.bold = True
-        run.font.size = Pt(13)
+            key = str(unit_no) if unit_no else "_misc"
+            if key not in units_dict:
+                units_dict[key] = {"unit_number": unit_no, "unit_title": f"Unit {unit_no}", "sessions": []}
+            units_dict[key]["sessions"].append({
+                "session_number": lect_no,
+                "topic": topic,
+                "teaching_method": method,
+                "type": stype,
+                "co_mapped": co,
+            })
 
-        # Table
-        col_labels = [c.get("label", c.get("key", "")) for c in payload.cols]
-        tbl = doc.add_table(rows=1, cols=len(col_labels))
-        tbl.style = "Table Grid"
+        plan_data = {"units": list(units_dict.values())}
 
-        def _shade(cell, hex_color):
-            tc = cell._tc
-            tcPr = tc.get_or_add_tcPr()
-            shd = OxmlElement("w:shd")
-            shd.set(qn("w:val"), "clear")
-            shd.set(qn("w:color"), "auto")
-            shd.set(qn("w:fill"), hex_color)
-            tcPr.append(shd)
-
-        for i, (cell, label) in enumerate(zip(tbl.rows[0].cells, col_labels)):
-            _shade(cell, _NAVY)
-            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = cell.paragraphs[0].add_run(label)
-            r.bold = True
-            r.font.size = Pt(8)
-            r.font.color.rgb = _WHITE
-
-        _LIGHT = "D6DCE4"
-        for ri, row_data in enumerate(payload.rows):
-            row = tbl.add_row()
-            if ri % 2 == 0:
-                for c in row.cells:
-                    _shade(c, _LIGHT)
-            for ci, col in enumerate(payload.cols):
-                val = str(row_data.get(col.get("key", ""), ""))
-                cell = row.cells[ci]
-                cell.paragraphs[0].clear()
-                r = cell.paragraphs[0].add_run(val)
-                r.font.size = Pt(8)
-
-        docx_filename = f"session_plan_{course_id}.docx"
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp) / docx_filename
-            doc.save(str(tmp_path))
-            storage.save_from_path(_CATEGORY, docx_filename, tmp_path)
+        svc = SessionPlanService(db)
+        _filename = f"session_plan_{course_id}.docx"
+        svc._build_docx(
+            course_name=course.course_name,
+            course_code=course.course_code,
+            faculty_name=course.faculty_name,
+            department=course.department,
+            semester=course.semester,
+            academic_year=course.academic_year,
+            credits=course.credits,
+            cos=course.cos,
+            data=plan_data,
+            _storage=storage,
+            _filename=_filename,
+        )
 
         logger.info(f"Session plan saved (edited) for course_id={course_id}: {len(payload.rows)} rows")
         return {
