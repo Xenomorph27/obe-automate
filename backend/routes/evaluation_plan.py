@@ -87,67 +87,47 @@ async def save_evaluation_plan(
     meta_bytes = json.dumps({"cols": payload.cols, "rows": payload.rows}, ensure_ascii=False).encode()
     storage.save(_CATEGORY, meta_filename, meta_bytes)
 
-    # 2. Rebuild docx from edited rows
+    # 2. Rebuild docx from edited rows using the proper SIT-formatted service
     try:
-        from docx import Document
-        from docx.shared import Pt, RGBColor, Inches
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from backend.services.course_service import CourseService
+        from backend.services.evaluation_plan_service import EvaluationPlanService
 
-        _NAVY = "1F3864"
-        _WHITE = RGBColor(0xFF, 0xFF, 0xFF)
-        _LIGHT = "D6DCE4"
+        # Load course info
+        course_svc = CourseService(db)
+        course = await course_svc.get_course(course_id)
 
-        doc = Document()
-        for sec in doc.sections:
-            sec.top_margin = sec.bottom_margin = Inches(0.6)
-            sec.left_margin = sec.right_margin = Inches(0.7)
+        # Convert edited rows back into ca_components structure
+        ca_components = []
+        for row_data in payload.rows:
+            ca_components.append({
+                "sr_no":          row_data.get("sr_no", row_data.get("srNo", "")),
+                "component":      row_data.get("component", ""),
+                "unit_syllabus":  row_data.get("unit_syllabus", row_data.get("unitSyllabus", "")),
+                "co_mapped":      row_data.get("co", row_data.get("co_mapped", row_data.get("coMapped", ""))),
+                "marks":          row_data.get("marks", ""),
+                "weightage":      row_data.get("weightage", ""),
+                "tentative_date": row_data.get("tentative_date", row_data.get("tentativeDate", "")),
+            })
 
-        p = doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(f"Evaluation Plan — Course ID {course_id} (Edited)")
-        run.bold = True
-        run.font.size = Pt(13)
+        plan_data = {"ca_components": ca_components}
 
-        col_labels = [c.get("label", c.get("key", "")) for c in payload.cols]
-        tbl = doc.add_table(rows=1, cols=len(col_labels))
-        tbl.style = "Table Grid"
+        eval_cfg = {**course.evaluation_config, "credits": str(course.credits)}
 
-        def _shade(cell, hex_color):
-            tc = cell._tc
-            tcPr = tc.get_or_add_tcPr()
-            shd = OxmlElement("w:shd")
-            shd.set(qn("w:val"), "clear")
-            shd.set(qn("w:color"), "auto")
-            shd.set(qn("w:fill"), hex_color)
-            tcPr.append(shd)
-
-        for cell, label in zip(tbl.rows[0].cells, col_labels):
-            _shade(cell, _NAVY)
-            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = cell.paragraphs[0].add_run(label)
-            r.bold = True
-            r.font.size = Pt(9)
-            r.font.color.rgb = _WHITE
-
-        for ri, row_data in enumerate(payload.rows):
-            row = tbl.add_row()
-            if ri % 2 == 0:
-                for c in row.cells:
-                    _shade(c, _LIGHT)
-            for ci, col in enumerate(payload.cols):
-                val = str(row_data.get(col.get("key", ""), ""))
-                cell = row.cells[ci]
-                cell.paragraphs[0].clear()
-                r = cell.paragraphs[0].add_run(val)
-                r.font.size = Pt(9)
-
-        docx_filename = f"evaluation_plan_{course_id}.docx"
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp) / docx_filename
-            doc.save(str(tmp_path))
-            storage.save_from_path(_CATEGORY, docx_filename, tmp_path)
+        svc = EvaluationPlanService(db)
+        _filename = f"evaluation_plan_{course_id}.docx"
+        svc._build_docx(
+            course_name=course.course_name,
+            course_code=course.course_code,
+            faculty_name=course.faculty_name,
+            department=course.department,
+            semester=course.semester,
+            academic_year=course.academic_year,
+            cos=course.cos,
+            eval_cfg=eval_cfg,
+            data=plan_data,
+            _storage=storage,
+            _filename=_filename,
+        )
 
         logger.info(f"Evaluation plan saved (edited) for course_id={course_id}: {len(payload.rows)} rows")
         return {
