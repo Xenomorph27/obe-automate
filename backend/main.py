@@ -22,6 +22,7 @@ from backend.database.connection import init_db
 from backend.core.config import APP_NAME, APP_VERSION, STORAGE_PATH
 from backend.core.logger import get_logger
 from backend.routes.ai_chat import router as ai_chat_router
+from backend.routes.co_po_template import router as co_po_template_router
 
 logger = get_logger(__name__)
 FRONTEND_DIR = Path("frontend")
@@ -101,6 +102,7 @@ app.include_router(questions_router)
 app.include_router(auth_router)
 app.include_router(students_router)
 app.include_router(ai_chat_router)
+app.include_router(co_po_template_router)
 
 @app.get("/health")
 def health_check():
@@ -132,7 +134,7 @@ from backend.core.storage import get_storage as _gs
 _storage_base = _gs().base
 _storage_base.mkdir(parents=True, exist_ok=True)
 # Pre-create all category subdirs so StaticFiles doesn't fail on first request
-for _cat in ["session_plans", "evaluation_plans", "attainment_reports", "nba_reports", "question_papers"]:
+for _cat in ["session_plans", "evaluation_plans", "attainment_reports", "nba_reports", "question_papers", "co_po_templates"]:
     (_storage_base / _cat).mkdir(parents=True, exist_ok=True)
 app.mount("/files", StaticFiles(directory=str(_storage_base)), name="files")
 
