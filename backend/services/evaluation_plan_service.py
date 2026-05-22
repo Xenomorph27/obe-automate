@@ -23,6 +23,9 @@ _CATEGORY = "evaluation_plans"
 _NAVY  = "1F3864"
 _LIGHT = "D6DCE4"
 _WHITE = RGBColor(0xFF,0xFF,0xFF)
+_BLACK = RGBColor(0,0,0)
+_GREEN = RGBColor(0x00,0x80,0x00)
+_FONT  = "Times New Roman"
 
 class EvaluationPlanService:
     def __init__(self, db: AsyncSession):
@@ -45,7 +48,6 @@ class EvaluationPlanService:
         academic_year = course.academic_year
         cos           = course.cos
         eval_cfg      = course.evaluation_config
-        # Inject credits into eval_cfg so _build_docx can use it
         eval_cfg      = {**eval_cfg, "credits": str(course.credits)}
         logger.info(f"Generating evaluation plan for '{course_name}' ({course_code})")
         prompt = self._build_prompt(course_name, course_code, cos, eval_cfg)
@@ -110,82 +112,110 @@ Return ONLY valid JSON, no markdown:
 
         cia_total = eval_cfg.get("continuous_assessment_total", 30)
         ese_total = eval_cfg.get("end_sem_total", 45)
+        credits   = eval_cfg.get("credits", "")
+
+        def _para(text="", bold=False, size=12, color=None, align=None, indent=None):
+            p = doc.add_paragraph()
+            if align:
+                p.alignment = align
+            if indent:
+                p.paragraph_format.left_indent = Inches(indent)
+            if text:
+                r = p.add_run(text)
+                r.bold = bold
+                r.font.name = _FONT
+                r.font.size = Pt(size)
+                r.font.color.rgb = color if color else _BLACK
+            return p
+
+        def _split_para(left_bold_text, left_normal_text, right_bold_text, right_normal_text, size=10):
+            p = doc.add_paragraph()
+            if left_bold_text:
+                rb = p.add_run(left_bold_text)
+                rb.bold = True; rb.font.name = _FONT; rb.font.size = Pt(size); rb.font.color.rgb = _BLACK
+            if left_normal_text:
+                rn = p.add_run(left_normal_text)
+                rn.font.name = _FONT; rn.font.size = Pt(size); rn.font.color.rgb = _BLACK
+            p.add_run("\t")
+            if right_bold_text:
+                rb2 = p.add_run(right_bold_text)
+                rb2.bold = True; rb2.font.name = _FONT; rb2.font.size = Pt(size); rb2.font.color.rgb = _BLACK
+            if right_normal_text:
+                rn2 = p.add_run(right_normal_text)
+                rn2.font.name = _FONT; rn2.font.size = Pt(size); rn2.font.color.rgb = _BLACK
+            return p
 
         # ── FORMAT LABEL (top-right) ──────────────────────────────────
         fmt_p = doc.add_paragraph()
         fmt_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         fmt_r = fmt_p.add_run("Format 6")
-        fmt_r.font.size = Pt(9)
+        fmt_r.font.name = _FONT
+        fmt_r.font.size = Pt(12)
         fmt_r.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
 
-        # ── HEADER TABLE ──────────────────────────────────────────────
-        # 7 cols to allow left/right splits
-        hdr = doc.add_table(rows=0, cols=7)
-        hdr.style = "Table Grid"
+        # ── INSTITUTE NAME ────────────────────────────────────────────
+        inst_p = doc.add_paragraph()
+        inst_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        inst_r = inst_p.add_run("Symbiosis Institute of Technology, Pune")
+        inst_r.bold = True; inst_r.font.name = _FONT; inst_r.font.size = Pt(13); inst_r.font.color.rgb = _BLACK
 
-        def _full_row(text, size=11, bold=True, shade=_NAVY, color=None):
-            row = hdr.add_row()
-            c = row.cells[0]
-            for other in row.cells[1:]: c = c.merge(other)
-            self._shade(c, shade)
-            p = c.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = p.add_run(text); r.bold = bold; r.font.size = Pt(size)
-            r.font.color.rgb = color if color else _WHITE
-
-        def _split_row(left_text, right_text, size=10):
-            row = hdr.add_row()
-            lc = row.cells[0].merge(row.cells[3])
-            rc = row.cells[4].merge(row.cells[6])
-            self._shade(lc, "FFFFFF"); self._shade(rc, "FFFFFF")
-            lp = lc.paragraphs[0]
-            lp.add_run(left_text).font.size = Pt(size)
-            rp = rc.paragraphs[0]
-            rp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            rp.add_run(right_text).font.size = Pt(size)
-
-        # Row 1: Institute
-        _full_row("Symbiosis Institute of Technology, Pune", size=13)
-        # Row 2: Title
-        _full_row("Evaluation Plan", size=12)
-        # Row 3: Department | Batch
-        _split_row(f"Department: {department}", f"Batch: {academic_year}")
-        # Row 4: Course name | Credit
-        credits = eval_cfg.get("credits", "")
-        _split_row(f"Course name: {course_name}", f"Credit: {credits if credits else ''}")
-        # Row 5: Year | Sem
-        _split_row(f"Year: {academic_year}", f"Sem: {semester}")
-        # Row 6: Faculty (full width)
-        r6 = hdr.add_row()
-        fc = r6.cells[0].merge(r6.cells[6])
-        self._shade(fc, "FFFFFF")
-        fp = fc.paragraphs[0]
-        fb = fp.add_run("Name of the faculty member: "); fb.bold = True; fb.font.size = Pt(10)
-        fn = fp.add_run(faculty_name); fn.font.size = Pt(10)
+        # ── TITLE ─────────────────────────────────────────────────────
+        title_p = doc.add_paragraph()
+        title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_r = title_p.add_run("Evaluation Plan")
+        title_r.bold = True; title_r.font.name = _FONT; title_r.font.size = Pt(12); title_r.font.color.rgb = _BLACK
 
         doc.add_paragraph()
 
-        # ── CA / ESE MARKS (plain text, like template) ────────────────
+        # ── DEPT | BATCH ──────────────────────────────────────────────
+        _split_para("\tDepartment: ", department + "  " * 38, "Batch: ", academic_year)
+
+        doc.add_paragraph()
+
+        # ── COURSE NAME | CREDIT ──────────────────────────────────────
+        _split_para("\tCourse name:", f" {course_name}", "Credit: ", credits)
+
+        # ── YEAR | SEM ────────────────────────────────────────────────
+        _split_para("\tYear:", f" {academic_year}", "Sem: ", semester)
+
+        # ── FACULTY ───────────────────────────────────────────────────
+        fac_p = doc.add_paragraph()
+        fb = fac_p.add_run("Name of the faculty member: ")
+        fb.bold = True; fb.font.name = _FONT; fb.font.size = Pt(10); fb.font.color.rgb = _BLACK
+        fn = fac_p.add_run(faculty_name)
+        fn.font.name = _FONT; fn.font.size = Pt(10); fn.font.color.rgb = _BLACK
+
+        doc.add_paragraph()
+
+        # ── CA / ESE MARKS ────────────────────────────────────────────
         ca_p = doc.add_paragraph()
-        ca_r = ca_p.add_run(f"CA -{cia_total} marks"); ca_r.font.size = Pt(10)
+        ca_bold = ca_p.add_run("CA")
+        ca_bold.bold = True; ca_bold.font.name = _FONT; ca_bold.font.size = Pt(10); ca_bold.font.color.rgb = _BLACK
+        ca_rest = ca_p.add_run(f" -{cia_total} marks")
+        ca_rest.font.name = _FONT; ca_rest.font.size = Pt(10); ca_rest.font.color.rgb = _BLACK
+
         ese_p = doc.add_paragraph()
-        ese_r = ese_p.add_run(f"ESE – {ese_total} marks"); ese_r.font.size = Pt(10)
+        ese_r = ese_p.add_run(f"ESE – {ese_total} marks")
+        ese_r.font.name = _FONT; ese_r.font.size = Pt(10); ese_r.font.color.rgb = _BLACK
 
         doc.add_paragraph()
 
         # ── COURSE OUTCOMES LIST ──────────────────────────────────────
         co_title = doc.add_paragraph()
-        ct = co_title.add_run("Course Outcomes-"); ct.bold = True; ct.font.size = Pt(10)
+        ct = co_title.add_run("Course Outcomes-")
+        ct.bold = True; ct.font.name = _FONT; ct.font.size = Pt(10); ct.font.color.rgb = _BLACK
+
         for co in cos:
             co_p = doc.add_paragraph(style="List Bullet")
             co_r = co_p.add_run(co.get("statement", ""))
-            co_r.font.size = Pt(10)
+            co_r.font.name = _FONT; co_r.font.size = Pt(10); co_r.font.color.rgb = _BLACK
 
         doc.add_paragraph()
 
         # ── SECTION TITLE ─────────────────────────────────────────────
         theory_p = doc.add_paragraph()
         tt = theory_p.add_run("Theory Evaluation Components")
-        tt.bold = True; tt.font.size = Pt(10)
+        tt.bold = True; tt.font.name = _FONT; tt.font.size = Pt(10); tt.font.color.rgb = _BLACK
 
         doc.add_paragraph()
 
@@ -198,7 +228,7 @@ Return ONLY valid JSON, no markdown:
         for i, (cell, text) in enumerate(zip(tbl.rows[0].cells, col_headers)):
             self._shade(cell, _NAVY)
             p = cell.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = p.add_run(text); r.bold = True; r.font.size = Pt(9); r.font.color.rgb = _WHITE
+            r = p.add_run(text); r.bold = True; r.font.name = _FONT; r.font.size = Pt(9); r.font.color.rgb = _WHITE
             cell.width = col_widths[i]
 
         components = data.get("ca_components", [])
@@ -217,30 +247,41 @@ Return ONLY valid JSON, no markdown:
             ]
             for j, (c, v) in enumerate(zip(row, values)):
                 p = c.paragraphs[0]; p.clear()
-                r = p.add_run(v); r.font.size = Pt(9)
+                r = p.add_run(v); r.font.name = _FONT; r.font.size = Pt(9); r.font.color.rgb = _BLACK
                 if j in (0, 4, 5): p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 c.width = col_widths[j]
 
         doc.add_paragraph()
 
-        # ── CA DETAIL NOTES (like template bullet notes) ──────────────
+        # ── CA DETAIL NOTES ───────────────────────────────────────────
         for comp in components:
             det_p = doc.add_paragraph()
-            label_r = det_p.add_run(f"{comp.get('sr_no','')}: {comp.get('component','')} - {comp.get('marks','')} Marks ({comp.get('co_mapped','')})")
-            label_r.bold = True; label_r.font.size = Pt(9)
+            label_r = det_p.add_run(f"- ")
+            label_r.font.name = _FONT; label_r.font.size = Pt(10); label_r.font.color.rgb = _BLACK
+            sr = det_p.add_run(f"{comp.get('sr_no','')}")
+            sr.bold = True; sr.font.name = _FONT; sr.font.size = Pt(10); sr.font.color.rgb = _BLACK
+            colon = det_p.add_run(":")
+            colon.bold = True; colon.font.name = _FONT; colon.font.size = Pt(10); colon.font.color.rgb = _BLACK
+            comp_name = det_p.add_run(f" {comp.get('component','')} - {comp.get('marks','')} Marks ({comp.get('co_mapped','')})")
+            comp_name.bold = True; comp_name.font.name = _FONT; comp_name.font.size = Pt(10); comp_name.font.color.rgb = _BLACK
+
             det2 = doc.add_paragraph()
-            det2_r = det2.add_run(f"{comp.get('unit_syllabus','')}"); det2_r.font.size = Pt(9)
+            det2_r = det2.add_run(f"{comp.get('unit_syllabus','')}")
+            det2_r.font.name = _FONT; det2_r.font.size = Pt(10); det2_r.font.color.rgb = _BLACK
 
         doc.add_paragraph()
 
         # ── SIGNATURE ROW ─────────────────────────────────────────────
         sign_p = doc.add_paragraph()
         sign_r = sign_p.add_run(f"Sign of the faculty member: {faculty_name}")
-        sign_r.font.size = Pt(10)
+        sign_r.font.name = _FONT; sign_r.font.size = Pt(10); sign_r.font.color.rgb = _BLACK
 
-        hod_p = doc.add_paragraph()
-        hod_r = hod_p.add_run("Sign of HoD:")
-        hod_r.bold = True; hod_r.font.size = Pt(10)
+        doc.add_paragraph()
+
+        hod_heading_p = doc.add_paragraph()
+        hod_heading_r = hod_heading_p.add_run("Sign of HoD: ")
+        hod_heading_r.bold = True
+        hod_heading_r.font.name = _FONT; hod_heading_r.font.size = Pt(10); hod_heading_r.font.color.rgb = _BLACK
 
         import tempfile as _tmp
         with _tmp.TemporaryDirectory() as _t:

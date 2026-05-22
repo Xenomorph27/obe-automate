@@ -27,6 +27,8 @@ _NAVY  = "1F3864"
 _LIGHT = "D6DCE4"
 _WHITE = RGBColor(0xFF,0xFF,0xFF)
 _NAVY_R = RGBColor(0x1F,0x38,0x64)
+_BLACK = RGBColor(0,0,0)
+_FONT = "Times New Roman"
 
 class SessionPlanService:
     def __init__(self, db: AsyncSession):
@@ -113,50 +115,79 @@ Schema:
         fmt_p = doc.add_paragraph()
         fmt_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         fmt_r = fmt_p.add_run("Format: 5")
-        fmt_r.font.size = Pt(9)
-        fmt_r.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)  # red like template
+        fmt_r.font.name = _FONT
+        fmt_r.font.size = Pt(12)
+        fmt_r.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
 
         # ── HEADER TABLE — matches template exactly ───────────────────
-        # Cols: 9 to allow fine-grained splits
         hdr = doc.add_table(rows=0, cols=9)
         hdr.style = "Table Grid"
 
-        def _full_row(text, size=11, bold=True, shade=_NAVY, color=None):
+        def _set_cell_borders(cell):
+            tc = cell._tc
+            tcPr = tc.get_or_add_tcPr()
+            tcBorders = OxmlElement("w:tcBorders")
+            for side in ["top", "left", "bottom", "right"]:
+                b = OxmlElement(f"w:{side}")
+                b.set(qn("w:val"), "single")
+                b.set(qn("w:sz"), "4")
+                b.set(qn("w:space"), "0")
+                b.set(qn("w:color"), "auto")
+                tcBorders.append(b)
+            tcPr.append(tcBorders)
+
+        def _full_row(text, size=11, bold=True, center=True):
             row = hdr.add_row()
             c = row.cells[0]
-            for other in row.cells[1:]: c = c.merge(other)
-            self._shade(c, shade)
-            p = c.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = p.add_run(text); r.bold = bold; r.font.size = Pt(size)
-            r.font.color.rgb = color if color else _WHITE
+            for other in row.cells[1:]:
+                c = c.merge(other)
+            _set_cell_borders(c)
+            p = c.paragraphs[0]
+            if center:
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r = p.add_run(text)
+            r.bold = bold
+            r.font.name = _FONT
+            r.font.size = Pt(size)
+            r.font.color.rgb = _BLACK
 
         # Row 1: Institute name
         _full_row("Symbiosis Institute of Technology, Pune", size=13)
         # Row 2: "Session Plan" title
         _full_row("Session Plan", size=12)
         # Row 3: Department
-        _full_row(f"Name of the Department – {department}", size=10, bold=False, shade="FFFFFF", color=RGBColor(0,0,0))
-        # Row 4: Course name | Credit (split)
+        _full_row(f"              Name of the Department – {department}", size=10, center=False)
+        # Row 4: Course name | Credit
         r4 = hdr.add_row()
         lc4 = r4.cells[0].merge(r4.cells[5])
         rc4 = r4.cells[6].merge(r4.cells[8])
-        self._shade(lc4, "FFFFFF"); self._shade(rc4, "FFFFFF")
-        lp4 = lc4.paragraphs[0]; lp4.add_run(f"Name of the course– {course_name}").font.size = Pt(10)
-        rp4 = rc4.paragraphs[0]; rp4.add_run(f"Credit - {credits}").font.size = Pt(10)
-        # Row 5: Semester | Batch (split)
+        for c in [lc4, rc4]:
+            _set_cell_borders(c)
+        lp4 = lc4.paragraphs[0]
+        lr4 = lp4.add_run(f"              Name of the course– {course_name}")
+        lr4.bold = True; lr4.font.name = _FONT; lr4.font.size = Pt(10); lr4.font.color.rgb = _BLACK
+        rp4 = rc4.paragraphs[0]
+        rr4 = rp4.add_run(f"Credit - {credits}")
+        rr4.bold = True; rr4.font.name = _FONT; rr4.font.size = Pt(10); rr4.font.color.rgb = _BLACK
+        # Row 5: Semester | blank | Batch
         r5 = hdr.add_row()
         lc5 = r5.cells[0].merge(r5.cells[4])
         mc5 = r5.cells[5]
         rc5 = r5.cells[6].merge(r5.cells[8])
-        self._shade(lc5, "FFFFFF"); self._shade(mc5, "FFFFFF"); self._shade(rc5, "FFFFFF")
-        lc5.paragraphs[0].add_run(f"Semester –").font.size = Pt(10)
-        mc5.paragraphs[0].add_run(f"{semester}").font.size = Pt(10)
-        rc5.paragraphs[0].add_run(f"Batch – {academic_year}").font.size = Pt(10)
-        # Row 6: Faculty name (full width)
+        for c in [lc5, mc5, rc5]:
+            _set_cell_borders(c)
+        sem_run = lc5.paragraphs[0].add_run(f"              Semester –")
+        sem_run.bold = True; sem_run.font.name = _FONT; sem_run.font.size = Pt(10); sem_run.font.color.rgb = _BLACK
+        sem_val = mc5.paragraphs[0].add_run(f"{semester}")
+        sem_val.bold = True; sem_val.font.name = _FONT; sem_val.font.size = Pt(10); sem_val.font.color.rgb = _BLACK
+        batch_run = rc5.paragraphs[0].add_run(f"Batch – {academic_year}")
+        batch_run.bold = True; batch_run.font.name = _FONT; batch_run.font.size = Pt(10); batch_run.font.color.rgb = _BLACK
+        # Row 6: Faculty name
         r6 = hdr.add_row()
         fc = r6.cells[0].merge(r6.cells[8])
-        self._shade(fc, "FFFFFF")
-        fc.paragraphs[0].add_run(f"Name of the faculty– {faculty_name}").font.size = Pt(10)
+        _set_cell_borders(fc)
+        fac_run = fc.paragraphs[0].add_run(f"              Name of the faculty– {faculty_name}")
+        fac_run.bold = True; fac_run.font.name = _FONT; fac_run.font.size = Pt(10); fac_run.font.color.rgb = _BLACK
 
         doc.add_paragraph()
 
@@ -171,7 +202,7 @@ Schema:
         for i,(cell,text) in enumerate(zip(tbl.rows[0].cells, col_headers)):
             self._shade(cell, _NAVY)
             p = cell.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r = p.add_run(text); r.bold=True; r.font.size=Pt(8); r.font.color.rgb=_WHITE
+            r = p.add_run(text); r.bold=True; r.font.name=_FONT; r.font.size=Pt(9); r.font.color.rgb=_WHITE
             cell.width = col_widths[i]
 
         lect_num = 0
@@ -197,7 +228,7 @@ Schema:
                 for i,(c,v) in enumerate(zip(row,values)):
                     p = c.paragraphs[0]
                     p.clear()
-                    r = p.add_run(v); r.font.size = Pt(8)
+                    r = p.add_run(v); r.font.name=_FONT; r.font.size = Pt(9)
                     if i in (0,1,6): p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     if is_eval: r.bold=True; r.font.color.rgb=_NAVY_R
                     c.width = col_widths[i]
