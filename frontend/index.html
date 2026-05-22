@@ -1300,6 +1300,16 @@ function CourseSetupPage({setCourse,syllabusData}){
     setCos(classified);
     setClassifyingCos(false);
   };
+  // Auto-run AI classification on mount when syllabus data is available
+  React.useEffect(()=>{
+    if(syllabusData&&initCos.length>0){
+      setClassifyingCos(true);
+      aiClassifyBloom(initCos,syllabusData?.units||[]).then(classified=>{
+        setCos(classified);
+        setClassifyingCos(false);
+      });
+    }
+  },[]);
 
   const addCustomField=()=>{
     const label=window.prompt('Field name (e.g. "Program Outcomes", "Program Specific Outcomes"):');
