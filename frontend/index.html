@@ -385,6 +385,30 @@ const inferBloom=(statement='')=>{
   return'Understand';
 };
 const inferBloomSync=inferBloom;
+
+// ── AI BLOOM CLASSIFICATION ─────────────────────────────────────────────────
+// Calls the backend /syllabus/classify-bloom endpoint to use LLM for accurate
+// Bloom's level detection. Falls back to inferBloom() if the call fails.
+const aiClassifyBloom=async(cosArr)=>{
+  if(!cosArr||cosArr.length===0)return cosArr;
+  const statements=cosArr.map(co=>co.statement||'');
+  try{
+    const tok=sessionStorage.getItem('obe_token')||'';
+    const r=await fetch(API+'/syllabus/classify-bloom',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',...(tok?{Authorization:`Bearer ${tok}`}:{})},
+      body:JSON.stringify({statements})
+    });
+    if(!r.ok)throw new Error('classify-bloom API failed');
+    const j=await r.json();
+    const levels=j.levels||[];
+    return cosArr.map((co,i)=>({...co,bloom_level:levels[i]||inferBloom(co.statement||'')}));
+  }catch(e){
+    console.warn('AI Bloom classify failed, falling back to regex:',e);
+    return cosArr.map(co=>({...co,bloom_level:inferBloom(co.statement||'')}));
+  }
+};
+
 const QTYPES=['Short Answer','Long Answer','MCQ','Case Study'];
 
 class EB extends React.Component{
@@ -781,6 +805,14 @@ function CourseDetailPage({course,go,setCourse}){
   const [saving,setSaving]=useState(false);
   const [saveOk,setSaveOk]=useState('');
   const [saveErr,setSaveErr]=useState('');
+  const [classifyingEdit,setClassifyingEdit]=useState(false);
+  const runAiClassifyEdit=async()=>{
+    if(!editCos||editCos.length===0)return;
+    setClassifyingEdit(true);
+    const classified=await aiClassifyBloom(editCos);
+    setEditCos(classified);
+    setClassifyingEdit(false);
+  };
 
   useEffect(()=>{
     if(course){
@@ -876,7 +908,10 @@ function CourseDetailPage({course,go,setCourse}){
             {editCos.length>1&&<button onClick={()=>setEditCos(c=>c.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:'1.1rem',flexShrink:0}}>✕</button>}
           </div>
         ))}
-        <button className="btn btn-outline btn-sm" onClick={()=>setEditCos(c=>[...c,{co_id:`CO${c.length+1}`,statement:'',bloom_level:'Apply'}])}>+ Add CO</button>
+        <div style={{display:'flex',gap:'.4rem'}}>
+          <button className="btn btn-outline btn-sm" onClick={runAiClassifyEdit} disabled={classifyingEdit||editCos.length===0} title="Re-classify all CO Bloom levels using AI">{classifyingEdit?<><Spin/>Classifying…</>:'🤖 AI Classify'}</button>
+          <button className="btn btn-outline btn-sm" onClick={()=>setEditCos(c=>[...c,{co_id:`CO${c.length+1}`,statement:'',bloom_level:'Apply'}])}>+ Add CO</button>
+        </div>
       </div>
       {saveErr&&<Alrt t="error" msg={saveErr}/>}
       {saveOk&&<Alrt t="success" msg={saveOk}/>}
@@ -1131,15 +1166,30 @@ function SyllabusPage({onExtracted}){
   const [editRes,setEditRes]=useState(null);
   const [editingCos,setEditingCos]=useState([]);
   const [editingUnits,setEditingUnits]=useState([]);
+  const [classifying,setClassifying]=useState(false);
+
+  const runAiClassify=async()=>{
+    if(!editingCos||editingCos.length===0)return;
+    setClassifying(true);
+    const classified=await aiClassifyBloom(editingCos);
+    setEditingCos(classified);
+    setClassifying(false);
+  };
 
   const upload=async()=>{if(!file){setErr('Select a PDF.');return;}setLoading(true);setErr('');setRes(null);
     try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;
       setRes(d);
       setEditRes({course_name:d.course_name||'',course_code:d.course_code||'',credits:d.credits||4});
+      // Regex first for instant display
       const rawCos=(d.course_outcomes||d.cos||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')}));
       setEditingCos(rawCos);
       setEditingUnits((d.units||[]).map(u=>({...u})));
-    }catch(e){setErr(e.message);}setLoading(false);};
+      // Auto-upgrade to AI classification immediately after extraction
+      setClassifying(true);
+      const aiCos=await aiClassifyBloom(rawCos);
+      setEditingCos(aiCos);
+      setClassifying(false);
+    }catch(e){setErr(e.message);setClassifying(false);}setLoading(false);};
 
   const updCo=(i,k,v)=>setEditingCos(c=>{const a=[...c];a[i]={...a[i],[k]:v};return a;});
   const addCo=()=>setEditingCos(c=>[...c,{co_id:`CO${c.length+1}`,statement:'',bloom_level:'Apply'}]);
@@ -1181,7 +1231,10 @@ function SyllabusPage({onExtracted}){
         <div style={{marginBottom:'1.5rem'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.75rem'}}>
             <div style={{fontWeight:600,fontSize:'.85rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>Course Outcomes ({editingCos.length})</div>
-            <button className="btn btn-outline btn-sm" onClick={addCo}>+ Add CO</button>
+            <div style={{display:'flex',gap:'.4rem'}}>
+              <button className="btn btn-outline btn-sm" onClick={runAiClassify} disabled={classifying||editingCos.length===0} title="Re-classify all CO levels using AI">{classifying?<><Spin/>Classifying…</>:'🤖 AI Classify'}</button>
+              <button className="btn btn-outline btn-sm" onClick={addCo}>+ Add CO</button>
+            </div>
           </div>
           {editingCos.map((co,i)=>(
             <div key={i} style={{display:'flex',gap:'.5rem',alignItems:'flex-start',marginBottom:'.5rem',padding:'.65rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
@@ -1233,6 +1286,14 @@ function CourseSetupPage({setCourse,syllabusData}){
   const [cos,setCos]=useState(initCos.length>0?initCos:[{co_id:'CO1',statement:'',bloom_level:'Apply'}]);
   const [customFields,setCustomFields]=useState([]); // [{id, label, values:[{id,text}]}]
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const [classifyingCos,setClassifyingCos]=useState(false);
+  const runAiClassifySetup=async()=>{
+    if(!cos||cos.length===0)return;
+    setClassifyingCos(true);
+    const classified=await aiClassifyBloom(cos);
+    setCos(classified);
+    setClassifyingCos(false);
+  };
 
   const addCustomField=()=>{
     const label=window.prompt('Field name (e.g. "Program Outcomes", "Program Specific Outcomes"):');
@@ -1298,7 +1359,10 @@ function CourseSetupPage({setCourse,syllabusData}){
             <textarea className="fi" rows={2} style={{resize:'vertical',fontSize:'.855rem'}} value={co.statement} onChange={e=>{const stmt=e.target.value;setCo(i,'statement',stmt);setCo(i,'bloom_level',inferBloom(stmt));}} placeholder="CO statement..."/>
           </div>
         ))}
-        <button className="btn btn-outline btn-sm" onClick={addCo} style={{marginTop:'.25rem'}}>+ Add CO</button>
+        <div style={{display:'flex',gap:'.4rem',marginTop:'.25rem'}}>
+          <button className="btn btn-outline btn-sm" onClick={runAiClassifySetup} disabled={classifyingCos||cos.length===0} title="Classify all CO levels using AI">{classifyingCos?<><Spin/>Classifying…</>:'🤖 AI Classify'}</button>
+          <button className="btn btn-outline btn-sm" onClick={addCo}>+ Add CO</button>
+        </div>
       </div>
     </div>
 
