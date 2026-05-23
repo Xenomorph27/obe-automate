@@ -9,6 +9,7 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -2192,8 +2193,10 @@ function EvalPlanPage({course}){
     setViewLoading(true);
     try{
       const d=await api(`/evaluation-plan/view/${course.id}`);
-      setViewRows(d.data||d.rows||d||[]);
+      const rows=d.data||d.rows||d||[];
+      setViewRows(Array.isArray(rows)?rows:[]);
     }catch(e){
+      // fallback: if we have live rows use those, else try to reconstruct from generate response
       if(liveRows.length>0) setViewRows(liveRows);
       else setViewRows([]);
     }
@@ -2340,7 +2343,18 @@ function EvalPlanPage({course}){
         </div>
       ):(()=>{
         const rows=Array.isArray(viewRows)?viewRows:[];
-        const cols=liveCols.length>1?liveCols:DEFAULT_EVAL_COLS;
+        // Auto-detect columns from row data if liveCols doesn't match the saved data
+        let cols;
+        if(liveCols.length>1 && rows.length>0 && Object.keys(rows[0]||{}).some(k=>liveCols.find(c=>c.key===k))){
+          cols=liveCols;
+        } else if(rows.length>0){
+          // Detect cols from row keys, mapping known keys to labels
+          const keyLabelMap={sr:'Sr. No.',component:'Component',unit_syllabus:'Unit Syllabus',co:'CO Mapped',marks:'Marks',weightage:'Weightage',date:'Tentative Date',comp:'Component',co_mapped:'CO Mapped',sr_no:'Sr. No.',tentative_date:'Tentative Date'};
+          const keys=Object.keys(rows[0]).filter(k=>!k.startsWith('_'));
+          cols=keys.map(k=>({key:k,label:keyLabelMap[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}));
+        } else {
+          cols=DEFAULT_EVAL_COLS;
+        }
         return(<div>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
             <div style={{fontWeight:700,fontSize:'.9rem'}}>
@@ -2379,9 +2393,9 @@ function EvalPlanPage({course}){
                       <td key={col.key} style={{padding:'7px 12px',
                         textAlign:col.key==='component'||col.key==='unit_syllabus'||col.key==='comp'?'left':'center',
                         borderRight:'1px solid var(--border)',fontSize:'.82rem',color:'var(--text)'}}>
-                        {col.key==='co'
+                        {(col.key==='co'||col.key==='co_mapped')
                           ?<span style={{background:'var(--blue3)',color:'var(--blue2)',borderRadius:20,padding:'2px 8px',fontSize:'.75rem',fontWeight:600}}>{row[col.key]||'—'}</span>
-                          :col.key==='marks'
+                          :(col.key==='marks'||col.key==='weightage')
                           ?<span style={{fontWeight:700,color:'var(--green)'}}>{row[col.key]||'—'}</span>
                           :row[col.key]||<span style={{color:'var(--text3)'}}>—</span>
                         }
@@ -2697,13 +2711,30 @@ function StudyMaterialsPage({course}){
     if(!course)return;
     setLoading(true);setErr('');
     try{
+      // Try direct materials endpoint first
       const d=await api(`/session-plan/materials/${course.id}`);
-      setData(d.data||d);
+      const raw=d.data||d;
+      // Normalize various response shapes
+      const mats={
+        textbooks:raw.textbooks||raw.reference_books||raw.books||[],
+        web_links:raw.web_links||raw.online_links||raw.nptel_links||raw.web||[],
+        journals:raw.journals||raw.research_papers||raw.papers||[],
+        mooc_courses:raw.mooc_courses||raw.moocs||[],
+      };
+      setData(mats);
     }catch(e){
       try{
-        const sp=await api(`/session-plan/generate/${course.id}`,{method:'POST'});
+        // Fallback: get from session plan
+        const sp=await api(`/session-plan/view/${course.id}`);
         const plan=sp.data||sp;
-        setData(plan?.study_materials||plan?.materials||null);
+        const mats=plan?.study_materials||plan?.materials||{};
+        if(Object.keys(mats).length>0){setData(mats);}
+        else{
+          // Last resort: generate session plan to get materials
+          const sp2=await api(`/session-plan/generate/${course.id}`,{method:'POST'});
+          const plan2=sp2.data||sp2;
+          setData(plan2?.study_materials||plan2?.materials||null);
+        }
       }catch{setErr('Generate the session plan first to see AI recommendations.');}
     }
     setLoading(false);
@@ -2713,9 +2744,9 @@ function StudyMaterialsPage({course}){
   useEffect(()=>{setUserMats(loadUser());setShowForm(false);setForm(emptyForm);},[course]);
 
   // AI-sourced
-  const aiTextbooks=data?.textbooks||data?.reference_books||[];
-  const aiWeb=data?.web_links||data?.online_links||data?.nptel_links||[];
-  const aiJournals=data?.journals||data?.research_papers||[];
+  const aiTextbooks=data?.textbooks||data?.reference_books||data?.books||[];
+  const aiWeb=data?.web_links||data?.online_links||data?.nptel_links||data?.web||[];
+  const aiJournals=data?.journals||data?.research_papers||data?.papers||[];
   const aiMoocs=data?.mooc_courses||data?.moocs||[];
 
   const total=(a,k)=>a.length+(userMats[k]||[]).length;
@@ -2866,8 +2897,20 @@ function StudyMaterialsPage({course}){
 
       if(!parsedItems.length){setAddMsg('No readable content found in file.');setTimeout(()=>setAddMsg(''),3000);return;}
 
+      // Filter out items that are just numbers, single chars, or header-like entries
+      const filteredItems=parsedItems.filter(it=>{
+        const t=(it.title||'').trim();
+        if(!t||t.length<=2)return false;
+        // Filter lone numbers like "1", "2", "5.", "6.", "Sr.", etc.
+        if(/^[\d]+\.?$/.test(t))return false;
+        if(/^(sr\.?\s*no\.?|s\.?\s*no\.?|#)$/i.test(t))return false;
+        return true;
+      });
+
+      if(!filteredItems.length){setAddMsg('No readable content found after filtering.');setTimeout(()=>setAddMsg(''),3000);return;}
+
       // Build initial allocations: use _cat if detected, else guess from text
-      const items=parsedItems.map((it,i)=>({...it,id:it.id||Date.now()+i}));
+      const items=filteredItems.map((it,i)=>({...it,id:it.id||Date.now()+i}));
       const guessed={};
       items.forEach((it,i)=>{
         if(it._cat){guessed[i]=it._cat;return;}
@@ -2956,7 +2999,7 @@ function StudyMaterialsPage({course}){
         <div style={{background:'var(--card)',borderRadius:14,padding:'1.5rem',maxWidth:700,width:'100%',maxHeight:'80vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.25)'}}>
           <div style={{fontWeight:700,fontSize:'1rem',marginBottom:'.25rem'}}>Allocate items to categories</div>
           <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem'}}>
-            From <strong>{pendingImport.fileName}</strong> · {pendingImport.items.length} items found · AI has auto-guessed categories — adjust as needed
+            From <strong>{pendingImport.fileName}</strong> · {pendingImport.items.length} items found · <span style={{color:'#C2410C',fontWeight:600}}>✨ AI has auto-guessed categories</span> — adjust as needed
           </div>
           <div style={{overflowY:'auto',flex:1,marginBottom:'1rem'}}>
             {pendingImport.items.map((it,i)=>(
@@ -3017,7 +3060,7 @@ function StudyMaterialsPage({course}){
     );
   };
 
-  const AiBadge=()=><span style={{fontSize:'.65rem',background:'#FFEDD5',color:'#C2410C',borderRadius:20,padding:'1px 7px',fontWeight:600,marginLeft:6}}>AI</span>;
+  const AiBadge=()=><span title="AI Recommendation" style={{fontSize:'.65rem',background:'linear-gradient(135deg,#FFEDD5,#FED7AA)',color:'#C2410C',borderRadius:20,padding:'2px 8px',fontWeight:700,marginLeft:6,border:'1px solid #FDBA74',display:'inline-flex',alignItems:'center',gap:3}}>✨ AI</span>;
   const UserBadge=()=><span style={{fontSize:'.65rem',background:'var(--bg2)',color:'var(--text2)',borderRadius:20,padding:'1px 7px',fontWeight:600,marginLeft:6}}>You</span>;
 
   const hasAny=aiTextbooks.length||aiWeb.length||aiJournals.length||aiMoocs.length||
@@ -3383,7 +3426,7 @@ function MarksPage({course}){
           const allDisp = [...caComps, ...(eseKey?[eseKey]:[])] ;
 
           const getCompTotal=(rec,comp)=>{
-            // Sum across all COs for this component
+            // Sum across all COs for this component, rounded to 2 decimals
             let t=0;
             Object.values(rec.marks||{}).forEach(coMarks=>{
               const v=coMarks?.[comp];
@@ -3392,13 +3435,13 @@ function MarksPage({course}){
                 if(!isNaN(n)) t+=n;
               }
             });
-            return t||null;
+            return t>0?Math.round(t*100)/100:null;
           };
 
           const getGrandTotal=(rec)=>{
             let t=0;
             allDisp.forEach(comp=>{const v=getCompTotal(rec,comp);if(v)t+=v;});
-            return t;
+            return Math.round(t*100)/100;
           };
 
           return(<div className="tbl-wrap"><table>
@@ -3429,7 +3472,7 @@ function MarksPage({course}){
                 <td style={{fontSize:'.85rem',fontWeight:isEditing?600:'normal'}}>{rec.student_name}</td>
                 {allDisp.map(comp=>{
                   const totVal=getCompTotal(rec,comp);
-                  const displayVal=totVal!==null?totVal:'—';
+                  const displayVal=totVal!==null?(Number.isInteger(totVal)?totVal:totVal.toFixed(2)):'—';
                   const isEse=comp===eseKey;
                   return(<td key={comp} style={{textAlign:'center',background:isEditing?(isEse?'#fef9c3':'var(--blue3)'):''}}>
                     {isEditing?
@@ -3453,7 +3496,7 @@ function MarksPage({course}){
                     }
                   </td>);
                 })}
-                <td style={{textAlign:'center',fontWeight:700,background:'var(--bg2)',fontSize:'.85rem',color:grandTotal>0?'var(--green)':'var(--text3)'}}>{grandTotal||'—'}</td>
+                <td style={{textAlign:'center',fontWeight:700,background:'var(--bg2)',fontSize:'.85rem',color:grandTotal>0?'var(--green)':'var(--text3)'}}>{grandTotal>0?(Number.isInteger(grandTotal)?grandTotal:grandTotal.toFixed(2)):'—'}</td>
                 <td style={{textAlign:'center',whiteSpace:'nowrap'}}>
                   {isEditing?(<>
                     <button className="btn btn-primary btn-sm" onClick={()=>saveEdit(rec)} disabled={isSaving} style={{marginRight:4,fontSize:'.75rem'}}>
@@ -4270,6 +4313,45 @@ function MasterAttainmentPage({course}){
     const updQ=(i,field,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.map((q,j)=>j===i?{...q,[field]:val}:q)}}));
     const delQ=(i)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.filter((_,j)=>j!==i)}}));
     const updMark=(prn,qno,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...marks,[prn]:{...(marks[prn]||{}),[qno]:val}}}}));
+    const marksFileRef=React.createRef();
+    const uploadCAMarksFile=(file)=>{
+      if(!file)return;
+      const reader=new FileReader();
+      reader.onload=(ev)=>{
+        try{
+          if(typeof XLSX==='undefined'){setErr('XLSX library not loaded. Cannot parse marks file.');return;}
+          const wb=XLSX.read(ev.target.result,{type:'array'});
+          // Try matching sheet name to this CA, or use first sheet
+          const sheetName=wb.SheetNames.find(s=>s.toLowerCase().includes(ca.toLowerCase()))||wb.SheetNames[0];
+          if(!sheetName){setErr('No sheets found in file.');return;}
+          const ws=wb.Sheets[sheetName];
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().includes('roll')));
+          if(hdrIdx<0)hdrIdx=0;
+          const hdrRow=rows[hdrIdx];
+          const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().includes('roll'));
+          const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark')||String(h).toLowerCase().includes('total'));
+          if(prnIdx<0){setErr('Could not find PRN/Roll No column in marks file.');return;}
+          const curQP=qp;
+          const newMarks={};
+          rows.slice(hdrIdx+1).forEach(row=>{
+            const prn=String(row[prnIdx]||'').trim();
+            if(!prn||prn.length<4)return;
+            const totalMark=mIdx>=0?parseFloat(row[mIdx])||0:0;
+            if(curQP.length>0&&totalMark>0){
+              const totalQMax=curQP.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+              const sm={};
+              curQP.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+              newMarks[prn]=sm;
+            }else{newMarks[prn]={1:totalMark};}
+          });
+          const cnt=Object.keys(newMarks).length;
+          setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...p[ca]?.marks,...newMarks}}}));
+          setOk(`✓ Loaded marks for ${cnt} students into ${ca}.`);
+        }catch(ex){setErr('Marks parse error: '+ex.message);}
+      };
+      reader.readAsArrayBuffer(file);
+    };
     return(
       <div>
         <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1rem',flexWrap:'wrap'}}>
@@ -4280,6 +4362,14 @@ function MasterAttainmentPage({course}){
               onChange={e=>e.target.files[0]&&uploadQP(ca,e.target.files[0])}/>
             <button className="btn btn-outline btn-sm" onClick={()=>fileRef.current&&fileRef.current.click()}>
               {loading?'Parsing…':'⬆ Upload QP'}
+            </button>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:'.4rem'}}>
+            <input type="file" accept=".xlsx,.xls" style={{display:'none'}} ref={marksFileRef}
+              onChange={e=>{if(e.target.files[0])uploadCAMarksFile(e.target.files[0]);e.target.value='';}}/>
+            <button className="btn btn-outline btn-sm" style={{background:'var(--amber2)',borderColor:'#d97706',color:'#92400e'}}
+              onClick={()=>marksFileRef.current&&marksFileRef.current.click()}>
+              ✏ Upload Marks
             </button>
           </div>
         </div>
@@ -4343,13 +4433,13 @@ function MasterAttainmentPage({course}){
                       <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
                       {qp.map(q=>(
                         <TD key={q.q_no} center>
-                          <input type="number" min="0" max={q.marks} step="0.5"
+                          <input type="number" min="0" max={q.marks} step="0.01"
                             value={sm[q.q_no]??''} onChange={e=>updMark(s.prn,q.q_no,e.target.value)}
                             style={{width:52,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px',
                               textAlign:'center',fontSize:'.78rem',fontFamily:'DM Sans,sans-serif'}}/>
                         </TD>
                       ))}
-                      <TD center><span style={{fontWeight:700,color:total>0?'var(--green)':'var(--text3)'}}>{total||'—'}</span></TD>
+                      <TD center><span style={{fontWeight:700,color:total>0?'var(--green)':'var(--text3)'}}>{total>0?(Number.isInteger(total)?total:total.toFixed(2)):'—'}</span></TD>
                     </tr>
                   );
                 })}
@@ -4361,10 +4451,54 @@ function MasterAttainmentPage({course}){
     );
   };
 
-  const renderESE=()=>(
+  const renderESE=()=>{
+  const eseMarksRef=React.createRef();
+  const uploadESEMarks=(file)=>{
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        if(typeof XLSX==='undefined'){setErr('XLSX library not loaded.');return;}
+        const wb=XLSX.read(ev.target.result,{type:'array'});
+        const sheetName=wb.SheetNames.find(s=>s.toLowerCase().includes('ese')||s.toLowerCase().includes('end'))||wb.SheetNames[0];
+        if(!sheetName){setErr('No sheets found.');return;}
+        const ws=wb.Sheets[sheetName];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().includes('roll')));
+        if(hdrIdx<0)hdrIdx=0;
+        const hdrRow=rows[hdrIdx];
+        const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().includes('roll'));
+        const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark')||String(h).toLowerCase().includes('total'));
+        if(prnIdx<0){setErr('PRN/Roll No column not found in ESE marks file.');return;}
+        const newMarks={};
+        rows.slice(hdrIdx+1).forEach(row=>{
+          const prn=String(row[prnIdx]||'').trim();
+          if(!prn||prn.length<4)return;
+          const totalMark=mIdx>=0?parseFloat(row[mIdx])||0:0;
+          if(eseQP.length>0&&totalMark>0){
+            const totalQMax=eseQP.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+            const sm={};
+            eseQP.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+            newMarks[prn]=sm;
+          }else{newMarks[prn]={1:totalMark};}
+        });
+        const cnt=Object.keys(newMarks).length;
+        setEseMarks(p=>({...p,...newMarks}));
+        setOk(`✓ Loaded ESE marks for ${cnt} students.`);
+      }catch(ex){setErr('ESE marks parse error: '+ex.message);}
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  return(
     <div>
-      <div style={{display:'flex',gap:'1rem',alignItems:'center',marginBottom:'1rem'}}>
+      <div style={{display:'flex',gap:'1rem',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap'}}>
         <span style={{fontWeight:700,fontSize:'.9rem'}}>📄 End Semester Exam (ESE)</span>
+        <input type="file" accept=".xlsx,.xls" style={{display:'none'}} ref={eseMarksRef}
+          onChange={e=>{if(e.target.files[0])uploadESEMarks(e.target.files[0]);e.target.value='';}}/>
+        <button className="btn btn-outline btn-sm" style={{background:'var(--amber2)',borderColor:'#d97706',color:'#92400e'}}
+          onClick={()=>eseMarksRef.current&&eseMarksRef.current.click()}>
+          ✏ Upload Marks
+        </button>
         <button className="btn btn-primary btn-sm" onClick={()=>{
           const defaultCO=coList[0]?.co_id||'CO1';
           const co=coList.find(c=>c.co_id===defaultCO);
@@ -4423,12 +4557,12 @@ function MasterAttainmentPage({course}){
                     <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
                     {eseQP.map(q=>(
                       <TD key={q.q_no} center>
-                        <input type="number" min="0" max={q.marks} step="0.5" value={sm[q.q_no]??''}
+                        <input type="number" min="0" max={q.marks} step="0.01" value={sm[q.q_no]??''}
                           onChange={e=>setEseMarks(p=>({...p,[s.prn]:{...(p[s.prn]||{}),[q.q_no]:e.target.value}}))}
                           style={{width:50,border:'1px solid var(--border)',borderRadius:4,padding:'2px',textAlign:'center',fontSize:'.78rem'}}/>
                       </TD>
                     ))}
-                    <TD center><b>{tot||'—'}</b></TD>
+                    <TD center><b>{tot>0?(Number.isInteger(tot)?tot:tot.toFixed(2)):'—'}</b></TD>
                   </tr>);
                 })}
               </tbody>
@@ -4437,7 +4571,7 @@ function MasterAttainmentPage({course}){
         </div>
       )}
     </div>
-  );
+  );};
 
   const renderFinalAttn=()=>{
     const getLvl=p=>p<=40?1:p<70?2:3;
@@ -4562,7 +4696,7 @@ function MasterAttainmentPage({course}){
   };
 
   const renderBulkUpload=()=>(
-    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem'}}>
+    <div style={{display:'flex',flexDirection:'column',gap:'1.5rem'}}>
       <div>
         <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.75rem'}}>📄 Upload All Question Papers</div>
         <div style={{background:'var(--blue3)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem',lineHeight:1.7}}>
@@ -4604,7 +4738,7 @@ function MasterAttainmentPage({course}){
           {bulkMarksLoading?React.createElement(Spin,null):null}{bulkMarksLoading?'Parsing…':'📤 Upload & Distribute Marks'}
         </button>
       </div>
-      <div style={{gridColumn:'1/-1',background:'var(--bg2)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)'}}>
+      <div style={{background:'var(--bg2)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)'}}>
         💡 <strong>Tab-by-tab upload also available:</strong> Go to any CA tab (e.g. 📝 Quiz) and use the "⬆ Upload Question Paper" button there, or enter marks directly in the marks grid.
       </div>
     </div>
