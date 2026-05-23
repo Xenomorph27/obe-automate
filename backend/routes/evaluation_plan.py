@@ -53,6 +53,19 @@ async def generate_evaluation_plan(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+
+
+@router.get("/view/{course_id}")
+async def view_evaluation_plan(course_id: int, current_user: User = Depends(require_auth)):
+    """Return saved evaluation plan rows as JSON for on-screen preview."""
+    import json, os
+    json_path = os.path.join("generated_docs", "evaluation_plans", f"evaluation_plan_{course_id}_edited.json")
+    if os.path.exists(json_path):
+        with open(json_path) as jf:
+            data = json.load(jf)
+        return {"data": data.get("rows", data) if isinstance(data, dict) else data}
+    raise HTTPException(status_code=404, detail="No evaluation plan found. Generate first.")
+
 @router.get("/download/{course_id}")
 async def download_evaluation_plan(course_id: int, current_user: User = Depends(require_auth)):
     """Download the generated evaluation plan Word document."""

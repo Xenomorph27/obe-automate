@@ -1806,11 +1806,28 @@ function SessionPlanPage({course}){
     {key:'co',label:'CO',width:'60px',type:'text'},
   ];
 
+  const [activeView,setActiveView]=useState('edit'); // 'edit' | 'view'
   const [genLoading,setGenLoading]=useState(false);
   const [err,setErr]=useState('');
   const [generated,setGenerated]=useState(false);
   const [saving,setSaving]=useState(false);
   const [saveOk,setSaveOk]=useState('');
+  const [viewLoading,setViewLoading]=useState(false);
+  const [viewRows,setViewRows]=useState(null); // fetched plan rows for read-only preview
+
+  const fetchViewPlan=async()=>{
+    if(!course)return;
+    setViewLoading(true);
+    try{
+      const d=await api(`/session-plan/view/${course.id}`);
+      setViewRows(d.data||d.rows||d||[]);
+    }catch(e){
+      // fallback: use live rows if already generated
+      if(liveRows.length>0) setViewRows(liveRows);
+      else setViewRows([]);
+    }
+    setViewLoading(false);
+  };
 
   // Live table state — single source of truth
   const [liveCols,setLiveCols]=useState(DEFAULT_COLS);
@@ -1951,6 +1968,88 @@ function SessionPlanPage({course}){
       <span className="badge b-blue">{course.course_code}</span> {course.course_name}
     </div>}
 
+    {/* View / Edit tabs */}
+    <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',borderBottom:'2px solid var(--border)',paddingBottom:0}}>
+      {[['edit','✏️ Edit / Generate'],['view','👁 View Current Plan']].map(([v,l])=>(
+        <button key={v} onClick={()=>{setActiveView(v);if(v==='view')fetchViewPlan();}}
+          style={{padding:'.45rem 1.1rem',border:'none',cursor:'pointer',fontWeight:600,fontSize:'.82rem',
+            fontFamily:'DM Sans,sans-serif',background:'transparent',
+            color:activeView===v?'var(--blue2)':'var(--text3)',
+            borderBottom:activeView===v?'2px solid var(--blue2)':'2px solid transparent',
+            marginBottom:-2,transition:'all .15s'}}>
+          {l}
+        </button>
+      ))}
+    </div>
+
+    {/* ── View Tab ── */}
+    {activeView==='view'&&<div>
+      {viewLoading?<Skel/>:!viewRows||viewRows.length===0?(
+        <div className="card card-p" style={{textAlign:'center',padding:'2.5rem',color:'var(--text2)'}}>
+          <div style={{fontSize:'2rem',marginBottom:'.75rem'}}>📅</div>
+          <div style={{fontWeight:600,marginBottom:'.4rem'}}>No session plan generated yet</div>
+          <div style={{fontSize:'.855rem',marginBottom:'1rem'}}>Switch to the Edit tab and click Generate with AI.</div>
+          <button className="btn btn-primary" onClick={()=>setActiveView('edit')}>Go to Edit</button>
+        </div>
+      ):(()=>{
+        // viewRows can be either the live liveRows format or fetched from server
+        const rows = Array.isArray(viewRows) ? viewRows : [];
+        const cols = liveCols.length>1?liveCols:DEFAULT_COLS;
+        return(<div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
+            <div style={{fontWeight:700,fontSize:'.9rem'}}>
+              Session Plan — {course?.course_code} {course?.course_name}
+              <span style={{fontWeight:400,fontSize:'.8rem',color:'var(--text2)',marginLeft:'.75rem'}}>{rows.length} sessions</span>
+            </div>
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-outline btn-sm" onClick={fetchViewPlan} disabled={viewLoading}>↺ Refresh</button>
+              <button className="btn btn-outline btn-sm" onClick={async()=>{
+                try{
+                  const r=await fetch(API+`/session-plan/download/${course?.id}`,{headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+                  if(!r.ok){alert('No docx file found. Generate first.');return;}
+                  const blob=await r.blob();const url=URL.createObjectURL(blob);
+                  const a=document.createElement('a');a.href=url;a.download=`session_plan_${course?.id}.docx`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);document.body.removeChild(a);},1000);
+                }catch(ex){alert(ex.message);}
+              }}>⬇ Download docx</button>
+            </div>
+          </div>
+          <div style={{overflowX:'auto',borderRadius:'var(--radius)',border:'1px solid var(--border)',background:'var(--white)'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+              <thead>
+                <tr style={{background:'#1F3864'}}>
+                  {cols.map(col=>(
+                    <th key={col.key} style={{padding:'9px 12px',color:'#fff',fontWeight:700,textAlign:'center',
+                      whiteSpace:'nowrap',fontSize:'.78rem',borderRight:'1px solid rgba(255,255,255,0.15)'}}>
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row,ri)=>(
+                  <tr key={ri} style={{background:ri%2===0?'var(--bg)':'var(--white)',borderBottom:'1px solid var(--border)'}}>
+                    {cols.map(col=>(
+                      <td key={col.key} style={{padding:'7px 12px',textAlign:col.key==='topic'?'left':'center',
+                        color:'var(--text)',borderRight:'1px solid var(--border)',maxWidth:col.key==='topic'?320:undefined,
+                        whiteSpace:col.key==='topic'?'normal':'nowrap'}}>
+                        {col.key==='co'
+                          ?<span style={{background:'var(--blue3)',color:'var(--blue2)',borderRadius:20,padding:'2px 8px',fontSize:'.75rem',fontWeight:600}}>{row[col.key]||'—'}</span>
+                          :row[col.key]||<span style={{color:'var(--text3)'}}>—</span>
+                        }
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>);
+      })()}
+    </div>}
+
+    {/* ── Edit Tab ── */}
+    {activeView==='edit'&&<div>
+
     {/* Toolbar */}
     <div className="card card-p" style={{marginBottom:'1rem'}}>
       <Alrt t="error" msg={err}/>
@@ -2063,6 +2162,7 @@ function SessionPlanPage({course}){
         <div style={{fontSize:'.855rem'}}>Click "Generate with AI" to create your plan, then edit it here with AI assistance.</div>
       </div>
     }
+    </div>}
   </div>);
 }
 
@@ -2078,11 +2178,27 @@ function EvalPlanPage({course}){
     {key:'date',label:'Tentative Date',width:'120px',type:'text'},
   ];
 
+  const [activeView,setActiveView]=useState('edit');
   const [genLoading,setGenLoading]=useState(false);
   const [err,setErr]=useState('');
   const [generated,setGenerated]=useState(false);
   const [saving,setSaving]=useState(false);
   const [saveOk,setSaveOk]=useState('');
+  const [viewLoading,setViewLoading]=useState(false);
+  const [viewRows,setViewRows]=useState(null);
+
+  const fetchViewPlan=async()=>{
+    if(!course)return;
+    setViewLoading(true);
+    try{
+      const d=await api(`/evaluation-plan/view/${course.id}`);
+      setViewRows(d.data||d.rows||d||[]);
+    }catch(e){
+      if(liveRows.length>0) setViewRows(liveRows);
+      else setViewRows([]);
+    }
+    setViewLoading(false);
+  };
 
   const [liveCols,setLiveCols]=useState(DEFAULT_EVAL_COLS);
   const [liveRows,setLiveRows]=useState([]);
@@ -2199,6 +2315,98 @@ function EvalPlanPage({course}){
       <span className="badge b-blue">{course.course_code}</span> {course.course_name}
     </div>}
 
+    {/* View / Edit tabs */}
+    <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',borderBottom:'2px solid var(--border)',paddingBottom:0}}>
+      {[['edit','✏️ Edit / Generate'],['view','👁 View Current Plan']].map(([v,l])=>(
+        <button key={v} onClick={()=>{setActiveView(v);if(v==='view')fetchViewPlan();}}
+          style={{padding:'.45rem 1.1rem',border:'none',cursor:'pointer',fontWeight:600,fontSize:'.82rem',
+            fontFamily:'DM Sans,sans-serif',background:'transparent',
+            color:activeView===v?'var(--blue2)':'var(--text3)',
+            borderBottom:activeView===v?'2px solid var(--blue2)':'2px solid transparent',
+            marginBottom:-2,transition:'all .15s'}}>
+          {l}
+        </button>
+      ))}
+    </div>
+
+    {/* ── View Tab ── */}
+    {activeView==='view'&&<div>
+      {viewLoading?<Skel/>:!viewRows||viewRows.length===0?(
+        <div className="card card-p" style={{textAlign:'center',padding:'2.5rem',color:'var(--text2)'}}>
+          <div style={{fontSize:'2rem',marginBottom:'.75rem'}}>📋</div>
+          <div style={{fontWeight:600,marginBottom:'.4rem'}}>No evaluation plan generated yet</div>
+          <div style={{fontSize:'.855rem',marginBottom:'1rem'}}>Switch to the Edit tab and click Generate.</div>
+          <button className="btn btn-primary" onClick={()=>setActiveView('edit')}>Go to Edit</button>
+        </div>
+      ):(()=>{
+        const rows=Array.isArray(viewRows)?viewRows:[];
+        const cols=liveCols.length>1?liveCols:DEFAULT_EVAL_COLS;
+        return(<div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
+            <div style={{fontWeight:700,fontSize:'.9rem'}}>
+              Evaluation Plan — {course?.course_code} {course?.course_name}
+              <span style={{fontWeight:400,fontSize:'.8rem',color:'var(--text2)',marginLeft:'.75rem'}}>{rows.length} components</span>
+            </div>
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-outline btn-sm" onClick={fetchViewPlan} disabled={viewLoading}>↺ Refresh</button>
+              <button className="btn btn-outline btn-sm" onClick={async()=>{
+                try{
+                  const r=await fetch(API+`/evaluation-plan/download/${course?.id}`,{headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+                  if(!r.ok){alert('No docx file found. Generate first.');return;}
+                  const blob=await r.blob();const url=URL.createObjectURL(blob);
+                  const a=document.createElement('a');a.href=url;a.download=`evaluation_plan_${course?.id}.docx`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);document.body.removeChild(a);},1000);
+                }catch(ex){alert(ex.message);}
+              }}>⬇ Download docx</button>
+            </div>
+          </div>
+          <div style={{overflowX:'auto',borderRadius:'var(--radius)',border:'1px solid var(--border)',background:'var(--white)'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+              <thead>
+                <tr style={{background:'#1F3864'}}>
+                  {cols.map(col=>(
+                    <th key={col.key} style={{padding:'9px 12px',color:'#fff',fontWeight:700,
+                      textAlign:'center',whiteSpace:'nowrap',fontSize:'.78rem',
+                      borderRight:'1px solid rgba(255,255,255,0.15)'}}>
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row,ri)=>(
+                  <tr key={ri} style={{background:ri%2===0?'var(--bg)':'var(--white)',borderBottom:'1px solid var(--border)'}}>
+                    {cols.map(col=>(
+                      <td key={col.key} style={{padding:'7px 12px',
+                        textAlign:col.key==='component'||col.key==='unit_syllabus'||col.key==='comp'?'left':'center',
+                        borderRight:'1px solid var(--border)',fontSize:'.82rem',color:'var(--text)'}}>
+                        {col.key==='co'
+                          ?<span style={{background:'var(--blue3)',color:'var(--blue2)',borderRadius:20,padding:'2px 8px',fontSize:'.75rem',fontWeight:600}}>{row[col.key]||'—'}</span>
+                          :col.key==='marks'
+                          ?<span style={{fontWeight:700,color:'var(--green)'}}>{row[col.key]||'—'}</span>
+                          :row[col.key]||<span style={{color:'var(--text3)'}}>—</span>
+                        }
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{background:'var(--bg2)',fontWeight:700}}>
+                  <td colSpan={Math.max(1,cols.findIndex(c=>c.key==='marks'))} style={{padding:'8px 12px',textAlign:'right',fontSize:'.82rem'}}>Total Marks</td>
+                  <td style={{padding:'8px 12px',textAlign:'center',color:'var(--green)',fontSize:'.85rem',fontWeight:700}}>
+                    {rows.reduce((s,r)=>s+(parseFloat(r.marks)||0),0)}
+                  </td>
+                  <td colSpan={cols.length} style={{padding:'8px 12px'}}/>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>);
+      })()}
+    </div>}
+
+    {/* ── Edit Tab ── */}
+    {activeView==='edit'&&<div>
     <div className="card card-p" style={{marginBottom:'1rem'}}>
       <Alrt t="error" msg={err}/>
       <div style={{display:'flex',gap:'.625rem',flexWrap:'wrap',alignItems:'center'}}>
@@ -2295,6 +2503,7 @@ function EvalPlanPage({course}){
         <div style={{fontSize:'.855rem'}}>Click "Generate CIE+SEE Plan" to create your plan, then edit it here with AI assistance.</div>
       </div>
     }
+    </div>}
   </div>);
 }
 
@@ -3151,53 +3360,100 @@ function MarksPage({course}){
       </div>
     </div>}
 
-    {/* ── Current Marks Tab ── */}
+    {/* ── Current Marks Tab ── component-first view ── */}
     {tab==='current'&&<div>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
-        <div style={{fontWeight:700,fontSize:'.95rem'}}>📋 Student-wise Marks (Editable)</div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
+        <div style={{fontWeight:700,fontSize:'.95rem'}}>📋 Student Marks by Component (Editable)</div>
         <button className="btn btn-outline btn-sm" onClick={fetchCurrentMarks} disabled={currentLoading}>{currentLoading?<><Spin/>Loading…</>:'↺ Refresh'}</button>
+      </div>
+      <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem',padding:'.6rem .875rem',background:'var(--blue3)',borderRadius:8}}>
+        Columns show each evaluation component. Click ✎ Edit to update individual marks.
+        Max marks per component: {Object.entries(maxMarks).map(([k,v])=>`${k}: ${v}M`).join(' · ')||'—'}
       </div>
       <Alrt t="error" msg={currentErr}/><Alrt t="success" msg={currentOk}/>
       {currentLoading?<Skel/>:currentMarks.length===0?
-        <Alrt t="info" msg="No marks uploaded yet. Upload an xlsx or use Manual Entry first."/>:
+        <Alrt t="info" msg="No marks uploaded yet. Use the Upload tab to upload your marks file."/>:
         (()=>{
-          // Collect all COs and components from first record
-          const allCOs=Object.keys(currentMarks[0]?.marks||{});
-          const allComps=[...new Set(currentMarks.flatMap(r=>allCOs.flatMap(co=>Object.keys(r.marks[co]||{}))))];
+          // Build component-first view: columns = evaluation components + ESE + Total
+          // marks structure: { CO1: { "Quiz": 8, "Unit Test": 7 }, CO2: {...} }
+          // We want: for each student, show total per component summed across all COs
+          const evalComps = components.length ? components : [...new Set(currentMarks.flatMap(r=>Object.values(r.marks||{}).flatMap(co=>Object.keys(co||{}))))];
+          const eseKey = evalComps.find(c=>c.toLowerCase().includes('end')||c.toLowerCase().includes('ese')||c.toLowerCase().includes('sem')) || null;
+          const caComps = evalComps.filter(c=>c!==eseKey);
+          const allDisp = [...caComps, ...(eseKey?[eseKey]:[])] ;
+
+          const getCompTotal=(rec,comp)=>{
+            // Sum across all COs for this component
+            let t=0;
+            Object.values(rec.marks||{}).forEach(coMarks=>{
+              const v=coMarks?.[comp];
+              if(v!==undefined&&v!==null&&v!==''){
+                const n=parseFloat(v);
+                if(!isNaN(n)) t+=n;
+              }
+            });
+            return t||null;
+          };
+
+          const getGrandTotal=(rec)=>{
+            let t=0;
+            allDisp.forEach(comp=>{const v=getCompTotal(rec,comp);if(v)t+=v;});
+            return t;
+          };
+
           return(<div className="tbl-wrap"><table>
             <thead>
               <tr>
-                <th style={{minWidth:100}}>PRN</th>
-                <th style={{minWidth:160}}>Student Name</th>
-                {allCOs.map(co=>(
-                  <th key={co} colSpan={allComps.length} style={{textAlign:'center',background:'var(--blue3)',color:'var(--blue2)'}}>{co}</th>
+                <th style={{minWidth:40,textAlign:'center'}}>#</th>
+                <th style={{minWidth:110}}>PRN</th>
+                <th style={{minWidth:180}}>Student Name</th>
+                {caComps.map(comp=>(
+                  <th key={comp} style={{textAlign:'center',background:'var(--blue3)',color:'var(--blue2)',whiteSpace:'nowrap',fontSize:'.8rem'}}>
+                    {comp}<div style={{fontWeight:400,fontSize:'.7rem',color:'var(--text3)'}}>/{maxMarks[comp]||'—'}</div>
+                  </th>
                 ))}
+                {eseKey&&<th style={{textAlign:'center',background:'#fef3c7',color:'#92400e',whiteSpace:'nowrap',fontSize:'.8rem'}}>
+                  {eseKey}<div style={{fontWeight:400,fontSize:'.7rem',color:'#b45309'}}>/{maxMarks[eseKey]||60}</div>
+                </th>}
+                <th style={{textAlign:'center',background:'var(--bg2)',fontSize:'.8rem'}}>Total</th>
                 <th style={{textAlign:'center'}}>Actions</th>
               </tr>
-              <tr>
-                <th/><th/>
-                {allCOs.flatMap(co=>allComps.map(comp=>(
-                  <th key={co+comp} style={{textAlign:'center',fontSize:'.74rem',color:'var(--text3)',fontWeight:500}}>{comp}</th>
-                )))}
-                <th/>
-              </tr>
             </thead>
-            <tbody>{currentMarks.map(rec=>{
+            <tbody>{currentMarks.map((rec,idx)=>{
               const isEditing=editingRow===rec.student_id;
               const isSaving=savingRow===rec.student_id;
-              return(<tr key={rec.student_id} style={{background:isEditing?'var(--blue3)':''}}>
-                <td style={{fontFamily:'monospace',fontSize:'.8rem'}}>{rec.student_id}</td>
+              const grandTotal=getGrandTotal(rec);
+              return(<tr key={rec.student_id} style={{background:isEditing?'var(--blue3)':idx%2===0?'var(--bg)':'var(--white)'}}>
+                <td style={{textAlign:'center',color:'var(--text3)',fontSize:'.8rem'}}>{idx+1}</td>
+                <td style={{fontFamily:'monospace',fontSize:'.78rem'}}>{rec.student_id}</td>
                 <td style={{fontSize:'.85rem',fontWeight:isEditing?600:'normal'}}>{rec.student_name}</td>
-                {allCOs.flatMap(co=>allComps.map(comp=>{
-                  const val=isEditing?(editBuf[co]?.[comp]??''):(rec.marks[co]?.[comp]??'—');
-                  return(<td key={co+comp} style={{textAlign:'center'}}>
+                {allDisp.map(comp=>{
+                  const totVal=getCompTotal(rec,comp);
+                  const displayVal=totVal!==null?totVal:'—';
+                  const isEse=comp===eseKey;
+                  return(<td key={comp} style={{textAlign:'center',background:isEditing?(isEse?'#fef9c3':'var(--blue3)'):''}}>
                     {isEditing?
-                      <input type="number" min="0" value={editBuf[co]?.[comp]??''} style={{width:52,textAlign:'center',border:'1px solid var(--blue2)',borderRadius:5,padding:'2px 4px',fontSize:'.82rem'}}
-                        onChange={e=>{const v=e.target.value;setEditBuf(b=>{const nb=JSON.parse(JSON.stringify(b));if(!nb[co])nb[co]={};nb[co][comp]=v===''?'':parseFloat(v)||0;return nb;});}}/>
-                      :<span style={{fontSize:'.83rem',color:val==='—'?'var(--text3)':'var(--text)'}}>{val}</span>
+                      <input type="number" min="0" max={maxMarks[comp]||999}
+                        value={editBuf?.[Object.keys(rec.marks||{})[0]]?.[comp]??totVal??''}
+                        style={{width:60,textAlign:'center',border:'1px solid '+(isEse?'#f59e0b':'var(--blue2)'),borderRadius:5,padding:'2px 4px',fontSize:'.82rem'}}
+                        onChange={e=>{
+                          const v=e.target.value;
+                          setEditBuf(b=>{
+                            const nb=JSON.parse(JSON.stringify(b));
+                            // Update the value in the first CO key (or whichever has this comp)
+                            const coKeys=Object.keys(rec.marks||{});
+                            coKeys.forEach(co=>{if(rec.marks[co]?.[comp]!==undefined){if(!nb[co])nb[co]={};nb[co][comp]=v===''?'':parseFloat(v)||0;}});
+                            if(!coKeys.some(co=>rec.marks[co]?.[comp]!==undefined)){
+                              const fco=coKeys[0]||'CO1';if(!nb[fco])nb[fco]={};nb[fco][comp]=v===''?'':parseFloat(v)||0;
+                            }
+                            return nb;
+                          });
+                        }}/>
+                      :<span style={{fontSize:'.85rem',fontWeight:600,color:displayVal==='—'?'var(--text3)':isEse?'#92400e':'var(--text)'}}>{displayVal}</span>
                     }
                   </td>);
-                }))}
+                })}
+                <td style={{textAlign:'center',fontWeight:700,background:'var(--bg2)',fontSize:'.85rem',color:grandTotal>0?'var(--green)':'var(--text3)'}}>{grandTotal||'—'}</td>
                 <td style={{textAlign:'center',whiteSpace:'nowrap'}}>
                   {isEditing?(<>
                     <button className="btn btn-primary btn-sm" onClick={()=>saveEdit(rec)} disabled={isSaving} style={{marginRight:4,fontSize:'.75rem'}}>
@@ -3682,7 +3938,17 @@ function MasterAttainmentPage({course}){
       course_name:course.course_name||'',course_code:course.course_code||'',
       semester:course.semester||'',credits:course.credits||'',faculty_name:course.faculty_name||'',
     });
-    setCoList((course.cos||[]).map(c=>({...c,target:60})));
+    const normBloom=(b)=>{
+      if(!b)return'L2';
+      const bmap={'Remember':'L1','Remembering':'L1','Knowledge':'L1','L1':'L1',
+        'Understand':'L2','Understanding':'L2','Comprehension':'L2','L2':'L2',
+        'Apply':'L3','Applying':'L3','Application':'L3','L3':'L3',
+        'Analyse':'L4','Analyze':'L4','Analysing':'L4','Analyzing':'L4','Analysis':'L4','L4':'L4',
+        'Evaluate':'L5','Evaluating':'L5','Evaluation':'L5','Synthesis':'L5','L5':'L5',
+        'Create':'L6','Creating':'L6','Design':'L6','L6':'L6'};
+      return bmap[b]||('L'+(parseInt(String(b).replace('L',''))||2));
+    };
+    setCoList((course.cos||[]).map(c=>({...c,target:60,bloom_level:normBloom(c.bloom_level)})));
     setPoList(course.pos||[]);
     setCoPoMatrix(course.co_po_matrix||{});
     const comps=course.evaluation_config?.components||{};
@@ -3760,7 +4026,109 @@ function MasterAttainmentPage({course}){
     setLoading(false);
   };
 
+  // ── Bulk upload state ──
+  const [bulkQpFile,setBulkQpFile]=React.useState(null);
+  const [bulkMarksFile,setBulkMarksFile]=React.useState(null);
+  const [bulkQpLoading,setBulkQpLoading]=React.useState(false);
+  const [bulkMarksLoading,setBulkMarksLoading]=React.useState(false);
+  const [bulkQpOk,setBulkQpOk]=React.useState('');
+  const [bulkMarksOk,setBulkMarksOk]=React.useState('');
+  const [bulkQpErr,setBulkQpErr]=React.useState('');
+  const [bulkMarksErr,setBulkMarksErr]=React.useState('');
+
+  const uploadBulkQP=()=>{
+    if(!bulkQpFile||!course){setBulkQpErr('Select a file first.');return;}
+    setBulkQpLoading(true);setBulkQpErr('');setBulkQpOk('');
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        if(typeof XLSX==='undefined'){
+          setBulkQpErr('Bulk parse unavailable. Upload QPs tab by tab using the Upload button in each CA tab.');
+          setBulkQpLoading(false);return;
+        }
+        const wb=XLSX.read(ev.target.result,{type:'array'});
+        let matched=0;
+        wb.SheetNames.forEach(sheetName=>{
+          const target=caNames.find(ca=>sheetName.toLowerCase().includes(ca.toLowerCase())||ca.toLowerCase().includes(sheetName.toLowerCase()));
+          if(!target)return;
+          const ws=wb.Sheets[sheetName];
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('question')||String(c).toLowerCase().includes('q no')));
+          if(hdrIdx<0)hdrIdx=0;
+          const hdrRow=rows[hdrIdx];
+          const qIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('question'));
+          const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark'));
+          const coIdx=hdrRow.findIndex(h=>String(h).toLowerCase().trim()==='co');
+          const blIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('bloom'));
+          const qs=[];
+          rows.slice(hdrIdx+1).forEach((row,ri)=>{
+            const qtxt=qIdx>=0?String(row[qIdx]||'').trim():'';
+            const qm=mIdx>=0?parseFloat(row[mIdx])||0:0;
+            if(!qtxt&&!qm)return;
+            const qco=coIdx>=0?String(row[coIdx]||coList[0]?.co_id||'CO1').trim():(coList[0]?.co_id||'CO1');
+            const rawBl=blIdx>=0?String(row[blIdx]||'L2').trim():'L2';
+            const qbl=rawBl.startsWith('L')?rawBl.split(' ')[0]:'L2';
+            qs.push({q_no:ri+1,question_text:qtxt,marks:qm,co_id:qco,bloom_level:qbl});
+          });
+          if(qs.length>0){setCaSheets(prev=>({...prev,[target]:{...prev[target],qp:qs}}));matched++;}
+        });
+        setBulkQpOk('Distributed QPs to '+matched+' component tab(s). Check each CA tab to verify.');
+      }catch(ex){setBulkQpErr('Parse error: '+ex.message);}
+      setBulkQpLoading(false);
+    };
+    reader.readAsArrayBuffer(bulkQpFile);
+  };
+
+  const uploadBulkMarks=()=>{
+    if(!bulkMarksFile||!course){setBulkMarksErr('Select a file first.');return;}
+    setBulkMarksLoading(true);setBulkMarksErr('');setBulkMarksOk('');
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        if(typeof XLSX==='undefined'){
+          setBulkMarksErr('Bulk parse unavailable. Use sidebar Upload Marks page instead.');
+          setBulkMarksLoading(false);return;
+        }
+        const wb=XLSX.read(ev.target.result,{type:'array'});
+        let matched=0;
+        wb.SheetNames.forEach(sheetName=>{
+          const target=caNames.find(ca=>sheetName.toLowerCase().includes(ca.toLowerCase())||ca.toLowerCase().includes(sheetName.toLowerCase()));
+          if(!target)return;
+          const ws=wb.Sheets[sheetName];
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().includes('roll')));
+          if(hdrIdx<0)hdrIdx=0;
+          const hdrRow=rows[hdrIdx];
+          const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().includes('roll'));
+          const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark')||String(h).toLowerCase().includes('total'));
+          if(prnIdx<0)return;
+          const qp=caSheets[target]?.qp||[];
+          const newMarks={};
+          rows.slice(hdrIdx+1).forEach(row=>{
+            const prn=String(row[prnIdx]||'').trim();
+            if(!prn||prn.length<8||isNaN(Number(prn)))return;
+            const totalMark=mIdx>=0?parseFloat(row[mIdx])||0:0;
+            if(qp.length>0&&totalMark>0){
+              const totalQMax=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+              const sm={};
+              qp.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*10)/10;});
+              newMarks[prn]=sm;
+            }else{newMarks[prn]={1:totalMark};}
+          });
+          if(Object.keys(newMarks).length>0){
+            setCaSheets(prev=>({...prev,[target]:{...prev[target],marks:{...prev[target]?.marks,...newMarks}}}));
+            matched++;
+          }
+        });
+        setBulkMarksOk('Marks loaded into '+matched+' component tab(s). CO Attainment tab will update automatically.');
+      }catch(ex){setBulkMarksErr('Parse error: '+ex.message);}
+      setBulkMarksLoading(false);
+    };
+    reader.readAsArrayBuffer(bulkMarksFile);
+  };
+
   const tabs=[
+    {id:'bulk_upload',label:'📦 Bulk Upload'},
     {id:'course_info',label:'📋 Course Info'},{id:'co_list',label:'🎯 CO List'},{id:'roll_list',label:'👥 Roll List'},
     ...caNames.map(ca=>({id:'ca_'+ca,label:'📝 '+ca})),
     {id:'ese',label:'📄 ESE'},{id:'final_attn',label:'📊 CO Attainment'},{id:'po_attn',label:'🔗 PO Attainment'},
@@ -3827,9 +4195,9 @@ function MasterAttainmentPage({course}){
                 <TD center><EditCell value={co.co_id} onChange={v=>setCoList(p=>p.map((c,j)=>j===i?{...c,co_id:v}:c))} small/></TD>
                 <TD><EditCell value={co.statement} onChange={v=>setCoList(p=>p.map((c,j)=>j===i?{...c,statement:v}:c))}/></TD>
                 <TD center>
-                  <select value={co.bloom_level||'L1'} onChange={e=>setCoList(p=>p.map((c,j)=>j===i?{...c,bloom_level:e.target.value}:c))}
-                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px'}}>
-                    {['L1','L2','L3','L4','L5','L6'].map(l=><option key={l}>{l}</option>)}
+                  <select value={co.bloom_level||'L2'} onChange={e=>{const v=e.target.value;setCoList(p=>p.map((c,j)=>j===i?{...c,bloom_level:v}:c));}}
+                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',minWidth:130}}>
+                    {[['L1','Remember'],['L2','Understand'],['L3','Apply'],['L4','Analyse'],['L5','Evaluate'],['L6','Create']].map(([l,n])=><option key={l} value={l}>{l} – {n}</option>)}
                   </select>
                 </TD>
                 <TD center><EditCell value={co.target??60} type="number" onChange={v=>setCoList(p=>p.map((c,j)=>j===i?{...c,target:v}:c))} small/></TD>
@@ -3879,20 +4247,25 @@ function MasterAttainmentPage({course}){
     const marks=sheet.marks||{};
     const fileRef=React.createRef();
     // Bloom auto-map from CO: use the CO's bloom_level if available
+    const BLOOM_LABELS=[['L1','Remember'],['L2','Understand'],['L3','Apply'],['L4','Analyse'],['L5','Evaluate'],['L6','Create']];
     const coBloom=(co_id)=>{
       const co=coList.find(c=>c.co_id===co_id);
-      if(!co||!co.bloom_level) return 1;
-      const lvlMap={'Remember':1,'Remembering':1,'L1':1,'Knowledge':1,
-        'Understand':2,'Understanding':2,'L2':2,'Comprehension':2,
-        'Apply':3,'Applying':3,'L3':3,'Application':3,
-        'Analyse':4,'Analyze':4,'Analysing':4,'Analyzing':4,'L4':4,'Analysis':4,
-        'Evaluate':5,'Evaluating':5,'L5':5,'Evaluation':5,'Synthesis':5,
-        'Create':6,'Creating':6,'L6':6,'Design':6};
-      return lvlMap[co.bloom_level]||parseInt(String(co.bloom_level).replace('L',''))||1;
+      if(!co||!co.bloom_level) return 'L2';
+      // bloom_level is already normalized to Lx by normBloom on load
+      const bl=String(co.bloom_level);
+      if(bl.startsWith('L')) return bl;
+      const lvlMap={'Remember':'L1','Remembering':'L1','Knowledge':'L1',
+        'Understand':'L2','Understanding':'L2','Comprehension':'L2',
+        'Apply':'L3','Applying':'L3','Application':'L3',
+        'Analyse':'L4','Analyze':'L4','Analysing':'L4','Analyzing':'L4','Analysis':'L4',
+        'Evaluate':'L5','Evaluating':'L5','Evaluation':'L5','Synthesis':'L5',
+        'Create':'L6','Creating':'L6','Design':'L6'};
+      return lvlMap[bl]||('L'+(parseInt(bl)||2));
     };
     const addQ=()=>{
       const defaultCO=coList[0]?.co_id||'CO1';
-      setCaSheets(p=>({...p,[ca]:{...p[ca],qp:[...qp,{q_no:qp.length+1,question_text:'',marks:5,co_id:defaultCO,bloom_level:coBloom(defaultCO)}]}}));
+      const newBloom=coBloom(defaultCO);
+      setCaSheets(p=>({...p,[ca]:{...p[ca],qp:[...qp,{q_no:qp.length+1,question_text:'',marks:5,co_id:defaultCO,bloom_level:newBloom}]}}));
     };
     const updQ=(i,field,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.map((q,j)=>j===i?{...q,[field]:val}:q)}}));
     const delQ=(i)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.filter((_,j)=>j!==i)}}));
@@ -3926,9 +4299,9 @@ function MasterAttainmentPage({course}){
                     </select>
                   </TD>
                   <TD center>
-                    <select value={q.bloom_level||1} onChange={e=>updQ(i,'bloom_level',parseInt(e.target.value))}
+                    <select value={q.bloom_level||'L2'} onChange={e=>updQ(i,'bloom_level',e.target.value)}
                       style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',width:'100%'}}>
-                      {[1,2,3,4,5,6].map(l=><option key={l} value={l}>L{l}</option>)}
+                      {BLOOM_LABELS.map(([l,n])=><option key={l} value={l}>{l} – {n}</option>)}
                     </select>
                   </TD>
                   <TD center><span onClick={()=>delQ(i)} style={{cursor:'pointer',color:'var(--red)'}}>×</span></TD>
@@ -4021,9 +4394,9 @@ function MasterAttainmentPage({course}){
                   </select>
                 </TD>
                 <TD center>
-                  <select value={q.bloom_level} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,bloom_level:parseInt(e.target.value)}:x))}
+                  <select value={q.bloom_level||'L2'} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,bloom_level:e.target.value}:x))}
                     style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px'}}>
-                    {[1,2,3,4,5,6].map(l=><option key={l} value={l}>L{l}</option>)}
+                    {[['L1','Remember'],['L2','Understand'],['L3','Apply'],['L4','Analyse'],['L5','Evaluate'],['L6','Create']].map(([l,n])=><option key={l} value={l}>{l} – {n}</option>)}
                   </select>
                 </TD>
                 <TD center><span onClick={()=>setEseQP(p=>p.filter((_,j)=>j!==i))} style={{cursor:'pointer',color:'var(--red)'}}>×</span></TD>
@@ -4188,7 +4561,56 @@ function MasterAttainmentPage({course}){
     );
   };
 
-  const tabContent={course_info:renderCourseInfo(),co_list:renderCOList(),roll_list:renderRollList(),ese:renderESE(),final_attn:renderFinalAttn(),po_attn:renderPOAttn()};
+  const renderBulkUpload=()=>(
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem'}}>
+      <div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.75rem'}}>📄 Upload All Question Papers</div>
+        <div style={{background:'var(--blue3)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem',lineHeight:1.7}}>
+          Upload a single xlsx with <strong>one sheet per component</strong> (sheet names must match component names: Case Study, Quiz, Unit Test, etc.).
+          Each sheet: Question, Marks, CO, Bloom Level columns. Auto-distributed to the right CA tabs.
+        </div>
+        <div onClick={()=>document.getElementById('bulk-qp-input').click()}
+          style={{border:'2px dashed '+(bulkQpFile?'var(--green)':'var(--border)'),borderRadius:10,padding:'1.5rem',
+            textAlign:'center',cursor:'pointer',background:bulkQpFile?'#f0fdf4':'var(--bg)',marginBottom:'.875rem'}}>
+          <div style={{fontSize:'1.8rem',marginBottom:'.4rem'}}>{bulkQpFile?'✅':'📊'}</div>
+          <div style={{fontWeight:600,color:bulkQpFile?'var(--green)':'var(--text)',fontSize:'.85rem'}}>{bulkQpFile?bulkQpFile.name:'Click to select Question Papers xlsx'}</div>
+          <div style={{fontSize:'.74rem',color:'var(--text2)',marginTop:'.2rem'}}>{bulkQpFile?'Ready to upload':'.xlsx files only'}</div>
+        </div>
+        <input id="bulk-qp-input" type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>{if(e.target.files[0])setBulkQpFile(e.target.files[0]);}}/>
+        {bulkQpErr&&<div style={{color:'var(--red)',fontSize:'.8rem',marginBottom:'.5rem'}}>{bulkQpErr}</div>}
+        {bulkQpOk&&<div style={{color:'var(--green)',fontSize:'.8rem',marginBottom:'.5rem'}}>✓ {bulkQpOk}</div>}
+        <button className="btn btn-primary" onClick={uploadBulkQP} disabled={bulkQpLoading||!bulkQpFile} style={{width:'100%'}}>
+          {bulkQpLoading?React.createElement(Spin,null):null}{bulkQpLoading?'Parsing…':'📤 Upload & Distribute QPs'}
+        </button>
+      </div>
+      <div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.75rem'}}>✏️ Upload All Marks</div>
+        <div style={{background:'var(--amber2)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'#92400e',marginBottom:'1rem',lineHeight:1.7,border:'1px solid var(--amber)'}}>
+          Upload marks xlsx with <strong>one sheet per component</strong>. Columns: PRN/Roll No, Student Name, Marks (Total).
+          If QPs are loaded first, marks will be distributed across questions proportionally.
+          <br/><strong>Tip: Upload QPs first, then marks.</strong>
+        </div>
+        <div onClick={()=>document.getElementById('bulk-marks-input').click()}
+          style={{border:'2px dashed '+(bulkMarksFile?'var(--green)':'var(--border)'),borderRadius:10,padding:'1.5rem',
+            textAlign:'center',cursor:'pointer',background:bulkMarksFile?'#f0fdf4':'var(--bg)',marginBottom:'.875rem'}}>
+          <div style={{fontSize:'1.8rem',marginBottom:'.4rem'}}>{bulkMarksFile?'✅':'✏️'}</div>
+          <div style={{fontWeight:600,color:bulkMarksFile?'var(--green)':'var(--text)',fontSize:'.85rem'}}>{bulkMarksFile?bulkMarksFile.name:'Click to select Marks xlsx'}</div>
+          <div style={{fontSize:'.74rem',color:'var(--text2)',marginTop:'.2rem'}}>{bulkMarksFile?'Ready to upload':'.xlsx files only'}</div>
+        </div>
+        <input id="bulk-marks-input" type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>{if(e.target.files[0])setBulkMarksFile(e.target.files[0]);}}/>
+        {bulkMarksErr&&<div style={{color:'var(--red)',fontSize:'.8rem',marginBottom:'.5rem'}}>{bulkMarksErr}</div>}
+        {bulkMarksOk&&<div style={{color:'var(--green)',fontSize:'.8rem',marginBottom:'.5rem'}}>✓ {bulkMarksOk}</div>}
+        <button className="btn btn-primary" onClick={uploadBulkMarks} disabled={bulkMarksLoading||!bulkMarksFile} style={{width:'100%',background:'#d97706',borderColor:'#d97706'}}>
+          {bulkMarksLoading?React.createElement(Spin,null):null}{bulkMarksLoading?'Parsing…':'📤 Upload & Distribute Marks'}
+        </button>
+      </div>
+      <div style={{gridColumn:'1/-1',background:'var(--bg2)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)'}}>
+        💡 <strong>Tab-by-tab upload also available:</strong> Go to any CA tab (e.g. 📝 Quiz) and use the "⬆ Upload Question Paper" button there, or enter marks directly in the marks grid.
+      </div>
+    </div>
+  );
+
+  const tabContent={bulk_upload:renderBulkUpload(),course_info:renderCourseInfo(),co_list:renderCOList(),roll_list:renderRollList(),ese:renderESE(),final_attn:renderFinalAttn(),po_attn:renderPOAttn()};
   caNames.forEach(ca=>{tabContent['ca_'+ca]=renderCASheet(ca);});
 
   return(

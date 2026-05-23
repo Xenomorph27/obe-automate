@@ -69,6 +69,21 @@ async def download_session_plan(course_id: int, current_user: User = Depends(req
     )
 
 
+
+
+@router.get("/view/{course_id}")
+async def view_session_plan(course_id: int, current_user: User = Depends(require_auth)):
+    """Return saved session plan rows as JSON for on-screen preview."""
+    import json, os
+    # Try the edited JSON first, then fall back to generating from the docx metadata
+    json_path = os.path.join("generated_docs", "session_plans", f"session_plan_{course_id}_edited.json")
+    if os.path.exists(json_path):
+        with open(json_path) as jf:
+            data = json.load(jf)
+        return {"data": data.get("rows", data) if isinstance(data, dict) else data}
+    # No saved JSON — return empty so frontend shows "generate first"
+    raise HTTPException(status_code=404, detail="No session plan found. Generate first.")
+
 @router.post("/save/{course_id}", status_code=200)
 async def save_session_plan(
     course_id: int,
