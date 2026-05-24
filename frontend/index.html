@@ -4035,16 +4035,32 @@ function MasterAttainmentPage({course}){
     setCoList((course.cos||[]).map(c=>({...c,target:60,bloom_level:normBloom(c.bloom_level)})));
     setPoList(course.pos||[]);
     setCoPoMatrix(course.co_po_matrix||{});
-    const comps=course.evaluation_config?.components||{};
-    const caList=Object.keys(comps).length?Object.keys(comps):['CA1','CA2','CA3'];
-    setCaNames(caList);
-    const sheets={};caList.forEach(ca=>{sheets[ca]={qp:[],marks:{}};});
-    // Load persisted sheets from server
-    fetch(API+'/co-po-template/load-all-sheets/'+course.id,{headers:hdrForm()})
-      .then(r=>r.json()).then(d=>{
+    // Load CA names from evaluation plan (matches real component names like "Quiz 1", "Unit Test 1", etc.)
+    const loadCaNamesAndSheets=async()=>{
+      let caList=[];
+      try{
+        const epData=await fetch(API+'/evaluation-plan/view/'+course.id,{headers:hdrForm()}).then(r=>r.json());
+        const rows=epData.data||epData.rows||epData||[];
+        const ESE_KEYWORDS=['end semester','ese','end-semester','final exam'];
+        const isEse=(name)=>ESE_KEYWORDS.some(k=>name.toLowerCase().includes(k));
+        caList=(Array.isArray(rows)?rows:[])
+          .map(r=>r.component||r.comp||r.name||'')
+          .filter(name=>name&&!isEse(name));
+      }catch(e){}
+      // Fallback to evaluation_config components if eval plan not available
+      if(!caList.length){
+        const comps=course.evaluation_config?.components||{};
+        const compKeys=Object.keys(comps).filter(k=>!['end semester','ese'].some(kw=>k.toLowerCase().includes(kw)));
+        caList=compKeys.length?compKeys:['CA1','CA2','CA3'];
+      }
+      setCaNames(caList);
+      const sheets={};caList.forEach(ca=>{sheets[ca]={qp:[],marks:{}};});
+      // Load persisted sheets from server
+      try{
+        const d=await fetch(API+'/co-po-template/load-all-sheets/'+course.id,{headers:hdrForm()}).then(r=>r.json());
         if(d.sheets&&Object.keys(d.sheets).length>0){
           setCaSheets(prev=>{
-            const merged={...prev};
+            const merged={...sheets};
             Object.entries(d.sheets).forEach(([ca,data])=>{
               merged[ca]={qp:data.qp||[],marks:data.marks||{}};
             });
@@ -4053,7 +4069,9 @@ function MasterAttainmentPage({course}){
         } else {
           setCaSheets(sheets);
         }
-      }).catch(()=>setCaSheets(sheets));
+      }catch(e){setCaSheets(sheets);}
+    };
+    loadCaNamesAndSheets();
     fetch(API+'/students/'+course.id,{headers:hdrForm()})
       .then(r=>r.json()).then(d=>{if(d.data)setStudents(d.data);}).catch(()=>{});
   },[course?.id]);
@@ -4079,6 +4097,23 @@ function MasterAttainmentPage({course}){
     });
     setFinalAttn(attn);
   },[caSheets,students,coList,caNames]);
+
+  // Auto-save caSheets to server whenever they change (debounced 1.5s per CA)
+  React.useEffect(()=>{
+    if(!course||!Object.keys(caSheets).length)return;
+    Object.entries(caSheets).forEach(([ca,data])=>{
+      if(autoSaveTimers.current[ca]) clearTimeout(autoSaveTimers.current[ca]);
+      autoSaveTimers.current[ca]=setTimeout(async()=>{
+        try{
+          await fetch(API+'/co-po-template/save-sheet/'+course.id+'/'+encodeURIComponent(ca),{
+            method:'POST',
+            headers:{...hdr(),'Content-Type':'application/json'},
+            body:JSON.stringify({qp:data.qp||[],marks:data.marks||{}})
+          });
+        }catch(e){}
+      },1500);
+    });
+  },[caSheets,course?.id]);
 
   const generate=async()=>{
     if(!course){setErr('Select a course first.');return;}
@@ -4129,6 +4164,7 @@ function MasterAttainmentPage({course}){
   const caMarksRefs=React.useRef({});
   const eseQpRef=React.useRef(null);
   const eseMarksRef=React.useRef(null);
+  const autoSaveTimers=React.useRef({});
   // Ensure a ref exists for each CA
   caNames.forEach(ca=>{
     if(!caQpRefs.current[ca]) caQpRefs.current[ca]=React.createRef();
@@ -4613,7 +4649,7 @@ function MasterAttainmentPage({course}){
           body:JSON.stringify({qp,marks})
         });
         if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||'Save failed');}
-        setOk(`✓ ${ca} saved. Data will reload after navigation.`);
+        setOk(`✓ ${ca} saved successfully.`);
       }catch(e){
         setOk(`✓ ${ca} changes saved locally. Click Generate Excel to include in final file.`);
       }
