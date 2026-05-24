@@ -3231,6 +3231,12 @@ function MarksPage({course}){
   const [students,setStudents]=useState([]);const [fetching,setFetching]=useState(false);
   // manual entry state
   const [manualStudents,setManualStudents]=useState([]);const [saving,setSaving]=useState(false);
+  // eval-plan-driven marks grid state
+  const [evalPlanComps,setEvalPlanComps]=useState([]);const [evalPlanLoading,setEvalPlanLoading]=useState(false);
+  const [marksGrid,setMarksGrid]=useState({});// {prn: {compName: value}}
+  const [gridStudents,setGridStudents]=useState([]);// [{prn,name,section}]
+  const [gridSaving,setGridSaving]=useState(false);const [gridOk,setGridOk]=useState('');const [gridErr,setGridErr]=useState('');
+  const [sectionFilter,setSectionFilter]=useState('All');
   // current marks state
   const [currentMarks,setCurrentMarks]=useState([]);const [currentLoading,setCurrentLoading]=useState(false);
   const [currentErr,setCurrentErr]=useState('');const [currentOk,setCurrentOk]=useState('');
@@ -3266,6 +3272,68 @@ function MarksPage({course}){
     }
     setCurrentLoading(false);
   };
+
+  // Fetch eval plan component names (excluding ESE)
+  const fetchEvalPlanComps=async()=>{
+    if(!course)return;
+    setEvalPlanLoading(true);
+    try{
+      const d=await api(`/evaluation-plan/view/${course.id}`);
+      const rows=d.data||d.rows||d||[];
+      const ESE_KW=['end semester','ese','end-semester','final exam'];
+      const isEse=(n)=>ESE_KW.some(k=>n.toLowerCase().includes(k));
+      const comps=(Array.isArray(rows)?rows:[])
+        .map(r=>({name:r.component||r.comp||r.name||'',marks:r.marks||r.total_marks||''}))
+        .filter(c=>c.name&&!isEse(c.name));
+      setEvalPlanComps(comps);
+    }catch(e){setEvalPlanComps([]);}
+    setEvalPlanLoading(false);
+  };
+
+  // Fetch students for grid
+  const fetchGridStudents=async()=>{
+    if(!course)return;
+    try{
+      const d=await api(`/students/${course.id}`);
+      const rows=(d.data||[]).map(s=>({prn:s.prn||s.student_id||s.id,name:s.name||s.student_name||'',section:s.section||''}));
+      setGridStudents(rows);
+      // Load existing marks into grid
+      try{
+        const md=await api(`/attainment/marks/${course.id}`);
+        const existing={};
+        (md.data||[]).forEach(rec=>{
+          const prn=rec.student_id;
+          existing[prn]={};
+          const m=rec.marks||{};
+          // marks can be flat {comp:val} or co-wise {CO1:{comp:val}}
+          const firstVal=Object.values(m)[0];
+          if(firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object'){
+            Object.assign(existing[prn],m);
+          } else {
+            Object.values(m).forEach(coM=>{if(coM&&typeof coM==='object')Object.assign(existing[prn],coM);});
+          }
+        });
+        setMarksGrid(existing);
+      }catch(e){}
+    }catch(e){}
+  };
+
+  const saveGrid=async()=>{
+    if(!course){setGridErr('No course selected.');return;}
+    setGridSaving(true);setGridErr('');setGridOk('');
+    try{
+      const students=gridStudents.map(s=>({
+        student_id:s.prn,student_name:s.name,
+        marks:marksGrid[s.prn]||{}
+      }));
+      await api(`/attainment/marks/${course.id}`,{method:'POST',body:JSON.stringify({students})});
+      setGridOk('✓ Marks saved successfully.');
+      setTimeout(()=>setGridOk(''),3000);
+    }catch(e){setGridErr(e.message);}
+    setGridSaving(false);
+  };
+
+  const updateCell=(prn,comp,val)=>setMarksGrid(prev=>({...prev,[prn]:{...(prev[prn]||{}),[comp]:val}}));
 
   const startEdit=(rec)=>{setEditingRow(rec.student_id);setEditBuf(JSON.parse(JSON.stringify(rec.marks)));};
   const cancelEdit=()=>{setEditingRow(null);setEditBuf({});};
@@ -3347,13 +3415,14 @@ function MarksPage({course}){
 
   useEffect(()=>{if(tab==='summary')fetchMarksPreview();},[tab,course]);
   useEffect(()=>{if(tab==='current')fetchCurrentMarks();},[tab,course]);
+  useEffect(()=>{if(tab==='manual'){fetchEvalPlanComps();fetchGridStudents();}},[tab,course?.id]);
 
   return(<div className="page-body fade-up">
     <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.25rem'}}>Upload Student Marks</div>
     {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
 
     <div className="tabs" style={{marginBottom:'1.25rem'}}>
-      {[['upload','📤 Upload xlsx'],['manual','✏️ Manual Entry'],['current','📋 Current Marks'],['summary','📊 CO Summary']].map(([t,l])=>(
+      {[['upload','📤 Upload xlsx'],['manual','✏️ Marks Sheet'],['current','📋 Current Marks'],['summary','📊 CO Summary']].map(([t,l])=>(
         <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{l}</div>
       ))}
     </div>
@@ -3392,37 +3461,132 @@ function MarksPage({course}){
       </div>
     </div>}
 
-    {/* ── Manual Entry Tab ── */}
-    {tab==='manual'&&<div>
-      <div className="card card-p" style={{marginBottom:'1rem'}}>
-        <div style={{fontWeight:700,marginBottom:'.5rem',fontSize:'.9rem'}}>✏️ Enter Class-Average Marks per CO</div>
-        <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem'}}>
-          Enter the average marks scored by the class for each CO and evaluation component. This is useful when you have aggregate data rather than individual student marks.
+    {/* ── Manual Entry Tab — Student Marks Grid ── */}
+    {tab==='manual'&&(()=>{
+      const sections=['All',...[...new Set(gridStudents.map(s=>s.section).filter(Boolean))].sort()];
+      const filtered=sectionFilter==='All'?gridStudents:gridStudents.filter(s=>s.section===sectionFilter);
+      const filled=evalPlanComps.length>0&&filtered.length>0
+        ?Math.round(filtered.filter(s=>evalPlanComps.some(c=>marksGrid[s.prn]?.[c.name]!==undefined&&marksGrid[s.prn]?.[c.name]!=='')).length/filtered.length*100)
+        :0;
+      return(<div>
+        {/* Header bar */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem',flexWrap:'wrap',gap:'.75rem'}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:'.95rem'}}>✏️ Student Marks Sheet</div>
+            <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:2}}>
+              Fill in marks as assessments are completed. Changes auto-populate — click Save when done.
+            </div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:'.5rem',flexWrap:'wrap'}}>
+            {/* Section filter pills */}
+            {sections.length>1&&sections.map(s=>(
+              <button key={s} onClick={()=>setSectionFilter(s)}
+                className={`btn btn-sm ${sectionFilter===s?'btn-primary':'btn-outline'}`}
+                style={{minWidth:36}}>{s}</button>
+            ))}
+            <button className="btn btn-primary btn-sm" onClick={saveGrid} disabled={gridSaving||!course}>
+              {gridSaving?<><Spin/>Saving…</>:'💾 Save Marks'}
+            </button>
+          </div>
         </div>
-        {cos.length===0?<Alrt t="warning" msg="No COs found for this course. Complete Course Setup first."/>:
-        <div className="tbl-wrap"><table>
-          <thead><tr><th>CO</th><th style={{fontSize:'.78rem',maxWidth:200}}>Statement</th>
-            {components.map(c=><th key={c} style={{textAlign:'center'}}>{c}<div style={{fontSize:'.7rem',color:'var(--text3)',fontWeight:400}}>/{maxMarks[c]||10}</div></th>)}
-          </tr></thead>
-          <tbody>{(manualStudents.length?manualStudents:cos.map(co=>({co_id:co.co_id,...Object.fromEntries(components.map(c=>[c,'']))}))).map((row,i)=>(
-            <tr key={row.co_id}>
-              <td><strong style={{color:'var(--blue2)'}}>{row.co_id}</strong></td>
-              <td style={{fontSize:'.78rem',color:'var(--text2)',maxWidth:200}}>{cos.find(c=>c.co_id===row.co_id)?.statement||''}</td>
-              {components.map(c=>(
-                <td key={c} style={{textAlign:'center'}}>
-                  <input type="number" min="0" max={maxMarks[c]||100} value={row[c]||''} style={{width:60,textAlign:'center',border:'1px solid var(--border)',borderRadius:6,padding:'4px',fontSize:'.855rem'}}
-                    onChange={e=>{const nr=[...(manualStudents.length?manualStudents:cos.map(co=>({co_id:co.co_id,...Object.fromEntries(components.map(c=>[c,'']))})))];nr[i]={...nr[i],[c]:e.target.value};setManualStudents(nr);}}/>
+
+        {/* Progress bar */}
+        {evalPlanComps.length>0&&filtered.length>0&&<div style={{marginBottom:'1rem'}}>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:'.75rem',color:'var(--text2)',marginBottom:3}}>
+            <span>Fill progress</span><span>{filled}% of students have at least one mark</span>
+          </div>
+          <div style={{height:6,background:'var(--border)',borderRadius:99,overflow:'hidden'}}>
+            <div style={{height:'100%',width:filled+'%',background:'var(--green1,#16a34a)',borderRadius:99,transition:'width .4s'}}/>
+          </div>
+        </div>}
+
+        <Alrt t="error" msg={gridErr}/><Alrt t="success" msg={gridOk}/>
+
+        {!course&&<Alrt t="warning" msg="Select a course first."/>}
+        {course&&evalPlanLoading&&<Skel/>}
+        {course&&!evalPlanLoading&&evalPlanComps.length===0&&
+          <Alrt t="info" msg="No evaluation plan found. Please generate an Evaluation Plan first, then come back here."/>}
+        {course&&!evalPlanLoading&&evalPlanComps.length>0&&gridStudents.length===0&&
+          <Alrt t="warning" msg="No students found. Add students in the Students page first."/>}
+
+        {course&&!evalPlanLoading&&evalPlanComps.length>0&&gridStudents.length>0&&
+        <div className="tbl-wrap">
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.83rem'}}>
+            <thead>
+              <tr style={{background:'var(--bg2)'}}>
+                <th style={{textAlign:'center',width:36,padding:'8px 4px',position:'sticky',left:0,background:'var(--bg2)',zIndex:2}}>#</th>
+                <th style={{minWidth:120,padding:'8px 8px',position:'sticky',left:36,background:'var(--bg2)',zIndex:2,borderRight:'2px solid var(--border)'}}>PRN</th>
+                <th style={{minWidth:180,padding:'8px 8px',position:'sticky',left:156,background:'var(--bg2)',zIndex:2,borderRight:'2px solid var(--border)'}}>Name</th>
+                {sections.length>2&&<th style={{width:70,padding:'8px 6px',textAlign:'center'}}>Section</th>}
+                {evalPlanComps.map(c=>(
+                  <th key={c.name} style={{textAlign:'center',padding:'6px 4px',minWidth:90,whiteSpace:'nowrap'}}>
+                    <div style={{fontWeight:600}}>{c.name}</div>
+                    {c.marks&&<div style={{fontSize:'.7rem',color:'var(--text3)',fontWeight:400}}>/{c.marks} marks</div>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((s,idx)=>{
+                const rowMarks=marksGrid[s.prn]||{};
+                const hasAny=evalPlanComps.some(c=>rowMarks[c.name]!==undefined&&rowMarks[c.name]!=='');
+                return(
+                  <tr key={s.prn} style={{background:idx%2===0?'var(--bg)':'var(--white)',transition:'background .15s'}}
+                    onMouseEnter={e=>{e.currentTarget.style.background='var(--blue3)'}}
+                    onMouseLeave={e=>{e.currentTarget.style.background=idx%2===0?'var(--bg)':'var(--white)'}}>
+                    <td style={{textAlign:'center',color:'var(--text3)',padding:'5px 4px',position:'sticky',left:0,background:'inherit',zIndex:1}}>{idx+1}</td>
+                    <td style={{fontFamily:'monospace',fontSize:'.76rem',padding:'5px 8px',position:'sticky',left:36,background:'inherit',zIndex:1,borderRight:'2px solid var(--border)',color:hasAny?'var(--text)':'var(--text3)'}}>{s.prn}</td>
+                    <td style={{padding:'5px 8px',fontWeight:hasAny?600:'normal',position:'sticky',left:156,background:'inherit',zIndex:1,borderRight:'2px solid var(--border)'}}>{s.name||'—'}</td>
+                    {sections.length>2&&<td style={{textAlign:'center',padding:'5px 4px',fontSize:'.75rem',color:'var(--text2)'}}>{s.section}</td>}
+                    {evalPlanComps.map(c=>{
+                      const val=rowMarks[c.name]??'';
+                      const max=parseFloat(c.marks)||null;
+                      const numVal=parseFloat(val);
+                      const over=max&&!isNaN(numVal)&&numVal>max;
+                      return(
+                        <td key={c.name} style={{textAlign:'center',padding:'3px 4px'}}>
+                          <input
+                            type="number" min="0" max={max||undefined}
+                            value={val}
+                            placeholder="—"
+                            title={over?`Exceeds max ${max}`:''}
+                            style={{
+                              width:72,textAlign:'center',
+                              border:'1px solid '+(over?'#ef4444':val!==''?'var(--blue2)':'var(--border)'),
+                              borderRadius:6,padding:'4px 2px',fontSize:'.82rem',
+                              background:val!==''?(over?'#fef2f2':'#f0fdf4'):'var(--white)',
+                              outline:'none',transition:'all .15s'
+                            }}
+                            onChange={e=>updateCell(s.prn,c.name,e.target.value)}
+                          />
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+            {/* Footer totals row */}
+            <tfoot>
+              <tr style={{background:'var(--bg2)',fontWeight:700,fontSize:'.78rem'}}>
+                <td colSpan={sections.length>2?4:3} style={{padding:'7px 8px',color:'var(--text2)'}}>
+                  Class Avg →
                 </td>
-              ))}
-            </tr>
-          ))}</tbody>
-        </table></div>}
-        <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
-        {cos.length>0&&<button className="btn btn-primary" style={{marginTop:'1rem'}} onClick={saveManual} disabled={saving||!course}>
-          {saving?<><Spin/>Saving…</>:'💾 Save Marks'}
-        </button>}
-      </div>
-    </div>}
+                {evalPlanComps.map(c=>{
+                  const vals=filtered.map(s=>parseFloat(marksGrid[s.prn]?.[c.name])).filter(v=>!isNaN(v));
+                  const avg=vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*100)/100:null;
+                  return(
+                    <td key={c.name} style={{textAlign:'center',padding:'7px 4px',color:'var(--blue2)'}}>
+                      {avg!==null?avg:'—'}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          </table>
+        </div>}
+      </div>);
+    })()}
 
     {/* ── Current Marks Tab ── component-first view ── */}
     {tab==='current'&&<div>
