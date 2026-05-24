@@ -4135,7 +4135,87 @@ function MasterAttainmentPage({course}){
     if(!caMarksRefs.current[ca]) caMarksRefs.current[ca]=React.createRef();
   });
 
-  const [bulkQpFile,setBulkQpFile]=React.useState(null);
+  const [loadingFromDB,setLoadingFromDB]=React.useState(false);
+  const [loadFromDBOk,setLoadFromDBOk]=React.useState('');
+  const [loadFromDBErr,setLoadFromDBErr]=React.useState('');
+
+  const loadFromUploadedMarks=async()=>{
+    if(!course){setLoadFromDBErr('No course selected.');return;}
+    setLoadingFromDB(true);setLoadFromDBOk('');setLoadFromDBErr('');
+    try{
+      const r=await fetch(API+'/attainment/marks/'+course.id,{headers:hdrForm()});
+      if(!r.ok) throw new Error('Failed to fetch uploaded marks');
+      const d=await r.json();
+      const records=d.data||[];
+      if(!records.length){setLoadFromDBErr('No marks uploaded yet. Go to Upload Marks page first.');setLoadingFromDB(false);return;}
+
+      // Detect format: flat exam-wise {"Case Study":2.0} vs nested {"CO1":{"Total":2.0}}
+      const firstMarks=records[0]?.marks||{};
+      const firstVal=Object.values(firstMarks)[0];
+      const isFlat=firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object';
+
+      if(!isFlat){setLoadFromDBErr('Marks are in CO-wise format, not exam-wise. Re-upload using the exam-wise xlsx first.');setLoadingFromDB(false);return;}
+
+      // Build a map: examName → {prn: mark}
+      const examMap={};
+      records.forEach(rec=>{
+        const prn=rec.student_id;
+        Object.entries(rec.marks||{}).forEach(([exam,mark])=>{
+          if(!examMap[exam]) examMap[exam]={};
+          examMap[exam][prn]=parseFloat(mark)||0;
+        });
+      });
+
+      // Match each exam to a CA tab or ESE
+      const matchTarget=(examName)=>{
+        const sn=examName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
+        if(/end.*sem|ese/.test(sn)) return '__ESE__';
+        // Exact CA name match
+        let t=caNames.find(ca=>ca.toLowerCase()===sn); if(t) return t;
+        // One contains the other
+        t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn)); if(t) return t;
+        // Token overlap
+        const snToks=sn.split(/\s+/);
+        t=caNames.find(ca=>ca.toLowerCase().split(/\s+/).some(tok=>snToks.includes(tok)&&tok.length>2)); if(t) return t;
+        return null;
+      };
+
+      let matched=0;
+      const newCaSheets={...caSheets};
+      let newEseMarks={...eseMarks};
+
+      Object.entries(examMap).forEach(([exam,prnMap])=>{
+        const target=matchTarget(exam);
+        if(!target) return;
+        if(target==='__ESE__'){
+          Object.entries(prnMap).forEach(([prn,mark])=>{
+            newEseMarks[prn]={...(newEseMarks[prn]||{}),_total:mark};
+          });
+          matched++;
+        } else {
+          const qp=newCaSheets[target]?.qp||[];
+          const newMarks={};
+          Object.entries(prnMap).forEach(([prn,totalMark])=>{
+            if(qp.length>0&&totalMark>0){
+              const maxMarks=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+              const perQMark={};
+              qp.forEach(q=>{perQMark[q.q_no]=Math.round((parseFloat(q.marks)||0)/maxMarks*totalMark*100)/100;});
+              newMarks[prn]=perQMark;
+            } else {
+              newMarks[prn]={_total:totalMark};
+            }
+          });
+          newCaSheets[target]={...newCaSheets[target],marks:{...(newCaSheets[target]?.marks||{}),...newMarks}};
+          matched++;
+        }
+      });
+
+      setCaSheets(newCaSheets);
+      setEseMarks(newEseMarks);
+      setLoadFromDBOk(`✓ Loaded marks for ${records.length} students across ${matched} component(s): ${Object.keys(examMap).join(', ')}`);
+    }catch(e){setLoadFromDBErr(e.message);}
+    setLoadingFromDB(false);
+  };
   const [bulkMarksFile,setBulkMarksFile]=React.useState(null);
   const [bulkQpLoading,setBulkQpLoading]=React.useState(false);
   const [bulkMarksLoading,setBulkMarksLoading]=React.useState(false);
@@ -4975,6 +5055,19 @@ function MasterAttainmentPage({course}){
 
   const renderBulkUpload=()=>(
     <div style={{display:'flex',flexDirection:'column',gap:'1.5rem'}}>
+      {/* ── Load from already-uploaded marks ── */}
+      <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:10,padding:'1.25rem'}}>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.4rem',color:'#166534'}}>⚡ Load from Upload Marks Page</div>
+        <div style={{fontSize:'.8rem',color:'#166534',marginBottom:'.85rem',lineHeight:1.6}}>
+          You've already uploaded marks via the <strong>Upload Marks</strong> page. Click below to instantly pull those marks (Case Study, Mind Map, Quiz, Unit Test, ESE) into the correct CA tabs — no file needed.
+        </div>
+        {loadFromDBErr&&<div style={{color:'var(--red)',fontSize:'.8rem',marginBottom:'.5rem'}}>{loadFromDBErr}</div>}
+        {loadFromDBOk&&<div style={{color:'var(--green)',fontSize:'.8rem',marginBottom:'.5rem'}}>{loadFromDBOk}</div>}
+        <button className="btn btn-primary" onClick={loadFromUploadedMarks} disabled={loadingFromDB||!course}
+          style={{background:'#16a34a',borderColor:'#16a34a',width:'100%'}}>
+          {loadingFromDB?<><Spin/>Loading…</>:'⚡ Load Marks from Upload Marks Page'}
+        </button>
+      </div>
       <div>
         <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.75rem'}}>📄 Upload All Question Papers</div>
         <div style={{background:'var(--blue3)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem',lineHeight:1.7}}>
