@@ -2728,7 +2728,86 @@ function StudyMaterialsPage({course}){
   const [fileLabel,setFileLabel]=useState('');
   const [addMsg,setAddMsg]=useState('');
 
-  const fetch_=async()=>{
+  const [aiRecs,setAiRecs]=useState(null);// {textbooks:[],web:[],journals:[],moocs:[]}
+  const [aiRecsLoading,setAiRecsLoading]=useState(false);
+  const [aiRecsErr,setAiRecsErr]=useState('');
+  const [dismissedRecs,setDismissedRecs]=useState(()=>{try{return JSON.parse(sessionStorage.getItem(`mat_dismissed_${course?.id}`)||'[]');}catch{return[];}});
+
+  const fetchAiRecs=async()=>{
+    if(!course)return;
+    setAiRecsLoading(true);setAiRecsErr('');
+    try{
+      const coList=(course.cos||[]).map(c=>`${c.co_id}: ${c.statement||''}`).join('\n');
+      const syllabus=(course.syllabus_units||[]).map(u=>`Unit ${u.unit_no||''}: ${u.title||u.unit_title||''} — ${u.topics||''}`).join('\n')||'';
+      const prompt=`You are an academic resource advisor. Given the course below, recommend specific study materials.
+
+Course: ${course.course_name} (${course.course_code})
+Department: ${course.department||''}
+Semester: ${course.semester||''}
+
+Course Outcomes:
+${coList||'Not specified'}
+
+Syllabus:
+${syllabus||'Not specified'}
+
+Respond ONLY with a JSON object (no markdown, no explanation) in exactly this format:
+{
+  "textbooks": [
+    {"title":"","author":"","publisher":"","reason":"why this book fits the COs"}
+  ],
+  "web": [
+    {"title":"","url":"","unit":"which unit/CO it covers","reason":""}
+  ],
+  "journals": [
+    {"title":"","url":"","reason":""}
+  ],
+  "moocs": [
+    {"title":"","platform":"","url":"","duration":"","reason":""}
+  ]
+}
+
+Give 3-4 items per category. Be specific — use real book titles, real NPTEL/Coursera URLs where known, actual IEEE/Springer journal names. Tailor everything to the exact course topics.`;
+
+      const resp=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          model:'claude-sonnet-4-20250514',
+          max_tokens:1000,
+          messages:[{role:'user',content:prompt}]
+        })
+      });
+      const d=await resp.json();
+      const raw=d.content?.find(b=>b.type==='text')?.text||'{}';
+      const clean=raw.replace(/```json|```/g,'').trim();
+      const parsed=JSON.parse(clean);
+      setAiRecs(parsed);
+      // clear dismissed when fresh recs arrive
+      setDismissedRecs([]);
+      sessionStorage.removeItem(`mat_dismissed_${course?.id}`);
+    }catch(e){setAiRecsErr('Could not generate AI recommendations. Try again.');}
+    setAiRecsLoading(false);
+  };
+
+  const dismissRec=(key)=>{
+    const next=[...dismissedRecs,key];
+    setDismissedRecs(next);
+    try{sessionStorage.setItem(`mat_dismissed_${course?.id}`,JSON.stringify(next));}catch{}
+  };
+
+  const addRecToTab=(item,category)=>{
+    const entry={id:Date.now()+Math.random(),_source:'ai_rec',...item};
+    const u={...userMats,[category]:[...(userMats[category]||[]),entry]};
+    saveUser(u);
+    dismissRec(item.title);
+  };
+
+  useEffect(()=>{
+    if(course){
+      try{setDismissedRecs(JSON.parse(sessionStorage.getItem(`mat_dismissed_${course.id}`)||'[]'));}catch{setDismissedRecs([]);}
+    }
+  },[course?.id]);
     if(!course)return;
     setLoading(true);setErr('');
     try{
@@ -3094,16 +3173,80 @@ function StudyMaterialsPage({course}){
         <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>Study Materials</div>
         {course&&<div style={{fontSize:'.82rem',color:'var(--text2)',marginTop:'.2rem'}}>{course.course_name} · {course.course_code}</div>}
       </div>
-      <button className="btn btn-outline" onClick={fetch_} disabled={loading||!course}>
-        {loading?<><Spin/>Loading…</>:'↻ Refresh AI'}
-      </button>
+      <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+        <button className="btn btn-outline" onClick={fetch_} disabled={loading||!course}>
+          {loading?<><Spin/>Loading…</>:'↻ Refresh'}
+        </button>
+        <button className="btn btn-primary" onClick={fetchAiRecs} disabled={aiRecsLoading||!course}
+          style={{background:'linear-gradient(135deg,#f97316,#ea580c)',border:'none'}}>
+          {aiRecsLoading?<><Spin/>Generating…</>:'✨ Get AI Recommendations'}
+        </button>
+      </div>
     </div>
 
     {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
     <Alrt t="error" msg={err}/>
 
+    {/* ── AI Recommendations Panel ── */}
+    {aiRecsLoading&&<div className="card card-p" style={{textAlign:'center',padding:'2rem',marginBottom:'1rem',background:'linear-gradient(135deg,#fff7ed,#ffedd5)',border:'1px solid #fed7aa'}}>
+      <Spin/><span style={{color:'#c2410c',marginLeft:'.5rem',fontWeight:600}}>✨ Claude is analysing your course and generating recommendations…</span>
+    </div>}
+    {aiRecsErr&&<Alrt t="error" msg={aiRecsErr}/>}
+
+    {!aiRecsLoading&&aiRecs&&(()=>{
+      const catMap={textbooks:'textbooks',web:'web',journals:'journals',moocs:'moocs'};
+      const tabRecs=(aiRecs[catMap[tab]]||[]).filter(r=>!dismissedRecs.includes(r.title));
+      if(tab==='master'||tabRecs.length===0)return null;
+      return(
+        <div style={{marginBottom:'1rem',padding:'1rem 1.25rem',background:'linear-gradient(135deg,#fff7ed,#fffbeb)',border:'1px solid #fed7aa',borderRadius:12}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.75rem'}}>
+            <div style={{fontWeight:700,fontSize:'.9rem',color:'#92400e'}}>
+              ✨ AI Recommendations <span style={{fontWeight:400,fontSize:'.78rem',color:'#b45309'}}>for {tab==='textbooks'?'Textbooks':tab==='web'?'Web / NPTEL':tab==='journals'?'Journals':'MOOCs'}</span>
+            </div>
+            <span style={{fontSize:'.72rem',color:'#b45309'}}>Based on your COs & syllabus</span>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:'.6rem'}}>
+            {tabRecs.map((item,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'flex-start',gap:'1rem',padding:'.75rem',background:'rgba(255,255,255,.7)',borderRadius:9,border:'1px solid #fde68a'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,fontSize:'.855rem',color:'var(--text)',marginBottom:2}}>
+                    {tab==='web'&&item.url?<a href={item.url} target="_blank" rel="noreferrer" style={{color:'#c2410c',textDecoration:'none'}}>{item.title} ↗</a>:item.title}
+                  </div>
+                  {item.author&&<div style={{fontSize:'.78rem',color:'var(--text2)'}}>by {item.author}{item.publisher?` · ${item.publisher}`:''}</div>}
+                  {item.platform&&<div style={{fontSize:'.78rem',color:'var(--blue2)'}}>{item.platform}{item.duration?` · ${item.duration}`:''}</div>}
+                  {item.unit&&<div style={{fontSize:'.75rem',color:'var(--text3)'}}>📌 {item.unit}</div>}
+                  {item.reason&&<div style={{fontSize:'.75rem',color:'#92400e',marginTop:3,fontStyle:'italic'}}>💡 {item.reason}</div>}
+                </div>
+                <div style={{display:'flex',gap:'.35rem',flexShrink:0}}>
+                  <button onClick={()=>addRecToTab(item,tab)}
+                    style={{fontSize:'.75rem',padding:'4px 10px',background:'#f97316',color:'#fff',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600,whiteSpace:'nowrap'}}>
+                    + Add
+                  </button>
+                  <button onClick={()=>dismissRec(item.title)}
+                    style={{fontSize:'.75rem',padding:'4px 8px',background:'transparent',color:'#b45309',border:'1px solid #fcd34d',borderRadius:6,cursor:'pointer'}}>
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    })()}
+
+    {!aiRecs&&!aiRecsLoading&&course&&<div style={{marginBottom:'1rem',padding:'.875rem 1.25rem',background:'var(--bg)',border:'1px dashed var(--border)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'.5rem'}}>
+      <div>
+        <div style={{fontWeight:600,fontSize:'.85rem'}}>✨ Get AI-powered recommendations</div>
+        <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:2}}>Claude will analyse your COs and syllabus to suggest the best textbooks, NPTEL links, journals and MOOCs.</div>
+      </div>
+      <button className="btn btn-primary btn-sm" onClick={fetchAiRecs}
+        style={{background:'linear-gradient(135deg,#f97316,#ea580c)',border:'none',whiteSpace:'nowrap'}}>
+        ✨ Generate Recommendations
+      </button>
+    </div>}
+
     {loading&&<div className="card card-p" style={{textAlign:'center',padding:'3rem'}}>
-      <Spin/><span style={{color:'var(--text2)',marginLeft:'.5rem'}}>Loading AI recommendations…</span>
+      <Spin/><span style={{color:'var(--text2)',marginLeft:'.5rem'}}>Loading saved materials…</span>
     </div>}
 
     {!loading&&<>
