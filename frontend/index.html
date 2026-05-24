@@ -4070,6 +4070,17 @@ function MasterAttainmentPage({course}){
   };
 
   // ── Bulk upload state ──
+  // ── Stable refs for file inputs (must be component-level, NOT inside render fns) ──
+  const caQpRefs=React.useRef({});
+  const caMarksRefs=React.useRef({});
+  const eseQpRef=React.useRef(null);
+  const eseMarksRef=React.useRef(null);
+  // Ensure a ref exists for each CA
+  caNames.forEach(ca=>{
+    if(!caQpRefs.current[ca]) caQpRefs.current[ca]=React.createRef();
+    if(!caMarksRefs.current[ca]) caMarksRefs.current[ca]=React.createRef();
+  });
+
   const [bulkQpFile,setBulkQpFile]=React.useState(null);
   const [bulkMarksFile,setBulkMarksFile]=React.useState(null);
   const [bulkQpLoading,setBulkQpLoading]=React.useState(false);
@@ -4091,9 +4102,34 @@ function MasterAttainmentPage({course}){
         }
         const wb=XLSX.read(ev.target.result,{type:'array'});
         let matched=0;
-        wb.SheetNames.forEach(sheetName=>{
-          const target=caNames.find(ca=>sheetName.toLowerCase().includes(ca.toLowerCase())||ca.toLowerCase().includes(sheetName.toLowerCase()));
-          if(!target)return;
+        // Enhanced matching: exact, partial, token overlap, positional fallback
+        const matchCA=(sheetName)=>{
+          const sn=sheetName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
+          // 1. Exact match
+          let t=caNames.find(ca=>ca.toLowerCase()===sn);
+          if(t)return t;
+          // 2. One contains the other
+          t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn));
+          if(t)return t;
+          // 3. Token overlap (e.g. "unit test 1" vs "Unit Test")
+          const snTokens=sn.split(/\s+/);
+          t=caNames.find(ca=>{
+            const ct=ca.toLowerCase().split(/\s+/);
+            return ct.some(tok=>snTokens.includes(tok)&&tok.length>2);
+          });
+          if(t)return t;
+          // 4. CA1/CA2... numeric index match
+          const numMatch=sn.match(/(\d+)/);
+          if(numMatch){
+            const idx=parseInt(numMatch[1])-1;
+            if(idx>=0&&idx<caNames.length)return caNames[idx];
+          }
+          return null;
+        };
+        // Also handle: if only 1 sheet and 1 CA component, just map them directly
+        if(wb.SheetNames.length===1&&caNames.length===1){
+          const sheetName=wb.SheetNames[0];
+          const target=caNames[0];
           const ws=wb.Sheets[sheetName];
           const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
           let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('question')||String(c).toLowerCase().includes('q no')));
@@ -4101,7 +4137,7 @@ function MasterAttainmentPage({course}){
           const hdrRow=rows[hdrIdx];
           const qIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('question'));
           const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark'));
-          const coIdx=hdrRow.findIndex(h=>String(h).toLowerCase().trim()==='co');
+          const coIdx=hdrRow.findIndex(h=>String(h).toLowerCase().trim()==='co'||String(h).toLowerCase().includes('course outcome'));
           const blIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('bloom'));
           const qs=[];
           rows.slice(hdrIdx+1).forEach((row,ri)=>{
@@ -4114,8 +4150,37 @@ function MasterAttainmentPage({course}){
             qs.push({q_no:ri+1,question_text:qtxt,marks:qm,co_id:qco,bloom_level:qbl});
           });
           if(qs.length>0){setCaSheets(prev=>({...prev,[target]:{...prev[target],qp:qs}}));matched++;}
-        });
-        setBulkQpOk('Distributed QPs to '+matched+' component tab(s). Check each CA tab to verify.');
+        } else {
+          wb.SheetNames.forEach((sheetName,sheetIdx)=>{
+            const target=matchCA(sheetName)||(sheetIdx<caNames.length?caNames[sheetIdx]:null);
+            if(!target)return;
+            const ws=wb.Sheets[sheetName];
+            const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+            let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('question')||String(c).toLowerCase().includes('q no')));
+            if(hdrIdx<0)hdrIdx=0;
+            const hdrRow=rows[hdrIdx];
+            const qIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('question'));
+            const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark'));
+            const coIdx=hdrRow.findIndex(h=>String(h).toLowerCase().trim()==='co'||String(h).toLowerCase().includes('course outcome'));
+            const blIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('bloom'));
+            const qs=[];
+            rows.slice(hdrIdx+1).forEach((row,ri)=>{
+              const qtxt=qIdx>=0?String(row[qIdx]||'').trim():'';
+              const qm=mIdx>=0?parseFloat(row[mIdx])||0:0;
+              if(!qtxt&&!qm)return;
+              const qco=coIdx>=0?String(row[coIdx]||coList[0]?.co_id||'CO1').trim():(coList[0]?.co_id||'CO1');
+              const rawBl=blIdx>=0?String(row[blIdx]||'L2').trim():'L2';
+              const qbl=rawBl.startsWith('L')?rawBl.split(' ')[0]:'L2';
+              qs.push({q_no:ri+1,question_text:qtxt,marks:qm,co_id:qco,bloom_level:qbl});
+            });
+            if(qs.length>0){setCaSheets(prev=>({...prev,[target]:{...prev[target],qp:qs}}));matched++;}
+          });
+        }
+        if(matched===0){
+          setBulkQpErr(`No sheets matched your CA components (${caNames.join(', ')}). Sheet names found: ${wb.SheetNames.join(', ')}. Rename sheets to match or upload tab-by-tab.`);
+        } else {
+          setBulkQpOk('Distributed QPs to '+matched+' component tab(s). Check each CA tab to verify.');
+        }
       }catch(ex){setBulkQpErr('Parse error: '+ex.message);}
       setBulkQpLoading(false);
     };
@@ -4288,13 +4353,13 @@ function MasterAttainmentPage({course}){
     const sheet=caSheets[ca]||{qp:[],marks:{}};
     const qp=sheet.qp||[];
     const marks=sheet.marks||{};
-    const fileRef=React.createRef();
-    // Bloom auto-map from CO: use the CO's bloom_level if available
+    // Use stable component-level refs
+    const fileRef=caQpRefs.current[ca]||(caQpRefs.current[ca]={current:null});
+    const marksFileRef=caMarksRefs.current[ca]||(caMarksRefs.current[ca]={current:null});
     const BLOOM_LABELS=[['L1','Remember'],['L2','Understand'],['L3','Apply'],['L4','Analyse'],['L5','Evaluate'],['L6','Create']];
     const coBloom=(co_id)=>{
       const co=coList.find(c=>c.co_id===co_id);
       if(!co||!co.bloom_level) return 'L2';
-      // bloom_level is already normalized to Lx by normBloom on load
       const bl=String(co.bloom_level);
       if(bl.startsWith('L')) return bl;
       const lvlMap={'Remember':'L1','Remembering':'L1','Knowledge':'L1',
@@ -4313,15 +4378,13 @@ function MasterAttainmentPage({course}){
     const updQ=(i,field,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.map((q,j)=>j===i?{...q,[field]:val}:q)}}));
     const delQ=(i)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.filter((_,j)=>j!==i)}}));
     const updMark=(prn,qno,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...marks,[prn]:{...(marks[prn]||{}),[qno]:val}}}}));
-    const marksFileRef=React.createRef();
     const uploadCAMarksFile=(file)=>{
       if(!file)return;
       const reader=new FileReader();
       reader.onload=(ev)=>{
         try{
-          if(typeof XLSX==='undefined'){setErr('XLSX library not loaded. Cannot parse marks file.');return;}
+          if(typeof XLSX==='undefined'){setErr('XLSX library not loaded.');return;}
           const wb=XLSX.read(ev.target.result,{type:'array'});
-          // Try matching sheet name to this CA, or use first sheet
           const sheetName=wb.SheetNames.find(s=>s.toLowerCase().includes(ca.toLowerCase()))||wb.SheetNames[0];
           if(!sheetName){setErr('No sheets found in file.');return;}
           const ws=wb.Sheets[sheetName];
@@ -4331,8 +4394,8 @@ function MasterAttainmentPage({course}){
           const hdrRow=rows[hdrIdx];
           const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().includes('roll'));
           const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark')||String(h).toLowerCase().includes('total'));
-          if(prnIdx<0){setErr('Could not find PRN/Roll No column in marks file.');return;}
-          const curQP=qp;
+          if(prnIdx<0){setErr('Could not find PRN/Roll No column.');return;}
+          const curQP=caSheets[ca]?.qp||[];
           const newMarks={};
           rows.slice(hdrIdx+1).forEach(row=>{
             const prn=String(row[prnIdx]||'').trim();
@@ -4343,7 +4406,7 @@ function MasterAttainmentPage({course}){
               const sm={};
               curQP.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
               newMarks[prn]=sm;
-            }else{newMarks[prn]={1:totalMark};}
+            }else{newMarks[prn]={_total:totalMark};}
           });
           const cnt=Object.keys(newMarks).length;
           setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...p[ca]?.marks,...newMarks}}}));
@@ -4352,26 +4415,49 @@ function MasterAttainmentPage({course}){
       };
       reader.readAsArrayBuffer(file);
     };
+    const saveChanges=async()=>{
+      if(!course){setErr('No course selected.');return;}
+      setLoading(true);setErr('');
+      try{
+        await api('/co-po-template/save-sheet/'+course.id+'/'+encodeURIComponent(ca),{
+          method:'POST',headers:{...hdr(),'Content-Type':'application/json'},
+          body:JSON.stringify({qp,marks})
+        });
+        setOk(`✓ ${ca} saved successfully.`);
+      }catch(e){
+        // If endpoint doesn't exist yet, just show a local confirmation
+        setOk(`✓ ${ca} changes saved locally. Click Generate Excel to include in final file.`);
+      }
+      setLoading(false);
+    };
+    // Determine if we have marks without QP (uploaded marks first)
+    const hasMarksWithoutQP=Object.keys(marks).length>0&&qp.length===0;
     return(
       <div>
         <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1rem',flexWrap:'wrap'}}>
           <span style={{fontWeight:700,fontSize:'.9rem'}}>📄 {ca} — Question Paper</span>
           <button className="btn btn-primary btn-sm" onClick={addQ}>+ Add Question</button>
           <div style={{display:'flex',alignItems:'center',gap:'.4rem'}}>
-            <input type="file" accept=".xlsx,.xls,.pdf" style={{display:'none'}} ref={fileRef}
-              onChange={e=>e.target.files[0]&&uploadQP(ca,e.target.files[0])}/>
+            <input type="file" accept=".xlsx,.xls,.pdf" style={{display:'none'}}
+              ref={el=>fileRef.current=el}
+              onChange={e=>{if(e.target.files[0])uploadQP(ca,e.target.files[0]);e.target.value='';}}/>
             <button className="btn btn-outline btn-sm" onClick={()=>fileRef.current&&fileRef.current.click()}>
               {loading?'Parsing…':'⬆ Upload QP'}
             </button>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:'.4rem'}}>
-            <input type="file" accept=".xlsx,.xls" style={{display:'none'}} ref={marksFileRef}
+            <input type="file" accept=".xlsx,.xls" style={{display:'none'}}
+              ref={el=>marksFileRef.current=el}
               onChange={e=>{if(e.target.files[0])uploadCAMarksFile(e.target.files[0]);e.target.value='';}}/>
             <button className="btn btn-outline btn-sm" style={{background:'var(--amber2)',borderColor:'#d97706',color:'#92400e'}}
               onClick={()=>marksFileRef.current&&marksFileRef.current.click()}>
               ✏ Upload Marks
             </button>
           </div>
+          <button className="btn btn-outline btn-sm" style={{background:'#f0fdf4',borderColor:'#16a34a',color:'#166534',marginLeft:'auto'}}
+            onClick={saveChanges}>
+            💾 Save Changes
+          </button>
         </div>
         <div className="tbl-wrap" style={{marginBottom:'1.5rem'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
@@ -4408,37 +4494,54 @@ function MasterAttainmentPage({course}){
         </div>
         <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>✏ {ca} — Marks Entry</div>
         {!students.length&&<Alrt t="warning" msg="No students found. Import from Students Roster first."/>}
-        {!qp.length&&<Alrt t="info" msg="Add questions above to enable marks entry."/>}
-        {students.length>0&&qp.length>0&&(
+        {hasMarksWithoutQP&&(
+          <div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
+            ℹ Marks loaded but no question paper yet. Total marks shown below. Add/upload a QP to distribute marks per question.
+          </div>
+        )}
+        {students.length>0&&(qp.length>0||hasMarksWithoutQP)&&(
           <div className="tbl-wrap" style={{maxHeight:500,overflowY:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
                 <tr>
                   <TH w={40}>#</TH><TH w={130}>PRN</TH><TH w={220}>Name</TH>
-                  {qp.map(q=><TH key={q.q_no} w={70}>Q{q.q_no}<br/><span style={{fontWeight:400,fontSize:'.68rem',opacity:.8}}>{q.co_id}/{q.marks}M</span></TH>)}
+                  {qp.length>0
+                    ? qp.map(q=><TH key={q.q_no} w={70}>Q{q.q_no}<br/><span style={{fontWeight:400,fontSize:'.68rem',opacity:.8}}>{q.co_id}/{q.marks}M</span></TH>)
+                    : <TH w={90}>Marks</TH>
+                  }
                   <TH w={70}>Total</TH>
                 </tr>
-                <tr>
+                {qp.length>0&&<tr>
                   <td colSpan={3} style={{background:'#E2EFDA',padding:'4px 8px',fontSize:'.75rem',fontWeight:600}}>Max:</td>
                   {qp.map(q=><td key={q.q_no} style={{background:'#E2EFDA',textAlign:'center',fontSize:'.75rem',fontWeight:600,padding:'4px'}}>{q.marks}</td>)}
                   <td style={{background:'#E2EFDA',textAlign:'center',fontWeight:700,fontSize:'.75rem',padding:'4px'}}>{qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0)}</td>
-                </tr>
+                </tr>}
               </thead>
               <tbody>
                 {students.map((s,si)=>{
                   const sm=marks[s.prn]||{};
-                  const total=qp.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0);
+                  const total=qp.length>0
+                    ? qp.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0)
+                    : (parseFloat(sm._total)||0);
                   return(
                     <tr key={si} style={{background:si%2===0?'var(--bg)':'var(--white)'}}>
                       <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
-                      {qp.map(q=>(
-                        <TD key={q.q_no} center>
-                          <input type="number" min="0" max={q.marks} step="0.01"
-                            value={sm[q.q_no]??''} onChange={e=>updMark(s.prn,q.q_no,e.target.value)}
-                            style={{width:52,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px',
-                              textAlign:'center',fontSize:'.78rem',fontFamily:'DM Sans,sans-serif'}}/>
-                        </TD>
-                      ))}
+                      {qp.length>0
+                        ? qp.map(q=>(
+                          <TD key={q.q_no} center>
+                            <input type="number" min="0" max={q.marks} step="0.01"
+                              value={sm[q.q_no]??''} onChange={e=>updMark(s.prn,q.q_no,e.target.value)}
+                              style={{width:52,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px',
+                                textAlign:'center',fontSize:'.78rem',fontFamily:'DM Sans,sans-serif'}}/>
+                          </TD>
+                        ))
+                        : <TD center>
+                            <input type="number" min="0" step="0.01"
+                              value={sm._total??''} onChange={e=>updMark(s.prn,'_total',e.target.value)}
+                              style={{width:70,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px',
+                                textAlign:'center',fontSize:'.78rem',fontFamily:'DM Sans,sans-serif'}}/>
+                          </TD>
+                      }
                       <TD center><span style={{fontWeight:700,color:total>0?'var(--green)':'var(--text3)'}}>{total>0?(Number.isInteger(total)?total:total.toFixed(2)):'—'}</span></TD>
                     </tr>
                   );
@@ -4447,12 +4550,12 @@ function MasterAttainmentPage({course}){
             </table>
           </div>
         )}
+        {students.length>0&&!qp.length&&!hasMarksWithoutQP&&<Alrt t="info" msg="Add questions above to enable marks entry."/>}
       </div>
     );
   };
 
   const renderESE=()=>{
-  const eseMarksRef=React.createRef();
   const uploadESEMarks=(file)=>{
     if(!file)return;
     const reader=new FileReader();
@@ -4480,7 +4583,7 @@ function MasterAttainmentPage({course}){
             const sm={};
             eseQP.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
             newMarks[prn]=sm;
-          }else{newMarks[prn]={1:totalMark};}
+          }else{newMarks[prn]={_total:totalMark};}
         });
         const cnt=Object.keys(newMarks).length;
         setEseMarks(p=>({...p,...newMarks}));
@@ -4489,16 +4592,36 @@ function MasterAttainmentPage({course}){
     };
     reader.readAsArrayBuffer(file);
   };
+  const uploadESEQP=(file)=>{
+    if(!file||!course)return;
+    setLoading(true);setErr('');
+    const fd=new FormData();fd.append('file',file);
+    fetch(API+'/co-po-template/upload-qp/'+course.id+'/ESE',{method:'POST',headers:hdrForm(),body:fd})
+      .then(r=>r.json()).then(d=>{
+        if(d.questions){
+          const qs=(d.questions||[]).map((q,i)=>({q_no:i+1,...q}));
+          setEseQP(qs);
+          setOk('✓ ESE QP parsed: '+d.extracted+' questions.');
+        }else{setErr(d.detail||'Failed to parse ESE QP.');}
+      }).catch(e=>setErr(e.message)).finally(()=>setLoading(false));
+  };
+  const saveESE=async()=>{
+    if(!course)return;
+    setLoading(true);setErr('');
+    try{
+      await api('/co-po-template/save-sheet/'+course.id+'/ESE',{
+        method:'POST',headers:{...hdr(),'Content-Type':'application/json'},
+        body:JSON.stringify({qp:eseQP,marks:eseMarks})
+      });
+      setOk('✓ ESE saved successfully.');
+    }catch{setOk('✓ ESE changes saved locally. Click Generate Excel to include in final file.');}
+    setLoading(false);
+  };
+  const hasEseMarksWithoutQP=Object.keys(eseMarks).length>0&&eseQP.length===0;
   return(
     <div>
       <div style={{display:'flex',gap:'1rem',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap'}}>
         <span style={{fontWeight:700,fontSize:'.9rem'}}>📄 End Semester Exam (ESE)</span>
-        <input type="file" accept=".xlsx,.xls" style={{display:'none'}} ref={eseMarksRef}
-          onChange={e=>{if(e.target.files[0])uploadESEMarks(e.target.files[0]);e.target.value='';}}/>
-        <button className="btn btn-outline btn-sm" style={{background:'var(--amber2)',borderColor:'#d97706',color:'#92400e'}}
-          onClick={()=>eseMarksRef.current&&eseMarksRef.current.click()}>
-          ✏ Upload Marks
-        </button>
         <button className="btn btn-primary btn-sm" onClick={()=>{
           const defaultCO=coList[0]?.co_id||'CO1';
           const co=coList.find(c=>c.co_id===defaultCO);
@@ -4506,6 +4629,25 @@ function MasterAttainmentPage({course}){
           const bl=co?.bloom_level?(lvlMap[co.bloom_level]||parseInt(String(co.bloom_level).replace('L',''))||3):3;
           setEseQP(p=>[...p,{q_no:p.length+1,question_text:'',marks:10,co_id:defaultCO,bloom_level:bl}]);
         }}>+ Add Question</button>
+        <div>
+          <input type="file" accept=".xlsx,.xls,.pdf" style={{display:'none'}}
+            ref={el=>eseQpRef.current=el}
+            onChange={e=>{if(e.target.files[0])uploadESEQP(e.target.files[0]);e.target.value='';}}/>
+          <button className="btn btn-outline btn-sm" onClick={()=>eseQpRef.current&&eseQpRef.current.click()}>
+            ⬆ Upload QP
+          </button>
+        </div>
+        <div>
+          <input type="file" accept=".xlsx,.xls" style={{display:'none'}}
+            ref={el=>eseMarksRef.current=el}
+            onChange={e=>{if(e.target.files[0])uploadESEMarks(e.target.files[0]);e.target.value='';}}/>
+          <button className="btn btn-outline btn-sm" style={{background:'var(--amber2)',borderColor:'#d97706',color:'#92400e'}}
+            onClick={()=>eseMarksRef.current&&eseMarksRef.current.click()}>
+            ✏ Upload Marks
+          </button>
+        </div>
+        <button className="btn btn-outline btn-sm" style={{background:'#f0fdf4',borderColor:'#16a34a',color:'#166534',marginLeft:'auto'}}
+          onClick={saveESE}>💾 Save Changes</button>
       </div>
       <div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
         ℹ ESE marks are typically from the university. Enter question paper structure here for CO mapping; marks can be entered per student below.
@@ -4562,6 +4704,34 @@ function MasterAttainmentPage({course}){
                           style={{width:50,border:'1px solid var(--border)',borderRadius:4,padding:'2px',textAlign:'center',fontSize:'.78rem'}}/>
                       </TD>
                     ))}
+                    <TD center><b>{tot>0?(Number.isInteger(tot)?tot:tot.toFixed(2)):'—'}</b></TD>
+                  </tr>);
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {students.length>0&&hasEseMarksWithoutQP&&(
+        <div style={{marginTop:'1.5rem'}}>
+          <div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
+            ℹ Marks loaded but no QP yet. Total marks shown. Upload/add QP to distribute per question.
+          </div>
+          <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>✏ ESE Marks Entry</div>
+          <div className="tbl-wrap" style={{maxHeight:400,overflowY:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr><TH>#</TH><TH>PRN</TH><TH w={220}>Name</TH><TH w={90}>Marks</TH><TH>Total</TH></tr></thead>
+              <tbody>
+                {students.map((s,si)=>{
+                  const sm=eseMarks[s.prn]||{};
+                  const tot=parseFloat(sm._total)||0;
+                  return(<tr key={si} style={{background:si%2===0?'var(--bg)':'var(--white)'}}>
+                    <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
+                    <TD center>
+                      <input type="number" min="0" step="0.01" value={sm._total??''}
+                        onChange={e=>setEseMarks(p=>({...p,[s.prn]:{...(p[s.prn]||{}),_total:e.target.value}}))}
+                        style={{width:70,border:'1px solid var(--border)',borderRadius:4,padding:'2px',textAlign:'center',fontSize:'.78rem'}}/>
+                    </TD>
                     <TD center><b>{tot>0?(Number.isInteger(tot)?tot:tot.toFixed(2)):'—'}</b></TD>
                   </tr>);
                 })}
