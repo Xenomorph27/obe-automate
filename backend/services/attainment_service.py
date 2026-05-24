@@ -83,6 +83,8 @@ class AttainmentService:
         await self.db.execute(
             delete(COAttainment).where(COAttainment.course_id == course_id)
         )
+        await self.db.flush()  # ensure DELETE is sent before INSERT
+        logger.info(f"Deleted existing marks for course_id={course_id}, inserting {len(students)} new records")
 
         records = []
         for s in students:
@@ -97,6 +99,19 @@ class AttainmentService:
 
         await self.db.commit()
         logger.info(f"Saved marks for {len(records)} students, course_id={course_id}")
+
+        # Verify save by re-reading first record
+        try:
+            verify = await self.db.execute(
+                select(COAttainment).where(COAttainment.course_id == course_id).limit(1)
+            )
+            first = verify.scalar_one_or_none()
+            if first:
+                logger.info(f"Verify OK — first record marks keys: {list(first.marks.keys())}")
+            else:
+                logger.error(f"Verify FAILED — no records found after save for course_id={course_id}")
+        except Exception as ve:
+            logger.error(f"Verify check error: {ve}")
 
         return {
             "course_id": course_id,
