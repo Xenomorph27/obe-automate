@@ -1972,7 +1972,7 @@ function SessionPlanPage({course}){
     {/* View / Edit tabs */}
     <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',borderBottom:'2px solid var(--border)',paddingBottom:0}}>
       {[['edit','✏️ Edit / Generate'],['view','👁 View Current Plan']].map(([v,l])=>(
-        <button key={v} onClick={()=>{setActiveView(v);if(v==='view')fetchViewPlan();}}
+        <button key={v} onClick={()=>{setActiveView(v);if(v==='view'){if(liveRows.length>0)setViewRows([...liveRows]);fetchViewPlan();}}}
           style={{padding:'.45rem 1.1rem',border:'none',cursor:'pointer',fontWeight:600,fontSize:'.82rem',
             fontFamily:'DM Sans,sans-serif',background:'transparent',
             color:activeView===v?'var(--blue2)':'var(--text3)',
@@ -2239,6 +2239,7 @@ function EvalPlanPage({course}){
       }));
       setLiveRows(evalRows);
       setLiveCols(DEFAULT_EVAL_COLS);
+      setViewRows([...evalRows]);
       setGenerated(true);
       addLiveMsg('ai',`✅ Generated! ${evalRows.length} evaluation components loaded.\n\nEdit any cell inline. Ask me to add columns (e.g. Bloom's Level, Assessment Type), fill values, or restructure the plan.`);
     }catch(e){setErr(e.message);}
@@ -2321,7 +2322,7 @@ function EvalPlanPage({course}){
     {/* View / Edit tabs */}
     <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',borderBottom:'2px solid var(--border)',paddingBottom:0}}>
       {[['edit','✏️ Edit / Generate'],['view','👁 View Current Plan']].map(([v,l])=>(
-        <button key={v} onClick={()=>{setActiveView(v);if(v==='view')fetchViewPlan();}}
+        <button key={v} onClick={()=>{setActiveView(v);if(v==='view'){if(liveRows.length>0)setViewRows([...liveRows]);fetchViewPlan();}}}
           style={{padding:'.45rem 1.1rem',border:'none',cursor:'pointer',fontWeight:600,fontSize:'.82rem',
             fontFamily:'DM Sans,sans-serif',background:'transparent',
             color:activeView===v?'var(--blue2)':'var(--text3)',
@@ -4102,84 +4103,82 @@ function MasterAttainmentPage({course}){
         }
         const wb=XLSX.read(ev.target.result,{type:'array'});
         let matched=0;
-        // Enhanced matching: exact, partial, token overlap, positional fallback
-        const matchCA=(sheetName)=>{
-          const sn=sheetName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
-          // 1. Exact match
-          let t=caNames.find(ca=>ca.toLowerCase()===sn);
-          if(t)return t;
-          // 2. One contains the other
-          t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn));
-          if(t)return t;
-          // 3. Token overlap (e.g. "unit test 1" vs "Unit Test")
-          const snTokens=sn.split(/\s+/);
-          t=caNames.find(ca=>{
-            const ct=ca.toLowerCase().split(/\s+/);
-            return ct.some(tok=>snTokens.includes(tok)&&tok.length>2);
-          });
-          if(t)return t;
-          // 4. CA1/CA2... numeric index match
-          const numMatch=sn.match(/(\d+)/);
-          if(numMatch){
-            const idx=parseInt(numMatch[1])-1;
-            if(idx>=0&&idx<caNames.length)return caNames[idx];
-          }
-          return null;
-        };
-        // Also handle: if only 1 sheet and 1 CA component, just map them directly
-        if(wb.SheetNames.length===1&&caNames.length===1){
-          const sheetName=wb.SheetNames[0];
-          const target=caNames[0];
-          const ws=wb.Sheets[sheetName];
+
+        // Shared: parse one sheet into questions array
+        const parseQPSheet=(ws)=>{
           const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('question')||String(c).toLowerCase().includes('q no')));
-          if(hdrIdx<0)hdrIdx=0;
+          // Find the header row that has "Q No" or "Question" column
+          let hdrIdx=rows.findIndex(r=>r.some(c=>{const s=String(c).toLowerCase().trim();return s==='q no'||s==='question'||s==='q#'||s==='q no.';}));
+          if(hdrIdx<0) hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('question')));
+          if(hdrIdx<0) hdrIdx=0;
           const hdrRow=rows[hdrIdx];
+          // Col indices - "Q No" is col 0, "Question" is col 1, "Marks" col 2, "CO" col 3, "Bloom Level" col 4
+          const qnoIdx=hdrRow.findIndex(h=>{const s=String(h).toLowerCase().trim();return s==='q no'||s==='q no.'||s==='q#'||s==='qno';});
           const qIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('question'));
           const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark'));
-          const coIdx=hdrRow.findIndex(h=>String(h).toLowerCase().trim()==='co'||String(h).toLowerCase().includes('course outcome'));
+          const coIdx=hdrRow.findIndex(h=>String(h).toLowerCase().trim()==='co'||String(h).toLowerCase().trim()==='co mapped');
           const blIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('bloom'));
           const qs=[];
-          rows.slice(hdrIdx+1).forEach((row,ri)=>{
-            const qtxt=qIdx>=0?String(row[qIdx]||'').trim():'';
+          let qCounter=0;
+          rows.slice(hdrIdx+1).forEach(row=>{
+            const firstCell=String(row[0]||'').trim();
+            const qTxt=qIdx>=0?String(row[qIdx]||'').trim():'';
+            // Skip: empty rows, title rows, TOTAL rows, "Max Marks" rows, section dividers
+            if(!firstCell&&!qTxt) return;
+            if(/^(total|max|max marks|section|—|q no)/i.test(firstCell)) return;
+            if(/^(total|max marks)/i.test(qTxt)) return;
+            if(firstCell.includes('|')||firstCell.includes('·')) return; // title rows
+            // q_no: use qnoIdx col if available and is a number, else auto-increment
+            const rawQno=qnoIdx>=0?row[qnoIdx]:null;
+            const qno=(rawQno!==null&&rawQno!==''&&!isNaN(Number(rawQno)))?Number(rawQno):(++qCounter);
             const qm=mIdx>=0?parseFloat(row[mIdx])||0:0;
-            if(!qtxt&&!qm)return;
+            if(!qTxt&&!qm) return; // still nothing useful
             const qco=coIdx>=0?String(row[coIdx]||coList[0]?.co_id||'CO1').trim():(coList[0]?.co_id||'CO1');
             const rawBl=blIdx>=0?String(row[blIdx]||'L2').trim():'L2';
-            const qbl=rawBl.startsWith('L')?rawBl.split(' ')[0]:'L2';
-            qs.push({q_no:ri+1,question_text:qtxt,marks:qm,co_id:qco,bloom_level:qbl});
+            const qbl=rawBl.match(/L[1-6]/i)?rawBl.match(/L[1-6]/i)[0].toUpperCase():'L2';
+            qs.push({q_no:qno,question_text:qTxt,marks:qm,co_id:qco,bloom_level:qbl});
           });
-          if(qs.length>0){setCaSheets(prev=>({...prev,[target]:{...prev[target],qp:qs}}));matched++;}
-        } else {
-          wb.SheetNames.forEach((sheetName,sheetIdx)=>{
-            const target=matchCA(sheetName)||(sheetIdx<caNames.length?caNames[sheetIdx]:null);
-            if(!target)return;
-            const ws=wb.Sheets[sheetName];
-            const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-            let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('question')||String(c).toLowerCase().includes('q no')));
-            if(hdrIdx<0)hdrIdx=0;
-            const hdrRow=rows[hdrIdx];
-            const qIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('question'));
-            const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark'));
-            const coIdx=hdrRow.findIndex(h=>String(h).toLowerCase().trim()==='co'||String(h).toLowerCase().includes('course outcome'));
-            const blIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('bloom'));
-            const qs=[];
-            rows.slice(hdrIdx+1).forEach((row,ri)=>{
-              const qtxt=qIdx>=0?String(row[qIdx]||'').trim():'';
-              const qm=mIdx>=0?parseFloat(row[mIdx])||0:0;
-              if(!qtxt&&!qm)return;
-              const qco=coIdx>=0?String(row[coIdx]||coList[0]?.co_id||'CO1').trim():(coList[0]?.co_id||'CO1');
-              const rawBl=blIdx>=0?String(row[blIdx]||'L2').trim():'L2';
-              const qbl=rawBl.startsWith('L')?rawBl.split(' ')[0]:'L2';
-              qs.push({q_no:ri+1,question_text:qtxt,marks:qm,co_id:qco,bloom_level:qbl});
-            });
-            if(qs.length>0){setCaSheets(prev=>({...prev,[target]:{...prev[target],qp:qs}}));matched++;}
-          });
-        }
+          return qs;
+        };
+
+        // Enhanced sheet → CA matching
+        const matchCA=(sheetName,sheetIdx)=>{
+          const sn=sheetName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
+          // Skip summary/grade sheets
+          if(/summary|grade|distribution/.test(sn)) return null;
+          // 1. Exact
+          let t=caNames.find(ca=>ca.toLowerCase()===sn);if(t)return t;
+          // 2. One contains the other
+          t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn));if(t)return t;
+          // 3. Token overlap
+          const snToks=sn.split(/\s+/);
+          t=caNames.find(ca=>ca.toLowerCase().split(/\s+/).some(tok=>snToks.includes(tok)&&tok.length>2));if(t)return t;
+          // 4. Numeric: "CA1" or "1" → index 0
+          const num=sn.match(/(\d+)/);
+          if(num){const idx=parseInt(num[1])-1;if(idx>=0&&idx<caNames.length)return caNames[idx];}
+          // 5. Positional fallback — map sheet order to CA order
+          // Get non-summary sheets
+          const validSheets=wb.SheetNames.filter(s=>!/summary|grade|distribution/i.test(s));
+          const pos=validSheets.indexOf(sheetName);
+          if(pos>=0&&pos<caNames.length)return caNames[pos];
+          return null;
+        };
+
+        wb.SheetNames.forEach((sheetName,sheetIdx)=>{
+          const target=matchCA(sheetName,sheetIdx);
+          if(!target)return;
+          const ws=wb.Sheets[sheetName];
+          const qs=parseQPSheet(ws);
+          if(qs.length>0){
+            setCaSheets(prev=>({...prev,[target]:{...prev[target],qp:qs}}));
+            matched++;
+          }
+        });
+
         if(matched===0){
-          setBulkQpErr(`No sheets matched your CA components (${caNames.join(', ')}). Sheet names found: ${wb.SheetNames.join(', ')}. Rename sheets to match or upload tab-by-tab.`);
+          setBulkQpErr(`No sheets matched your CA components (${caNames.join(', ')}). Sheets found: ${wb.SheetNames.join(', ')}. Try uploading tab-by-tab.`);
         } else {
-          setBulkQpOk('Distributed QPs to '+matched+' component tab(s). Check each CA tab to verify.');
+          setBulkQpOk(`✓ Distributed QPs to ${matched} component tab(s). Check each CA tab to verify.`);
         }
       }catch(ex){setBulkQpErr('Parse error: '+ex.message);}
       setBulkQpLoading(false);
@@ -4199,36 +4198,91 @@ function MasterAttainmentPage({course}){
         }
         const wb=XLSX.read(ev.target.result,{type:'array'});
         let matched=0;
-        wb.SheetNames.forEach(sheetName=>{
-          const target=caNames.find(ca=>sheetName.toLowerCase().includes(ca.toLowerCase())||ca.toLowerCase().includes(sheetName.toLowerCase()));
-          if(!target)return;
-          const ws=wb.Sheets[sheetName];
+
+        // Shared: find header row, PRN col, marks col, and extract student marks
+        const parseMarksSheet=(ws)=>{
           const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().includes('roll')));
-          if(hdrIdx<0)hdrIdx=0;
+          // Find header row with PRN column
+          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().trim()==='roll no'));
+          if(hdrIdx<0) return {};
           const hdrRow=rows[hdrIdx];
-          const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().includes('roll'));
-          const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark')||String(h).toLowerCase().includes('total'));
-          if(prnIdx<0)return;
-          const qp=caSheets[target]?.qp||[];
-          const newMarks={};
+          const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().trim()==='roll no');
+          // Marks col: prefer "Marks\n/X" pattern, then "marks", then "total" but NOT "grand total" or "scaled"
+          const mIdx=hdrRow.findIndex(h=>{
+            const s=String(h).toLowerCase().replace(/\n/g,' ');
+            return (s.includes('marks')||s.includes('ese marks'))&&!s.includes('grand')&&!s.includes('scaled')&&!s.includes('out of');
+          });
+          const result={};
           rows.slice(hdrIdx+1).forEach(row=>{
             const prn=String(row[prnIdx]||'').trim();
-            if(!prn||prn.length<8||isNaN(Number(prn)))return;
-            const totalMark=mIdx>=0?parseFloat(row[mIdx])||0:0;
-            if(qp.length>0&&totalMark>0){
-              const totalQMax=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
-              const sm={};
-              qp.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*10)/10;});
-              newMarks[prn]=sm;
-            }else{newMarks[prn]={1:totalMark};}
+            // PRN must look like a student PRN: numeric, 8+ digits
+            if(!prn||prn.length<6||isNaN(Number(prn))) return;
+            // Skip MAX MARKS row and section divider rows
+            const name=String(row[2]||'').trim();
+            if(/max marks|section/i.test(name)) return;
+            const mark=mIdx>=0?parseFloat(row[mIdx]):NaN;
+            if(isNaN(mark)) return;
+            result[prn]=mark;
           });
-          if(Object.keys(newMarks).length>0){
+          return result;
+        };
+
+        // Match sheet to CA or ESE — same logic as QP matching
+        const matchTarget=(sheetName)=>{
+          const sn=sheetName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
+          if(/summary|grade|distribution/.test(sn)) return null;
+          // ESE check
+          if(/end.*sem|ese|end sem/.test(sn)) return '__ESE__';
+          // CA match
+          let t=caNames.find(ca=>ca.toLowerCase()===sn);if(t)return t;
+          t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn));if(t)return t;
+          const snToks=sn.split(/\s+/);
+          t=caNames.find(ca=>ca.toLowerCase().split(/\s+/).some(tok=>snToks.includes(tok)&&tok.length>2));if(t)return t;
+          // Positional fallback
+          const validSheets=wb.SheetNames.filter(s=>!/summary|grade|distribution/i.test(s));
+          const pos=validSheets.indexOf(sheetName);
+          if(pos>=0&&pos<caNames.length)return caNames[pos];
+          return null;
+        };
+
+        wb.SheetNames.forEach(sheetName=>{
+          const target=matchTarget(sheetName);
+          if(!target) return;
+          const ws=wb.Sheets[sheetName];
+          const studentMarks=parseMarksSheet(ws);
+          const cnt=Object.keys(studentMarks).length;
+          if(cnt===0) return;
+
+          if(target==='__ESE__'){
+            // ESE: store as _total
+            const newMarks={};
+            Object.entries(studentMarks).forEach(([prn,mark])=>{newMarks[prn]={_total:mark};});
+            setEseMarks(p=>({...p,...newMarks}));
+            matched++;
+          } else {
+            // CA: distribute across QP if available, else store as _total
+            const qp=caSheets[target]?.qp||[];
+            const newMarks={};
+            Object.entries(studentMarks).forEach(([prn,totalMark])=>{
+              if(qp.length>0&&totalMark>0){
+                const totalQMax=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                if(totalQMax>0){
+                  const sm={};
+                  qp.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+                  newMarks[prn]=sm;
+                } else {newMarks[prn]={_total:totalMark};}
+              } else {newMarks[prn]={_total:totalMark};}
+            });
             setCaSheets(prev=>({...prev,[target]:{...prev[target],marks:{...prev[target]?.marks,...newMarks}}}));
             matched++;
           }
         });
-        setBulkMarksOk('Marks loaded into '+matched+' component tab(s). CO Attainment tab will update automatically.');
+
+        if(matched===0){
+          setBulkMarksErr(`No sheets matched. Sheets in file: ${wb.SheetNames.join(', ')}. CA components: ${caNames.join(', ')}.`);
+        } else {
+          setBulkMarksOk(`✓ Marks loaded into ${matched} component tab(s). CO Attainment tab will update automatically.`);
+        }
       }catch(ex){setBulkMarksErr('Parse error: '+ex.message);}
       setBulkMarksLoading(false);
     };
