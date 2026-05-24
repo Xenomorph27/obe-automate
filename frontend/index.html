@@ -2808,6 +2808,8 @@ Give 3-4 items per category. Be specific — use real book titles, real NPTEL/Co
       try{setDismissedRecs(JSON.parse(sessionStorage.getItem(`mat_dismissed_${course.id}`)||'[]'));}catch{setDismissedRecs([]);}
     }
   },[course?.id]);
+
+  const fetch_=async()=>{
     if(!course)return;
     setLoading(true);setErr('');
     try{
