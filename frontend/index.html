@@ -2194,14 +2194,34 @@ function EvalPlanPage({course}){
     try{
       const d=await api(`/evaluation-plan/view/${course.id}`);
       const rows=d.data||d.rows||d||[];
-      setViewRows(Array.isArray(rows)?rows:[]);
+      // Normalize server keys to match DEFAULT_EVAL_COLS keys
+      const normalized=(Array.isArray(rows)?rows:[]).map(r=>({
+        sr: r.sr||r.sr_no||r.srNo||'',
+        component: r.component||r.comp||r.name||'',
+        unit_syllabus: r.unit_syllabus||r.unitSyllabus||r.units||'',
+        co: r.co||r.co_mapped||r.coMapped||r.cos||'',
+        marks: String(r.marks||r.total_marks||''),
+        weightage: String(r.weightage||''),
+        date: r.date||r.tentative_date||r.tentativeDate||'',
+      }));
+      setViewRows(normalized);
+      // Also sync to liveRows so edit tab stays consistent
+      if(normalized.length>0&&liveRows.length===0){
+        setLiveRows(normalized);
+        setLiveCols(DEFAULT_EVAL_COLS);
+        setGenerated(true);
+      }
     }catch(e){
-      // fallback: if we have live rows use those, else try to reconstruct from generate response
-      if(liveRows.length>0) setViewRows(liveRows);
+      if(liveRows.length>0) setViewRows([...liveRows]);
       else setViewRows([]);
     }
     setViewLoading(false);
   };
+
+  // Load saved plan on mount so View tab works after navigation
+  useEffect(()=>{
+    if(course){fetchViewPlan();}
+  },[course?.id]);
 
   const [liveCols,setLiveCols]=useState(DEFAULT_EVAL_COLS);
   const [liveRows,setLiveRows]=useState([]);
@@ -3418,23 +3438,36 @@ function MarksPage({course}){
       {currentLoading?<Skel/>:currentMarks.length===0?
         <Alrt t="info" msg="No marks uploaded yet. Use the Upload tab to upload your marks file."/>:
         (()=>{
-          // Build component-first view: columns = evaluation components + ESE + Total
-          // marks structure: { CO1: { "Quiz": 8, "Unit Test": 7 }, CO2: {...} }
-          // We want: for each student, show total per component summed across all COs
-          const evalComps = components.length ? components : [...new Set(currentMarks.flatMap(r=>Object.values(r.marks||{}).flatMap(co=>Object.keys(co||{}))))];
-          const eseKey = evalComps.find(c=>c.toLowerCase().includes('end')||c.toLowerCase().includes('ese')||c.toLowerCase().includes('sem')) || null;
-          const caComps = evalComps.filter(c=>c!==eseKey);
-          const allDisp = [...caComps, ...(eseKey?[eseKey]:[])] ;
+          // Detect format: exam-wise (flat: {"Quiz": 8.5}) vs co-wise ({"CO1": {"Quiz": 8}})
+          const firstMarks=currentMarks[0]?.marks||{};
+          const firstVal=Object.values(firstMarks)[0];
+          const isExamWise=firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object';
+
+          let evalComps, eseKey, caComps, allDisp;
+          if(isExamWise){
+            // Exam-wise: keys are exam names directly
+            evalComps=[...new Set(currentMarks.flatMap(r=>Object.keys(r.marks||{})))];
+            eseKey=evalComps.find(c=>c.toLowerCase().includes('end')||c.toLowerCase().includes('ese')||c.toLowerCase().includes('sem'))||null;
+            caComps=evalComps.filter(c=>c!==eseKey);
+            allDisp=[...caComps,...(eseKey?[eseKey]:[])];
+          } else {
+            evalComps = components.length ? components : [...new Set(currentMarks.flatMap(r=>Object.values(r.marks||{}).flatMap(co=>Object.keys(co||{}))))];
+            eseKey = evalComps.find(c=>c.toLowerCase().includes('end')||c.toLowerCase().includes('ese')||c.toLowerCase().includes('sem')) || null;
+            caComps = evalComps.filter(c=>c!==eseKey);
+            allDisp = [...caComps, ...(eseKey?[eseKey]:[])] ;
+          }
 
           const getCompTotal=(rec,comp)=>{
-            // Sum across all COs for this component, rounded to 2 decimals
+            if(isExamWise){
+              const v=rec.marks?.[comp];
+              if(v===undefined||v===null||v==='') return null;
+              const n=parseFloat(v);
+              return isNaN(n)?null:Math.round(n*100)/100;
+            }
             let t=0;
             Object.values(rec.marks||{}).forEach(coMarks=>{
               const v=coMarks?.[comp];
-              if(v!==undefined&&v!==null&&v!==''){
-                const n=parseFloat(v);
-                if(!isNaN(n)) t+=n;
-              }
+              if(v!==undefined&&v!==null&&v!==''){const n=parseFloat(v);if(!isNaN(n)) t+=n;}
             });
             return t>0?Math.round(t*100)/100:null;
           };
@@ -3475,20 +3508,27 @@ function MarksPage({course}){
                   const totVal=getCompTotal(rec,comp);
                   const displayVal=totVal!==null?(Number.isInteger(totVal)?totVal:totVal.toFixed(2)):'—';
                   const isEse=comp===eseKey;
+                  // For exam-wise: editBuf is flat {comp: val}. For co-wise: editBuf is {CO1: {comp: val}}
+                  const editVal=isExamWise
+                    ?(editBuf?.[comp]??totVal??'')
+                    :(editBuf?.[Object.keys(rec.marks||{})[0]]?.[comp]??totVal??'');
                   return(<td key={comp} style={{textAlign:'center',background:isEditing?(isEse?'#fef9c3':'var(--blue3)'):''}}>
                     {isEditing?
                       <input type="number" min="0" max={maxMarks[comp]||999}
-                        value={editBuf?.[Object.keys(rec.marks||{})[0]]?.[comp]??totVal??''}
+                        value={editVal}
                         style={{width:60,textAlign:'center',border:'1px solid '+(isEse?'#f59e0b':'var(--blue2)'),borderRadius:5,padding:'2px 4px',fontSize:'.82rem'}}
                         onChange={e=>{
                           const v=e.target.value;
                           setEditBuf(b=>{
                             const nb=JSON.parse(JSON.stringify(b));
-                            // Update the value in the first CO key (or whichever has this comp)
-                            const coKeys=Object.keys(rec.marks||{});
-                            coKeys.forEach(co=>{if(rec.marks[co]?.[comp]!==undefined){if(!nb[co])nb[co]={};nb[co][comp]=v===''?'':parseFloat(v)||0;}});
-                            if(!coKeys.some(co=>rec.marks[co]?.[comp]!==undefined)){
-                              const fco=coKeys[0]||'CO1';if(!nb[fco])nb[fco]={};nb[fco][comp]=v===''?'':parseFloat(v)||0;
+                            if(isExamWise){
+                              nb[comp]=v===''?'':parseFloat(v)||0;
+                            } else {
+                              const coKeys=Object.keys(rec.marks||{});
+                              coKeys.forEach(co=>{if(rec.marks[co]?.[comp]!==undefined){if(!nb[co])nb[co]={};nb[co][comp]=v===''?'':parseFloat(v)||0;}});
+                              if(!coKeys.some(co=>rec.marks[co]?.[comp]!==undefined)){
+                                const fco=coKeys[0]||'CO1';if(!nb[fco])nb[fco]={};nb[fco][comp]=v===''?'':parseFloat(v)||0;
+                              }
                             }
                             return nb;
                           });
@@ -3996,11 +4036,24 @@ function MasterAttainmentPage({course}){
     setPoList(course.pos||[]);
     setCoPoMatrix(course.co_po_matrix||{});
     const comps=course.evaluation_config?.components||{};
-    // Use ALL components from eval config (Case Study, Quiz, Unit Test, etc.)
     const caList=Object.keys(comps).length?Object.keys(comps):['CA1','CA2','CA3'];
     setCaNames(caList);
     const sheets={};caList.forEach(ca=>{sheets[ca]={qp:[],marks:{}};});
-    setCaSheets(sheets);
+    // Load persisted sheets from server
+    fetch(API+'/co-po-template/load-all-sheets/'+course.id,{headers:hdrForm()})
+      .then(r=>r.json()).then(d=>{
+        if(d.sheets&&Object.keys(d.sheets).length>0){
+          setCaSheets(prev=>{
+            const merged={...prev};
+            Object.entries(d.sheets).forEach(([ca,data])=>{
+              merged[ca]={qp:data.qp||[],marks:data.marks||{}};
+            });
+            return merged;
+          });
+        } else {
+          setCaSheets(sheets);
+        }
+      }).catch(()=>setCaSheets(sheets));
     fetch(API+'/students/'+course.id,{headers:hdrForm()})
       .then(r=>r.json()).then(d=>{if(d.data)setStudents(d.data);}).catch(()=>{});
   },[course?.id]);
@@ -4473,13 +4526,14 @@ function MasterAttainmentPage({course}){
       if(!course){setErr('No course selected.');return;}
       setLoading(true);setErr('');
       try{
-        await api('/co-po-template/save-sheet/'+course.id+'/'+encodeURIComponent(ca),{
-          method:'POST',headers:{...hdr(),'Content-Type':'application/json'},
+        const r=await fetch(API+'/co-po-template/save-sheet/'+course.id+'/'+encodeURIComponent(ca),{
+          method:'POST',
+          headers:{...hdr(),'Content-Type':'application/json'},
           body:JSON.stringify({qp,marks})
         });
-        setOk(`✓ ${ca} saved successfully.`);
+        if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||'Save failed');}
+        setOk(`✓ ${ca} saved. Data will reload after navigation.`);
       }catch(e){
-        // If endpoint doesn't exist yet, just show a local confirmation
         setOk(`✓ ${ca} changes saved locally. Click Generate Excel to include in final file.`);
       }
       setLoading(false);
