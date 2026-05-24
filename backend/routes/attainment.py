@@ -1,7 +1,7 @@
 # backend/routes/attainment.py
 import io
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from backend.core.auth import require_auth
 from backend.database.user_models import User
@@ -24,11 +24,10 @@ router = APIRouter(prefix="/attainment", tags=["CO Attainment"])
 class StudentMarks(BaseModel):
     student_id: str = Field(example="USN001")
     student_name: str = Field(example="Alice Kumar")
-    marks: Dict[str, Dict[str, float]] = Field(
-        description="CO → component → marks scored",
+    marks: Dict[str, Any] = Field(
+        description="CO → component → marks (nested), OR exam → mark (flat exam-wise)",
         example={
             "CO1": {"Quiz": 8.0, "Unit Test": 18.0},
-            "CO2": {"Quiz": 7.0, "Unit Test": 15.0},
         }
     )
 
@@ -76,6 +75,31 @@ def parse_marks_xlsx(file_bytes: bytes) -> List[dict]:
     if header_row_idx is None:
         raise ValueError("Could not find header row with 'PRN' column in the xlsx file.")
 
+    # Also look for exam-wise columns (non-CO columns like "Quiz", "Unit Test", "Case Study", etc.)
+    header_row = all_rows[header_row_idx]
+    exam_columns = {}   # col_index → exam name (cleaned)
+    SKIP_COLS = {'sr no', 'sr. no', 'sr.no', 'prn', 'roll no', 'student name', 'name',
+                 'sec', 'section', 'ca total', 'grand total', 'grade', 'scaled'}
+    for j, val in enumerate(header_row):
+        if val is None:
+            continue
+        # Normalize header: strip newlines and extra whitespace
+        raw = str(val).strip().replace('\n', ' ').strip()
+        raw_lower = raw.lower()
+        # Skip known non-exam columns
+        if any(s in raw_lower for s in SKIP_COLS):
+            continue
+        # Skip CO columns (already handled above)
+        if raw.upper().startswith('CO') and raw[2:3].isdigit():
+            continue
+        # Include columns that look like exam components: contain letters and are reasonable headers
+        if raw and not raw.replace('.','').replace('/','').isdigit():
+            # Strip marks suffix like "/10", "/5", "/60"
+            import re as _re2
+            clean = _re2.sub(r'\s*/\s*\d+', '', raw).strip()
+            if clean and clean.lower() not in SKIP_COLS:
+                exam_columns[j] = clean
+
     students = []
     for row in all_rows[header_row_idx + 1:]:
         if not row or len(row) < 3:
@@ -90,12 +114,12 @@ def parse_marks_xlsx(file_bytes: bytes) -> List[dict]:
         # Skip non-PRN rows (headers, "Max →", section markers, class average)
         if isinstance(prn, str) and not prn_str.replace('.','').isdigit():
             continue
-        if isinstance(name, str) and any(x in name.lower() for x in ['section','max','average','class avg']):
+        if isinstance(name, str) and any(x in name.lower() for x in ['section','max','average','class avg','max marks']):
             continue
-        # PRN must be a long number (SIT PRNs are 11 digits starting with 24)
+        # PRN must be a reasonable number (at least 6 digits)
         try:
             prn_int = int(float(prn_str))
-            if prn_int < 1000000000:  # not a valid PRN
+            if prn_int < 100000:  # not a valid PRN
                 continue
         except (ValueError, TypeError):
             continue
@@ -103,8 +127,29 @@ def parse_marks_xlsx(file_bytes: bytes) -> List[dict]:
         student_id = str(int(float(str(prn)))).strip()
         student_name = str(name).strip().replace('\xa0', '').strip()
 
-        # Build marks dict — if CO columns exist use them, else put all numeric cols under CO1
+        # Build marks dict
         marks = {}
+        if exam_columns:
+            # Exam-wise format: store each exam as its own component under a "Marks" key
+            # Use component name as the CO key so the frontend can display columns per exam
+            for col_idx, exam_name in exam_columns.items():
+                val = row[col_idx] if col_idx < len(row) else None
+                # Skip "—", "N/A", empty
+                if val is None or str(val).strip() in ('', '—', 'N/A'):
+                    continue
+                try:
+                    marks[exam_name] = float(val)
+                except (TypeError, ValueError):
+                    pass
+            # Store as flat exam→mark mapping under a special key
+            if marks:
+                students.append({
+                    "student_id": student_id,
+                    "student_name": student_name,
+                    "marks": marks,   # flat: {"Quiz": 8.5, "Unit Test": 7.0, ...}
+                    "_format": "exam_wise",
+                })
+                continue
         if co_columns:
             for col_idx, co_name in co_columns.items():
                 val = row[col_idx] if col_idx < len(row) else None
@@ -158,9 +203,29 @@ async def upload_marks_xlsx(
         if not students:
             raise HTTPException(status_code=400, detail="No student records found in the file. Check the format.")
         logger.info(f"Parsed {len(students)} students from xlsx")
+        # Detect if this is an exam-wise file (flat marks dict)
+        is_exam_wise = any(s.get("_format") == "exam_wise" for s in students)
+        # Clean up the _format key and normalize marks for saving
+        cleaned_students = []
+        for s in students:
+            fmt = s.pop("_format", None)
+            if fmt == "exam_wise":
+                # Store flat exam marks directly — frontend handles display
+                cleaned_students.append({
+                    "student_id": s["student_id"],
+                    "student_name": s["student_name"],
+                    "marks": s["marks"],  # {"Quiz": 8.5, "Unit Test": 7.0, ...}
+                })
+            else:
+                cleaned_students.append(s)
         service = AttainmentService(db)
-        result = await service.save_marks(course_id, students)
-        return {"status": "success", "data": result, "parsed_students": len(students)}
+        result = await service.save_marks(course_id, cleaned_students)
+        return {
+            "status": "success",
+            "data": result,
+            "parsed_students": len(cleaned_students),
+            "format": "exam_wise" if is_exam_wise else "co_wise",
+        }
     except HTTPException:
         raise
     except ValueError as e:
