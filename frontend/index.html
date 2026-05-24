@@ -2737,53 +2737,19 @@ function StudyMaterialsPage({course}){
     if(!course)return;
     setAiRecsLoading(true);setAiRecsErr('');
     try{
-      const coList=(course.cos||[]).map(c=>`${c.co_id}: ${c.statement||''}`).join('\n');
-      const syllabus=(course.syllabus_units||[]).map(u=>`Unit ${u.unit_no||''}: ${u.title||u.unit_title||''} — ${u.topics||''}`).join('\n')||'';
-      const prompt=`You are an academic resource advisor. Given the course below, recommend specific study materials.
-
-Course: ${course.course_name} (${course.course_code})
-Department: ${course.department||''}
-Semester: ${course.semester||''}
-
-Course Outcomes:
-${coList||'Not specified'}
-
-Syllabus:
-${syllabus||'Not specified'}
-
-Respond ONLY with a JSON object (no markdown, no explanation) in exactly this format:
-{
-  "textbooks": [
-    {"title":"","author":"","publisher":"","reason":"why this book fits the COs"}
-  ],
-  "web": [
-    {"title":"","url":"","unit":"which unit/CO it covers","reason":""}
-  ],
-  "journals": [
-    {"title":"","url":"","reason":""}
-  ],
-  "moocs": [
-    {"title":"","platform":"","url":"","duration":"","reason":""}
-  ]
-}
-
-Give 3-4 items per category. Be specific — use real book titles, real NPTEL/Coursera URLs where known, actual IEEE/Springer journal names. Tailor everything to the exact course topics.`;
-
-      const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      const resp=await api(`/ai/study-materials/${course.id}`,{
         method:'POST',
-        headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
-          model:'claude-sonnet-4-20250514',
-          max_tokens:1000,
-          messages:[{role:'user',content:prompt}]
+          course_name:course.course_name||'',
+          course_code:course.course_code||'',
+          department:course.department||'',
+          semester:course.semester||'',
+          cos:course.cos||[],
+          syllabus_units:course.syllabus_units||[],
         })
       });
-      const d=await resp.json();
-      const raw=d.content?.find(b=>b.type==='text')?.text||'{}';
-      const clean=raw.replace(/```json|```/g,'').trim();
-      const parsed=JSON.parse(clean);
+      const parsed=resp.data||resp;
       setAiRecs(parsed);
-      // clear dismissed when fresh recs arrive
       setDismissedRecs([]);
       sessionStorage.removeItem(`mat_dismissed_${course?.id}`);
     }catch(e){setAiRecsErr('Could not generate AI recommendations. Try again.');}

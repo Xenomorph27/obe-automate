@@ -4,16 +4,114 @@ AI Table Chat endpoint
 Receives table context + user message, returns a structured action via Gemini.
 Used by Session Plan and Evaluation Plan pages for the AI assistant panel.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from backend.core.llm import get_llm_response
 from backend.core.logger import get_logger
 from backend.core.auth import get_current_user
 from backend.database.user_models import User
+from backend.database.connection import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
+
+
+class TableCol(BaseModel):
+    key: str
+    label: str
+
+
+class TableChatRequest(BaseModel):
+    user_message: str
+    cols: List[TableCol]
+    rows: List[dict]
+    plan_type: str = "session"  # "session" or "evaluation"
+
+
+class StudyMaterialRequest(BaseModel):
+    course_name: str
+    course_code: str
+    department: Optional[str] = ""
+    semester: Optional[str] = ""
+    cos: Optional[List[dict]] = []
+    syllabus_units: Optional[List[dict]] = []
+
+
+@router.post("/study-materials/{course_id}")
+async def get_study_material_recommendations(
+    course_id: int,
+    req: StudyMaterialRequest,
+    current_user: User = Depends(get_current_user),
+):
+    co_list = "\n".join(
+        f"{c.get('co_id','')}: {c.get('statement','')}"
+        for c in (req.cos or [])
+        if c.get("co_id")
+    ) or "Not specified"
+
+    syllabus = "\n".join(
+        f"Unit {u.get('unit_no','')}: {u.get('title') or u.get('unit_title','')} — {u.get('topics','')}"
+        for u in (req.syllabus_units or [])
+    ) or "Not specified"
+
+    prompt = f"""You are an academic resource advisor for an Indian engineering college.
+Given the course below, recommend specific study materials used in Indian universities.
+
+Course: {req.course_name} ({req.course_code})
+Department: {req.department or 'Engineering'}
+Semester: {req.semester or ''}
+
+Course Outcomes:
+{co_list}
+
+Syllabus:
+{syllabus}
+
+Respond ONLY with a valid JSON object (no markdown, no explanation, no code fences) in exactly this format:
+{{
+  "textbooks": [
+    {{"title":"","author":"","publisher":"","reason":"why this book fits the COs"}}
+  ],
+  "web": [
+    {{"title":"","url":"","unit":"which unit/CO it covers","reason":""}}
+  ],
+  "journals": [
+    {{"title":"","url":"","reason":""}}
+  ],
+  "moocs": [
+    {{"title":"","platform":"","url":"","duration":"","reason":""}}
+  ]
+}}
+
+Rules:
+- Give 3-4 items per category
+- Use real book titles commonly prescribed in Indian engineering syllabi
+- For web: prefer NPTEL (nptel.ac.in), GeeksforGeeks, Coursera free courses, YouTube playlists
+- For journals: use IEEE Xplore, Springer, Elsevier — relevant to the topics
+- For MOOCs: prefer NPTEL SWAYAM, Coursera, NPTEL YouTube
+- Tailor everything to the exact course topics and COs above
+- reason field must explain which specific CO or topic this covers"""
+
+    import json, re
+    try:
+        raw = await get_llm_response(prompt)
+        clean = raw.strip()
+        if clean.startswith("```"):
+            clean = re.sub(r"^```(?:json)?\s*", "", clean)
+            clean = re.sub(r"\s*```$", "", clean)
+        clean = clean.strip()
+        parsed = json.loads(clean)
+        return {"ok": True, "data": parsed}
+    except json.JSONDecodeError as e:
+        logger.error(f"Study materials JSON parse error: {e} | raw: {raw[:300] if 'raw' in dir() else 'N/A'}")
+        raise HTTPException(status_code=500, detail="AI returned invalid response. Please try again.")
+    except Exception as e:
+        logger.error(f"Study materials recommendation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 class TableCol(BaseModel):
