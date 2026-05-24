@@ -4216,6 +4216,7 @@ function MasterAttainmentPage({course}){
     }catch(e){setLoadFromDBErr(e.message);}
     setLoadingFromDB(false);
   };
+  const [bulkQpFile,setBulkQpFile]=React.useState(null);
   const [bulkMarksFile,setBulkMarksFile]=React.useState(null);
   const [bulkQpLoading,setBulkQpLoading]=React.useState(false);
   const [bulkMarksLoading,setBulkMarksLoading]=React.useState(false);
