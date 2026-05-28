@@ -360,7 +360,7 @@ tbody tr:hover{background:var(--bg)}
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
-const API='';
+const API='https://obe-automate.onrender.com';
 
 // ── JWT token storage (session only — lost on tab close by design) ──────────
 let _token = sessionStorage.getItem('obe_token') || '';
@@ -4265,7 +4265,7 @@ function ReportsPage({course}){
 // ── HOD DASHBOARD ─────────────────────────────────────────────────────────
 // ── MASTER ATTAINMENT FILE ─────────────────────────────────────────────────
 function MasterAttainmentPage({course}){
-  const API=window.API||'';
+  const API=window.API||'https://obe-automate.onrender.com';
   const tok=()=>sessionStorage.getItem('obe_token');
   const hdr=()=>({Authorization:'Bearer '+tok(),'Content-Type':'application/json'});
   const hdrForm=()=>({Authorization:'Bearer '+tok()});
