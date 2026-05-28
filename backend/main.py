@@ -55,13 +55,12 @@ app = FastAPI(
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 # Only allow your Railway domain + localhost in dev
-_ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
-if not _ALLOWED_ORIGINS:
-    _ALLOWED_ORIGINS = ["http://localhost:8000", "http://localhost:3000", "http://127.0.0.1:8000"]
-
-# Always include Vercel domain
-_ALLOWED_ORIGINS.append("https://obe-automate.vercel.app")
-
+_ALLOWED_ORIGINS = [
+    "https://obe-automate.vercel.app",
+    "http://localhost:8000",
+    "http://localhost:3000",
+    "http://127.0.0.1:8000",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
