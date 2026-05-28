@@ -21,8 +21,8 @@ class User(Base):
     role = Column(String(50), nullable=False, default="faculty")  # faculty | hod | admin
     department = Column(String(200), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_login = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    last_login = Column(DateTime(timezone=True), nullable=True)
 
     def to_dict(self):
         return {
