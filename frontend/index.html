@@ -355,8 +355,137 @@ tbody tr:hover{background:var(--bg)}
   background:rgba(234,88,12,.12) !important;
 }
 </style>
+<style>
+/* ── OBE Automate Splash Screen ─────────────────────────────────────── */
+#obe-splash{
+  position:fixed;inset:0;z-index:99999;
+  background:#0a0a0a;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  overflow:hidden;
+  transition:opacity .55s ease, visibility .55s ease;
+}
+#obe-splash.fade-out{opacity:0;visibility:hidden;pointer-events:none;}
+
+/* Horizontal scan line (Ferrari-style reveal) */
+#obe-splash::before{
+  content:'';
+  position:absolute;top:0;left:-100%;width:60%;height:100%;
+  background:linear-gradient(90deg,transparent,rgba(234,88,12,.08),rgba(234,88,12,.18),rgba(234,88,12,.08),transparent);
+  animation:splash-scan 1.6s ease-in-out .3s forwards;
+  pointer-events:none;
+}
+@keyframes splash-scan{
+  0%{left:-60%;}
+  100%{left:120%;}
+}
+
+/* Logo mark container */
+.splash-logo-wrap{
+  position:relative;
+  display:flex;flex-direction:column;align-items:center;gap:0;
+  animation:splash-rise .7s cubic-bezier(.22,1,.36,1) .1s both;
+}
+@keyframes splash-rise{
+  from{opacity:0;transform:translateY(28px);}
+  to{opacity:1;transform:translateY(0);}
+}
+
+/* SVG shield/crest icon */
+.splash-icon{
+  width:72px;height:72px;
+  margin-bottom:6px;
+  filter:drop-shadow(0 0 18px rgba(234,88,12,.55));
+  animation:splash-glow 2s ease-in-out .8s infinite alternate;
+}
+@keyframes splash-glow{
+  from{filter:drop-shadow(0 0 14px rgba(234,88,12,.45));}
+  to{filter:drop-shadow(0 0 30px rgba(234,88,12,.85));}
+}
+
+/* Wordmark */
+.splash-wordmark{
+  font-family:'DM Serif Display',serif;
+  font-size:3.2rem;letter-spacing:-.02em;
+  color:#fff;line-height:1;
+  animation:splash-rise .7s cubic-bezier(.22,1,.36,1) .22s both;
+}
+.splash-wordmark span{color:#EA580C;}
+
+.splash-tagline{
+  font-family:'DM Sans',sans-serif;
+  font-size:.78rem;letter-spacing:.22em;text-transform:uppercase;
+  color:rgba(255,255,255,.38);margin-top:.55rem;
+  animation:splash-rise .7s cubic-bezier(.22,1,.36,1) .35s both;
+}
+
+/* Bottom progress bar */
+.splash-bar-track{
+  position:absolute;bottom:0;left:0;right:0;height:2px;
+  background:rgba(255,255,255,.06);
+}
+.splash-bar-fill{
+  height:100%;width:0%;background:linear-gradient(90deg,#EA580C,#f97316);
+  animation:splash-bar 1.55s cubic-bezier(.4,0,.2,1) .2s forwards;
+  box-shadow:0 0 12px rgba(234,88,12,.8);
+}
+@keyframes splash-bar{
+  0%{width:0%;}
+  60%{width:75%;}
+  85%{width:92%;}
+  100%{width:100%;}
+}
+
+/* Decorative corner lines (Ferrari-inspired geometric) */
+.splash-corner{
+  position:absolute;width:48px;height:48px;
+  border-color:rgba(234,88,12,.45);border-style:solid;
+}
+.splash-corner.tl{top:28px;left:28px;border-width:2px 0 0 2px;animation:splash-rise .5s ease .05s both;}
+.splash-corner.tr{top:28px;right:28px;border-width:2px 2px 0 0;animation:splash-rise .5s ease .1s both;}
+.splash-corner.bl{bottom:28px;left:28px;border-width:0 0 2px 2px;animation:splash-rise .5s ease .15s both;}
+.splash-corner.br{bottom:28px;right:28px;border-width:0 2px 2px 0;animation:splash-rise .5s ease .2s both;}
+</style>
 </head>
 <body>
+
+<!-- ── Splash Screen ───────────────────────────────────────────────── -->
+<div id="obe-splash">
+  <div class="splash-corner tl"></div>
+  <div class="splash-corner tr"></div>
+  <div class="splash-corner bl"></div>
+  <div class="splash-corner br"></div>
+
+  <div class="splash-logo-wrap">
+    <!-- Shield / crest SVG icon -->
+    <svg class="splash-icon" viewBox="0 0 72 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M36 2L6 14v22c0 18.2 12.8 35.2 30 39 17.2-3.8 30-20.8 30-39V14L36 2z" fill="#EA580C" opacity=".15"/>
+      <path d="M36 2L6 14v22c0 18.2 12.8 35.2 30 39 17.2-3.8 30-20.8 30-39V14L36 2z" stroke="#EA580C" stroke-width="1.8" stroke-linejoin="round"/>
+      <path d="M36 8L11 18v18c0 14.8 10.4 28.6 25 32 14.6-3.4 25-17.2 25-32V18L36 8z" fill="#EA580C" opacity=".08"/>
+      <!-- Stylised OBE letters -->
+      <text x="36" y="49" text-anchor="middle" font-family="DM Serif Display,serif" font-size="20" fill="#EA580C" font-weight="700">OBE</text>
+    </svg>
+
+    <div class="splash-wordmark">OBE<span>.</span>Auto</div>
+    <div class="splash-tagline">Accreditation Engine &nbsp;·&nbsp; v0.1</div>
+  </div>
+
+  <div class="splash-bar-track">
+    <div class="splash-bar-fill"></div>
+  </div>
+</div>
+
+<script>
+// Dismiss splash after animations complete (~1.9s) then let React take over
+(function(){
+  var el=document.getElementById('obe-splash');
+  if(!el)return;
+  setTimeout(function(){
+    el.classList.add('fade-out');
+    setTimeout(function(){el.remove();},600);
+  },1900);
+})();
+</script>
+
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
