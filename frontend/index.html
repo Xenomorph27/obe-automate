@@ -529,7 +529,7 @@ function Sidebar({page,go,course,user,logout,open,close}){
     {s:'STUDENTS & MATERIALS'},
     {p:'students',i:'👥',n:'Students Roster'},{p:'materials',i:'📚',n:'Study Materials'},{p:'student_portal',i:'🎓',n:'Student Portal'},
     {s:'ATTAINMENT'},
-    {p:'marks',i:'✏',n:'Upload Marks'},{p:'attainment',i:'📊',n:'CO/PO Attainment'},{p:'reports',i:'📑',n:'Reports'},{p:'master_attainment',i:'📊',n:'Master Attainment File'},
+    {p:'marks',i:'✏',n:'Upload Marks'},{p:'attainment',i:'📊',n:'CO/PO Attainment'},{p:'reports',i:'📑',n:'Reports'},{p:'master_attainment',i:'📊',n:'Master Attainment File'},{p:'course_file',i:'📁',n:'Course File'},
     {s:'QUESTIONS'},
     {p:'qgenerate',i:'✨',n:'Generate Question'},{p:'qpaper',i:'📋',n:'Question Paper'},
     {p:'qbank',i:'🗄',n:'Question Bank'},{p:'qclassify',i:'🔍',n:'Classify Question'},{p:'qmanipulate',i:'🔄',n:'Manipulate Level'},
@@ -4262,6 +4262,237 @@ function ReportsPage({course}){
   </div>);
 }
 
+// ── COURSE FILE ─────────────────────────────────────────────────────────────
+function CourseFilePage({course}){
+  const API=window.API||'https://obe-automate.onrender.com';
+  const tok=()=>sessionStorage.getItem('obe_token');
+  const hdr=()=>({Authorization:'Bearer '+tok(),'Content-Type':'application/json'});
+  const hdrForm=()=>({Authorization:'Bearer '+tok()});
+
+  const [loading,setLoading]=React.useState(false);
+  const [saving,setSaving]=React.useState(false);
+  const [generating,setGenerating]=React.useState(false);
+  const [err,setErr]=React.useState('');
+  const [ok,setOk]=React.useState('');
+  const [generated,setGenerated]=React.useState(false);
+  const [activeSection,setActiveSection]=React.useState('info');
+
+  const [extra,setExtra]=React.useState({
+    vision_text:'',mission_text:'',batch:'',
+    prev_co_attainment:'',action_plan:'',
+    slow_learners:'',advanced_learners:'',
+    activity_reports:'',learning_material_links:'',attendance_links:'',
+  });
+
+  React.useEffect(()=>{
+    if(!course) return;
+    setLoading(true);
+    fetch(API+'/course-file/extra/'+course.id,{headers:hdrForm()})
+      .then(r=>r.json()).then(d=>{
+        if(d.data&&Object.keys(d.data).length>0) setExtra(e=>({...e,...d.data}));
+      }).catch(()=>{}).finally(()=>setLoading(false));
+  },[course?.id]);
+
+  const saveExtra=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setSaving(true);setErr('');setOk('');
+    try{
+      const r=await fetch(API+'/course-file/extra/'+course.id,{
+        method:'POST',headers:hdr(),body:JSON.stringify(extra)
+      });
+      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
+      setOk('Saved successfully!');setTimeout(()=>setOk(''),3000);
+    }catch(e){setErr(e.message);}
+    setSaving(false);
+  };
+
+  const generate=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    // Auto-save extra fields first
+    await saveExtra();
+    setGenerating(true);setErr('');setOk('');
+    try{
+      const r=await fetch(API+'/course-file/generate/'+course.id,{method:'POST',headers:hdr()});
+      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
+      const data=await r.json();
+      setGenerated(true);
+      const s=data.data?.sections_with_data||{};
+      const missing=[];
+      if(!s.session_plan) missing.push('Session Plan (go to Session Plan page)');
+      if(!s.evaluation_plan) missing.push('Evaluation Plan (go to Evaluation Plan page)');
+      if(!s.vision_mission) missing.push('Vision & Mission (fill in the Info tab below)');
+      setOk('Course file generated!'+(missing.length?'\n\nNote: These sections have placeholder text — fill them in:\n• '+missing.join('\n• '):''));
+    }catch(e){setErr(e.message);}
+    setGenerating(false);
+  };
+
+  const field=(label,key,multiline,rows=3,placeholder='')=>(
+    <div style={{marginBottom:'1rem'}}>
+      <label style={{display:'block',fontWeight:600,fontSize:'.82rem',marginBottom:4,color:'var(--text)'}}>{label}</label>
+      {multiline
+        ?<textarea value={extra[key]||''} onChange={e=>setExtra(x=>({...x,[key]:e.target.value}))}
+            rows={rows} placeholder={placeholder}
+            style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--border)',
+              fontFamily:'inherit',fontSize:'.85rem',resize:'vertical',boxSizing:'border-box'}}/>
+        :<input type="text" value={extra[key]||''} onChange={e=>setExtra(x=>({...x,[key]:e.target.value}))}
+            placeholder={placeholder}
+            style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--border)',
+              fontSize:'.85rem',boxSizing:'border-box'}}/>
+      }
+    </div>
+  );
+
+  const tabs=[
+    {k:'info',label:'📋 Course Info'},
+    {k:'vision',label:'🎯 Vision & Mission'},
+    {k:'previous',label:'📊 Prev. Attainment'},
+    {k:'learners',label:'👥 Learners'},
+    {k:'misc',label:'🔗 Links & Activities'},
+  ];
+
+  const tabContent={
+    info:<div>
+      <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>
+        Basic info pulled from the course setup. The batch field is the only new one — add it here.
+      </p>
+      {field('Batch (e.g. 2024-28)','batch',false,1,'e.g. 2024-28')}
+      <div style={{background:'var(--card-bg)',padding:'1rem',borderRadius:8,fontSize:'.82rem',marginTop:'1rem'}}>
+        <div><strong>Auto-populated from course data:</strong></div>
+        <div style={{marginTop:'.5rem',color:'var(--muted)'}}>
+          Department: {course?.department||'—'} &nbsp;|&nbsp;
+          Course: {course?.course_name} ({course?.course_code}) &nbsp;|&nbsp;
+          Semester: {course?.semester} &nbsp;|&nbsp;
+          Faculty: {course?.faculty_name}
+        </div>
+      </div>
+    </div>,
+    vision:<div>
+      <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>
+        Department-specific. Changes per department — fill in your department's vision & mission here.
+      </p>
+      {field('Vision of the Department','vision_text',true,4,'To impart quality education...')}
+      {field('Mission (one mission point per line, e.g. M1: ..., M2: ...)','mission_text',true,6,
+        'M1: To educate students on cutting-edge technologies...\nM2: To produce quality research...\nM3: To inculcate professional values...')}
+    </div>,
+    previous:<div>
+      <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>
+        Section 5 of the course file — summary of last year's CO attainment and the action plan taken.
+      </p>
+      {field('Previous Year CO Attainment Summary','prev_co_attainment',true,5,
+        'AY 2024-25: CO1 attainment = 2.8, CO2 = 2.1, ...')}
+      {field('Action Plan','action_plan',true,4,
+        'The attainment was higher than set targets. Plan: increase difficulty of CA3...')}
+    </div>,
+    learners:<div>
+      <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>
+        Slow and advanced learners are auto-detected from CA marks (below 40% = slow, above 75% = advanced).
+        You can override them here if needed.
+      </p>
+      {field('Slow Learners (auto-detected from marks, or override here)','slow_learners',true,4,
+        'Leave blank to auto-detect from CA marks...')}
+      {field('Advanced Learners','advanced_learners',true,4,
+        'Leave blank to auto-detect from CA marks...')}
+    </div>,
+    misc:<div>
+      {field('Learning Material Links (one per line)','learning_material_links',true,4,
+        'https://lms.example.edu/mod/folder/...\nhttps://nptel.ac.in/...')}
+      {field('Attendance Links (one per line)','attendance_links',true,3,
+        'Division A: https://lms.example.edu/attendance/...\nDivision B: https://lms.example.edu/attendance/...')}
+      {field('Activity Reports','activity_reports',true,5,
+        'Guest Lecture by Dr. X on Topic Y — 10 Feb 2025\nKaggle Competition conducted — 15 Apr 2025...')}
+    </div>,
+  };
+
+  if(!course) return(
+    <div className="empty-state">
+      <div className="empty-state-icon">📁</div>
+      <div className="empty-state-title">No course selected</div>
+      <div className="empty-state-desc">Select a course from the dropdown to generate its course file.</div>
+    </div>
+  );
+
+  return(
+    <div style={{maxWidth:860,margin:'0 auto',padding:'1rem'}}>
+      {/* Header + Generate button */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'1.5rem',gap:'1rem',flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:'1.1rem',marginBottom:4}}>Full Course File Generator</div>
+          <div style={{fontSize:'.83rem',color:'var(--muted)'}}>
+            Generates all 13 sections of the OBE course file as a Word document.
+            Fill in the details below, then click Generate.
+          </div>
+        </div>
+        <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap'}}>
+          <button onClick={saveExtra} disabled={saving}
+            style={{padding:'0.55rem 1.2rem',background:'var(--card-bg)',color:'var(--text)',
+              border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',fontWeight:600,fontSize:'.85rem'}}>
+            {saving?'Saving…':'💾 Save'}
+          </button>
+          <button onClick={generate} disabled={generating}
+            style={{padding:'0.55rem 1.4rem',background:'var(--blue2)',color:'#fff',
+              border:'none',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:'.9rem'}}>
+            {generating?<span>⏳ Generating…</span>:<span>⚡ Generate Course File</span>}
+          </button>
+          {generated&&<a href={API+'/course-file/download/'+course.id}
+            style={{padding:'0.55rem 1.2rem',background:'#16a34a',color:'#fff',
+              border:'none',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:'.9rem',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:4}}>
+            ⬇ Download .docx
+          </a>}
+        </div>
+      </div>
+
+      {err&&<div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'0.75rem 1rem',marginBottom:'1rem',color:'#b91c1c',fontSize:'.85rem',whiteSpace:'pre-wrap'}}>{err}</div>}
+      {ok&&<div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'0.75rem 1rem',marginBottom:'1rem',color:'#166534',fontSize:'.85rem',whiteSpace:'pre-wrap'}}>{ok}</div>}
+
+      {/* Data completeness checklist */}
+      <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem 1.2rem',marginBottom:'1.5rem'}}>
+        <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'.6rem'}}>Auto-populated sections (no action needed)</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'.4rem .8rem',fontSize:'.82rem'}}>
+          {[
+            {label:'Student List',ok:true,note:'from Students Roster'},
+            {label:'CO Statements & CO-PO Matrix',ok:true,note:'from Course Setup'},
+            {label:'Session Plan',ok:!!course,note:'from Session Plan page'},
+            {label:'Evaluation Plan',ok:!!course,note:'from Evaluation Plan page'},
+            {label:'CA Marks',ok:!!course,note:'from Master Attainment File'},
+            {label:'Question Bank',ok:!!course,note:'from Question Bank page'},
+            {label:'CO Attainment',ok:!!course,note:'auto-calculated from marks'},
+            {label:'Slow/Advanced Learners',ok:!!course,note:'auto-detected from marks'},
+          ].map(item=>(
+            <div key={item.label} style={{display:'flex',alignItems:'center',gap:6,color:'var(--text)'}}>
+              <span style={{color:item.ok?'#16a34a':'#dc2626',fontWeight:700}}>{item.ok?'✓':'○'}</span>
+              <span>{item.label}</span>
+              <span style={{color:'var(--muted)',fontSize:'.78rem'}}>({item.note})</span>
+            </div>
+          ))}
+        </div>
+        <div style={{marginTop:'.6rem',fontSize:'.8rem',color:'var(--muted)'}}>
+          ↓ Fill in the tabs below for the remaining sections:
+        </div>
+      </div>
+
+      {/* Tab navigation */}
+      <div style={{display:'flex',gap:4,borderBottom:'2px solid var(--border)',marginBottom:'1.2rem',overflowX:'auto'}}>
+        {tabs.map(t=>(
+          <button key={t.k} onClick={()=>setActiveSection(t.k)}
+            style={{padding:'0.5rem 0.9rem',background:'none',border:'none',cursor:'pointer',
+              fontWeight:activeSection===t.k?700:400,
+              color:activeSection===t.k?'var(--blue2)':'var(--muted)',
+              borderBottom:activeSection===t.k?'2px solid var(--blue2)':'2px solid transparent',
+              marginBottom:-2,whiteSpace:'nowrap',fontSize:'.85rem'}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1.2rem'}}>
+        {loading?<div style={{textAlign:'center',padding:'2rem',color:'var(--muted)'}}>Loading saved data…</div>
+          :tabContent[activeSection]}
+      </div>
+    </div>
+  );
+}
+
 // ── HOD DASHBOARD ─────────────────────────────────────────────────────────
 // ── MASTER ATTAINMENT FILE ─────────────────────────────────────────────────
 function MasterAttainmentPage({course}){
@@ -6216,7 +6447,7 @@ function App(){
 
   if(!user)return<Login onLogin={setUser}/>;
 
-  const titles={home:'Dashboard',courses:'Courses',usermgmt:'User Management',profile:'My Profile',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Level',students:'Student Roster',materials:'Study Materials',student_portal:'Student Portal'};
+  const titles={home:'Dashboard',courses:'Courses',usermgmt:'User Management',profile:'My Profile',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Level',students:'Student Roster',materials:'Study Materials',student_portal:'Student Portal',master_attainment:'Master Attainment File',course_file:'Course File Generator'};
 
   const pages={
     home:<HomePage go={setPage} setCourse={saveCourse}/>,
@@ -6241,6 +6472,7 @@ function App(){
     usermgmt:<UserMgmtPage currentUser={user}/>,
     profile:<ProfilePage user={user} logout={()=>{setToken('');setUser(null);setPage('home');saveCourse(null);}}/>,
     master_attainment:<MasterAttainmentPage course={course}/>,
+    course_file:<CourseFilePage course={course}/>,
   };
 
   return(<div className="shell">

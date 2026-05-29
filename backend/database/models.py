@@ -27,6 +27,8 @@ class Course(Base):
     questions = relationship("Question", back_populates="course", cascade="all, delete-orphan")
     ca_sheets = relationship("CASheet", back_populates="course", cascade="all, delete-orphan")
     eval_plan_rows = relationship("EvalPlanRow", back_populates="course", cascade="all, delete-orphan")
+    session_plan_rows = relationship("SessionPlanRow", back_populates="course", cascade="all, delete-orphan")
+    course_file_extra = relationship("CourseFileExtra", back_populates="course", uselist=False, cascade="all, delete-orphan")
 
     @property
     def cos(self): return json.loads(self._cos)
@@ -152,6 +154,79 @@ class EvalPlanRow(Base):
     def cols(self): return json.loads(self._cols)
     @cols.setter
     def cols(self, value): self._cols = json.dumps(value)
+
+
+class SessionPlanRow(Base):
+    """Stores saved session plan rows in DB so they survive server restarts."""
+    __tablename__ = "session_plan_rows"
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    _rows = Column("rows", Text, nullable=False, default="[]")
+    _cols = Column("cols", Text, nullable=False, default="[]")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    course = relationship("Course", back_populates="session_plan_rows")
+    __table_args__ = (UniqueConstraint("course_id", name="uq_session_plan"),)
+
+    @property
+    def rows(self): return json.loads(self._rows)
+    @rows.setter
+    def rows(self, value): self._rows = json.dumps(value)
+    @property
+    def cols(self): return json.loads(self._cols)
+    @cols.setter
+    def cols(self, value): self._cols = json.dumps(value)
+
+
+class CourseFileExtra(Base):
+    """
+    Stores additional fields needed for course file generation that aren't
+    in the core Course model. All fields are optional — faculty fills them
+    in the UI before generating the course file.
+    """
+    __tablename__ = "course_file_extra"
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    # Section 1 — Vision & Mission (changes per department)
+    vision_text = Column(Text, nullable=True, default="")
+    mission_text = Column(Text, nullable=True, default="")   # M1, M2, M3 as newline-separated
+
+    # Section 2 — Batch info (e.g. "2024-28")
+    batch = Column(String(20), nullable=True, default="")
+
+    # Section 5 — Previous year CO attainment + action plan
+    prev_co_attainment = Column(Text, nullable=True, default="")   # free-text / JSON summary
+    action_plan = Column(Text, nullable=True, default="")
+
+    # Section 8 — Slow/Advanced learners
+    slow_learners = Column(Text, nullable=True, default="")        # JSON list or free-text
+    advanced_learners = Column(Text, nullable=True, default="")
+
+    # Section 10 — Activity reports
+    activity_reports = Column(Text, nullable=True, default="")
+
+    # Section 11 — Learning material links
+    learning_material_links = Column(Text, nullable=True, default="")  # newline-separated URLs
+
+    # Section 13 — Attendance links
+    attendance_links = Column(Text, nullable=True, default="")
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    course = relationship("Course", back_populates="course_file_extra")
+
+    def to_dict(self):
+        return {
+            "vision_text": self.vision_text or "",
+            "mission_text": self.mission_text or "",
+            "batch": self.batch or "",
+            "prev_co_attainment": self.prev_co_attainment or "",
+            "action_plan": self.action_plan or "",
+            "slow_learners": self.slow_learners or "",
+            "advanced_learners": self.advanced_learners or "",
+            "activity_reports": self.activity_reports or "",
+            "learning_material_links": self.learning_material_links or "",
+            "attendance_links": self.attendance_links or "",
+        }
 
 
 # Import user models so they're registered in Base metadata
