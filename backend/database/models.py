@@ -1,7 +1,7 @@
 # backend/database/models.py
 import json
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from backend.database.connection import Base
 
@@ -25,6 +25,8 @@ class Course(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     attainment_records = relationship("COAttainment", back_populates="course", cascade="all, delete-orphan")
     questions = relationship("Question", back_populates="course", cascade="all, delete-orphan")
+    ca_sheets = relationship("CASheet", back_populates="course", cascade="all, delete-orphan")
+    eval_plan_rows = relationship("EvalPlanRow", back_populates="course", cascade="all, delete-orphan")
 
     @property
     def cos(self): return json.loads(self._cos)
@@ -107,6 +109,49 @@ class Question(Base):
                 "marks":self.marks,"source":self.source,"options":self.options,
                 "parent_question_id":self.parent_question_id,
                 "created_at":self.created_at.isoformat() if self.created_at else None}
+
+
+class CASheet(Base):
+    """Stores master attainment question paper + marks per CA component, persisted in DB."""
+    __tablename__ = "ca_sheets"
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    ca_label = Column(String(100), nullable=False)   # e.g. "Quiz 1", "Unit Test 1", "ESE"
+    _qp = Column("qp", Text, nullable=False, default="[]")      # JSON list of question objects
+    _marks = Column("marks", Text, nullable=False, default="{}")  # JSON dict {prn: {q_no: mark}}
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    course = relationship("Course", back_populates="ca_sheets")
+    __table_args__ = (UniqueConstraint("course_id", "ca_label", name="uq_ca_sheet"),)
+
+    @property
+    def qp(self): return json.loads(self._qp)
+    @qp.setter
+    def qp(self, value): self._qp = json.dumps(value)
+    @property
+    def marks(self): return json.loads(self._marks)
+    @marks.setter
+    def marks(self, value): self._marks = json.dumps(value)
+
+
+class EvalPlanRow(Base):
+    """Stores saved evaluation plan rows in DB so they survive server restarts."""
+    __tablename__ = "eval_plan_rows"
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    _rows = Column("rows", Text, nullable=False, default="[]")   # full rows JSON
+    _cols = Column("cols", Text, nullable=False, default="[]")   # cols JSON
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    course = relationship("Course", back_populates="eval_plan_rows")
+    __table_args__ = (UniqueConstraint("course_id", name="uq_eval_plan"),)
+
+    @property
+    def rows(self): return json.loads(self._rows)
+    @rows.setter
+    def rows(self, value): self._rows = json.dumps(value)
+    @property
+    def cols(self): return json.loads(self._cols)
+    @cols.setter
+    def cols(self, value): self._cols = json.dumps(value)
 
 
 # Import user models so they're registered in Base metadata

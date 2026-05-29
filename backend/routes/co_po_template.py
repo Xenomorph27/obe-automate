@@ -2,14 +2,18 @@
 """
 Routes for generating and downloading the CO-PO Attainment Excel template.
 
-POST /co-po-template/generate/{course_id}   — generate the workbook
-GET  /co-po-template/download/{course_id}   — download the xlsx
+POST /co-po-template/generate/{course_id}         — generate the workbook
+GET  /co-po-template/download/{course_id}         — download the xlsx
+POST /co-po-template/save-sheet/{course_id}/{ca}  — save QP + marks for one CA to DB
+GET  /co-po-template/load-all-sheets/{course_id}  — load all CA sheets from DB
 """
 import os
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from typing import Any, Dict, List
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from backend.core.auth import require_auth
 from backend.core.exceptions import OBEException
@@ -17,6 +21,7 @@ from backend.core.logger import get_logger
 from backend.core.storage import get_storage
 from backend.database.connection import get_db
 from backend.database.user_models import User
+from backend.database.models import CASheet
 from backend.services.co_po_template_service import COPOTemplateService
 
 logger = get_logger(__name__)
@@ -29,6 +34,11 @@ class GenerateRequest(BaseModel):
     qp_source: str = "blank"   # "blank" | "question_bank"
 
 
+class SaveSheetRequest(BaseModel):
+    qp: List[Dict[str, Any]] = []
+    marks: Dict[str, Any] = {}
+
+
 @router.post("/generate/{course_id}", status_code=201)
 async def generate_co_po_template(
     course_id: int,
@@ -36,13 +46,6 @@ async def generate_co_po_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """
-    Generate the CO-PO attainment Excel workbook for a course.
-
-    qp_source options:
-    - "blank"         : Leave question paper sheets empty (faculty fills manually)
-    - "question_bank" : Pre-fill question paper sheets from the course question bank
-    """
     logger.info(f"CO-PO template generation requested for course_id={course_id}, source={body.qp_source}")
     try:
         svc = COPOTemplateService(db)
@@ -76,6 +79,52 @@ async def download_co_po_template(
     )
 
 
+@router.post("/save-sheet/{course_id}/{ca_label}", status_code=200)
+async def save_sheet(
+    course_id: int,
+    ca_label: str,
+    payload: SaveSheetRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Save QP + marks for one CA component to the database."""
+    from urllib.parse import unquote
+    ca_label = unquote(ca_label)
+
+    result = await db.execute(
+        select(CASheet).where(CASheet.course_id == course_id, CASheet.ca_label == ca_label)
+    )
+    sheet = result.scalar_one_or_none()
+
+    if sheet:
+        sheet.qp = payload.qp
+        sheet.marks = payload.marks
+    else:
+        sheet = CASheet(course_id=course_id, ca_label=ca_label)
+        sheet.qp = payload.qp
+        sheet.marks = payload.marks
+        db.add(sheet)
+
+    await db.commit()
+    logger.info(f"Saved CA sheet for course={course_id} ca={ca_label}: {len(payload.qp)} questions, {len(payload.marks)} students")
+    return {"status": "success", "ca_label": ca_label, "questions": len(payload.qp), "students": len(payload.marks)}
+
+
+@router.get("/load-all-sheets/{course_id}")
+async def load_all_sheets(
+    course_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Load all saved CA sheets for a course from the database."""
+    result = await db.execute(
+        select(CASheet).where(CASheet.course_id == course_id)
+    )
+    sheets = result.scalars().all()
+    data = {s.ca_label: {"qp": s.qp, "marks": s.marks} for s in sheets}
+    return {"sheets": data}
+
+
 @router.post("/upload-qp/{course_id}/{ca_label}", status_code=200)
 async def upload_question_paper(
     course_id: int,
@@ -101,7 +150,6 @@ async def upload_question_paper(
             wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
             ws = wb.active
             rows = list(ws.iter_rows(values_only=True))
-            # Find header row
             hdr_idx = None
             for i, row in enumerate(rows):
                 vals = [str(v).strip().lower() if v else "" for v in row]
@@ -129,9 +177,7 @@ async def upload_question_paper(
         except Exception as e:
             raise HTTPException(400, f"Failed to parse xlsx: {str(e)}")
 
-    # Save parsed questions to question bank
     if questions:
-        from sqlalchemy import text as _text
         from backend.database.models import Question, BLOOM_LEVELS
         for q in questions:
             bl = q["bloom_level"]
