@@ -299,7 +299,7 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
 # ─────────────────────────────────────────────────────────────────────────────
 # Marks sheet (ESE_MKS or CA{n}_Marks)
 # ─────────────────────────────────────────────────────────────────────────────
-def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name, students, total_marks):
+def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name, students, total_marks, saved_marks=None, saved_qp=None):
     ws = wb.create_sheet(sheet_name)
     _course_header_block(ws, course)
 
@@ -343,11 +343,25 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name, students
 
     # ── Rows 10+: students ─────────────────────────────────────────────────
     last_q_col = get_column_letter(6 + _MAX_Q - 1)
+    # Build a PRN-normalised lookup for saved marks: str(int(prn)) -> {q_no: mark}
+    _saved = {}
+    if saved_marks:
+        for prn_key, qmarks in saved_marks.items():
+            try:
+                norm = str(int(float(str(prn_key))))
+            except (ValueError, TypeError):
+                norm = str(prn_key).strip()
+            _saved[norm] = qmarks
+
     for idx, s in enumerate(students, 1):
         r = data_start + idx - 1
         fill = _LIGHT_FILL if idx % 2 == 0 else PatternFill()
         # FIX: Store PRN as string to prevent scientific notation
         prn_val = str(s["prn"]) if s["prn"] is not None else ""
+        try:
+            prn_norm = str(int(float(prn_val))) if prn_val else ""
+        except (ValueError, TypeError):
+            prn_norm = prn_val
         _c(ws, r, 1, idx,       fill=fill, align=_CENTER)
         _c(ws, r, 2, "",        fill=fill, align=_CENTER)
         _c(ws, r, 3, prn_val,   fill=fill, align=_CENTER)
@@ -355,8 +369,22 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name, students
         _c(ws, r, 5,
            f"=SUM(F{r}:{last_q_col}{r})",
            fill=fill, align=_CENTER)
+
+        student_marks = _saved.get(prn_norm, {})
         for qi in range(_MAX_Q):
-            _c(ws, r, 6 + qi, None, fill=fill, align=_CENTER)
+            col = 6 + qi
+            mark_val = None
+            if student_marks:
+                # Try qi+1 string key (most common: frontend stores as "1","2","3"...)
+                mark_val = student_marks.get(str(qi + 1))
+                # Try via actual q_no from saved_qp at this position
+                if mark_val is None and saved_qp and qi < len(saved_qp):
+                    actual_qno = str(saved_qp[qi].get("q_no", qi + 1))
+                    mark_val = student_marks.get(actual_qno)
+                # Integer key fallback
+                if mark_val is None:
+                    mark_val = student_marks.get(qi + 1)
+            _c(ws, r, col, mark_val, fill=fill, align=_CENTER)
 
     # ── Summary rows ───────────────────────────────────────────────────────
     s0 = count_end + 3  # first summary row: "CO No | Level | ... No of students"
@@ -640,6 +668,19 @@ class COPOTemplateService:
         )
         return result.scalars().all()
 
+    async def _get_saved_sheets(self, course_id: int) -> dict:
+        """Load all saved CASheet records for a course. Returns {ca_label: {qp:[...], marks:{...}}}."""
+        from sqlalchemy import select
+        from backend.database.models import CASheet
+        try:
+            result = await self.db.execute(
+                select(CASheet).where(CASheet.course_id == course_id)
+            )
+            return {s.ca_label: {"qp": s.qp, "marks": s.marks} for s in result.scalars().all()}
+        except Exception as e:
+            logger.warning(f"Could not load saved CA sheets: {e}")
+            return {}
+
     async def generate(self, course_id: int, qp_source: str = "blank") -> dict:
         course_svc = CourseService(self.db)
         course   = await course_svc.get_course(course_id)
@@ -647,9 +688,25 @@ class COPOTemplateService:
         eval_cfg   = course.evaluation_config
         components = eval_cfg.get("components", {})
 
-        ca_names = sorted([k for k in components.keys()
-                           if k.upper().startswith("CA") or "quiz" in k.lower()
-                           or "unit test" in k.lower() or "test" in k.lower()])
+        # Load all saved CA sheets (QP + marks) that the user entered in the frontend
+        saved_sheets = await self._get_saved_sheets(course_id)
+
+        # Derive CA names: prefer saved sheet labels that match component keys,
+        # then fall back to component keys, then to generic CA1/CA2/CA3
+        ESE_KEYWORDS = {"end semester", "ese", "end-semester", "final exam"}
+        def _is_ese(name):
+            return any(k in name.lower() for k in ESE_KEYWORDS)
+
+        # All component keys that aren't ESE
+        comp_ca_names = sorted([k for k in components.keys() if not _is_ese(k)])
+        # All saved sheet labels that aren't ESE
+        saved_ca_names = [k for k in saved_sheets.keys() if not _is_ese(k)]
+
+        # Merge: start from component keys; add any saved labels not already present
+        ca_names = list(comp_ca_names)
+        for label in saved_ca_names:
+            if label not in ca_names:
+                ca_names.append(label)
         if not ca_names:
             ca_names = [f"CA{i}" for i in range(1, 4)]
         ca_names = ca_names[:5]
@@ -667,8 +724,12 @@ class COPOTemplateService:
         _build_co_list(wb, course)
 
         # 4. ESE_QP + ESE_MKS
-        ese_questions = None
-        if qp_source == "question_bank":
+        # Prefer saved ESE sheet; fall back to question bank
+        ese_saved = saved_sheets.get("ESE", {})
+        ese_saved_qp    = ese_saved.get("qp") or []
+        ese_saved_marks = ese_saved.get("marks") or {}
+        ese_questions = ese_saved_qp or None
+        if not ese_questions and qp_source == "question_bank":
             qs = await self._get_questions(course_id)
             ese_questions = [
                 {"q_no": i+1, "question_text": q.question_text,
@@ -677,15 +738,23 @@ class COPOTemplateService:
             ]
         _build_qp_sheet(wb, "ESE_QP", course, "ESE", questions=ese_questions)
         ese_total = eval_cfg.get("end_sem_total", 60)
-        ese_meta  = _build_marks_sheet(wb, "ESE_MKS", course, "ESE", "ESE_QP", students, ese_total)
+        ese_meta  = _build_marks_sheet(
+            wb, "ESE_MKS", course, "ESE", "ESE_QP", students, ese_total,
+            saved_marks=ese_saved_marks, saved_qp=ese_saved_qp or ese_questions,
+        )
 
         # 5. CA sheets
         marks_meta_list = []
         for ca in ca_names:
             qp_name  = f"{ca}_QP"
             mks_name = f"{ca}_Marks"
-            ca_questions = None
-            if qp_source == "question_bank":
+
+            # Prefer saved QP; fall back to question bank
+            ca_saved     = saved_sheets.get(ca, {})
+            ca_saved_qp    = ca_saved.get("qp") or []
+            ca_saved_marks = ca_saved.get("marks") or {}
+            ca_questions = ca_saved_qp or None
+            if not ca_questions and qp_source == "question_bank":
                 qs = await self._get_questions(course_id)
                 ca_questions = [
                     {"q_no": i+1, "question_text": q.question_text,
@@ -696,7 +765,10 @@ class COPOTemplateService:
             ca_total = components.get(ca, components.get(ca.lower(), 10))
             if not isinstance(ca_total, (int, float)):
                 ca_total = 10
-            meta = _build_marks_sheet(wb, mks_name, course, ca, qp_name, students, ca_total)
+            meta = _build_marks_sheet(
+                wb, mks_name, course, ca, qp_name, students, ca_total,
+                saved_marks=ca_saved_marks, saved_qp=ca_saved_qp or ca_questions,
+            )
             marks_meta_list.append(meta)
 
         # 6. Final_CO_Attn
