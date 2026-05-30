@@ -4975,33 +4975,44 @@ function MasterAttainmentPage({course}){
         // Shared: parse one sheet into questions array
         const parseQPSheet=(ws)=>{
           const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-          // Find the header row that has "Q No" or "Question" column
-          let hdrIdx=rows.findIndex(r=>r.some(c=>{const s=String(c).toLowerCase().trim();return s==='q no'||s==='question'||s==='q#'||s==='q no.';}));
-          if(hdrIdx<0) hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('question')));
-          if(hdrIdx<0) hdrIdx=0;
+          // Find the REAL header row: must have both a Q-number col AND a Marks col
+          // Title rows like "Question Paper — Quiz 1" contain "question" but not "marks"
+          let hdrIdx=rows.findIndex(r=>{
+            const cells=r.map(c=>String(c||'').toLowerCase().trim());
+            const hasQNo=cells.some(c=>c==='q no'||c==='q no.'||c==='q#'||c==='qno'||c==='q. no.'||c==='q. no');
+            const hasMark=cells.some(c=>c==='marks'||c==='mark');
+            return hasQNo&&hasMark;
+          });
+          // Fallback: find row with both "question" AND "marks" as separate cells
+          if(hdrIdx<0) hdrIdx=rows.findIndex(r=>{
+            const cells=r.map(c=>String(c||'').toLowerCase().trim());
+            return cells.some(c=>c.includes('question'))&&cells.some(c=>c==='marks'||c==='mark');
+          });
+          if(hdrIdx<0) return [];
           const hdrRow=rows[hdrIdx];
-          // Col indices - "Q No" is col 0, "Question" is col 1, "Marks" col 2, "CO" col 3, "Bloom Level" col 4
-          const qnoIdx=hdrRow.findIndex(h=>{const s=String(h).toLowerCase().trim();return s==='q no'||s==='q no.'||s==='q#'||s==='qno';});
-          const qIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('question'));
-          const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark'));
-          const coIdx=hdrRow.findIndex(h=>String(h).toLowerCase().trim()==='co'||String(h).toLowerCase().trim()==='co mapped');
-          const blIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('bloom'));
+          const qnoIdx=hdrRow.findIndex(h=>{const s=String(h||'').toLowerCase().trim();return s==='q no'||s==='q no.'||s==='q#'||s==='qno'||s==='q. no.'||s==='q. no';});
+          const qIdx=hdrRow.findIndex(h=>String(h||'').toLowerCase().includes('question'));
+          const mIdx=hdrRow.findIndex(h=>{const s=String(h||'').toLowerCase().trim();return s==='marks'||s==='mark';});
+          const coIdx=hdrRow.findIndex(h=>{const s=String(h||'').toLowerCase().trim();return s==='co'||s==='co mapped'||s==='co-mapped'||s==='co_mapped';});
+          const blIdx=hdrRow.findIndex(h=>String(h||'').toLowerCase().includes('bloom'));
           const qs=[];
           let qCounter=0;
           rows.slice(hdrIdx+1).forEach(row=>{
             const firstCell=String(row[0]||'').trim();
             const qTxt=qIdx>=0?String(row[qIdx]||'').trim():'';
-            // Skip: empty rows, title rows, TOTAL rows, "Max Marks" rows, section dividers
+            // Skip empty rows, TOTAL rows, section dividers
             if(!firstCell&&!qTxt) return;
-            if(/^(total|max|max marks|section|—|q no)/i.test(firstCell)) return;
+            if(/^(total|max|max marks|section|—)/i.test(firstCell)) return;
             if(/^(total|max marks)/i.test(qTxt)) return;
-            if(firstCell.includes('|')||firstCell.includes('·')) return; // title rows
-            // q_no: use qnoIdx col if available and is a number, else auto-increment
+            if(firstCell.includes('|')||firstCell.includes('·')) return;
+            // q_no: use qnoIdx col if it's a number, else auto-increment
             const rawQno=qnoIdx>=0?row[qnoIdx]:null;
             const qno=(rawQno!==null&&rawQno!==''&&!isNaN(Number(rawQno)))?Number(rawQno):(++qCounter);
             const qm=mIdx>=0?parseFloat(row[mIdx])||0:0;
-            if(!qTxt&&!qm) return; // still nothing useful
-            const qco=coIdx>=0?String(row[coIdx]||coList[0]?.co_id||'CO1').trim():(coList[0]?.co_id||'CO1');
+            if(!qTxt&&!qm) return;
+            // CO: use mapped column, fall back to first CO in list
+            const rawCo=coIdx>=0?String(row[coIdx]||'').trim():'';
+            const qco=rawCo||coList[0]?.co_id||'CO1';
             const rawBl=blIdx>=0?String(row[blIdx]||'L2').trim():'L2';
             const qbl=rawBl.match(/L[1-6]/i)?rawBl.match(/L[1-6]/i)[0].toUpperCase():'L2';
             qs.push({q_no:qno,question_text:qTxt,marks:qm,co_id:qco,bloom_level:qbl});
