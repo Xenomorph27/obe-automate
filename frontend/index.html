@@ -5365,8 +5365,7 @@ function MasterAttainmentPage({course}){
           const qColMap={};  // colIdx → q_no (integer)
           let totalColIdx=-1;
           hdrRow.forEach((h,ci)=>{
-            const s=String(h).toLowerCase().replace(/
-/g,' ').trim();
+            const s=String(h).toLowerCase().replace(/\n/g,' ').trim();
             const qm=s.match(/^q(\d+)/i);
             if(qm){qColMap[ci]=parseInt(qm[1]);}
             else if(s==='total'||s.includes('total marks'))totalColIdx=ci;
