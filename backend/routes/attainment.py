@@ -145,11 +145,17 @@ def _parse_one_sheet(ws, component_name: str) -> List[dict]:
         else:
             total_val = sum(sub_marks.values())
 
-        # Store ONLY the Total for each component.
-        # If we stored sub-questions (Q1, Q2, …) as well, the frontend's
-        # co-wise path would flatten them into columns and show Q1/Q2/Q3
-        # instead of the component name — exactly the original bug.
+        # Store Total AND per-question marks (Q1, Q2, …).
+        # Master attainment page uses Q-keys to populate the marks grid directly.
+        # The Current Marks tab only reads "Total" so it stays clean.
         component_marks = {"Total": round(total_val, 4)}
+        for q_label, q_val in sub_marks.items():
+            # Normalise label to a simple integer key so frontend lookup works
+            # e.g. "Q1" → key "1", "Q2" → "2"
+            import re as _re2
+            m = _re2.match(r'^Q(\d+)$', q_label, _re2.IGNORECASE)
+            if m:
+                component_marks[int(m.group(1))] = round(q_val, 4)
 
         if student_id in students:
             # Same student seen again (shouldn't happen within one sheet, but be safe)

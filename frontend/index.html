@@ -4848,63 +4848,103 @@ function MasterAttainmentPage({course}){
       const records=d.data||[];
       if(!records.length){setLoadFromDBErr('No marks uploaded yet. Go to Upload Marks page first.');setLoadingFromDB(false);return;}
 
-      // Detect format: flat exam-wise {"Case Study":2.0} vs nested {"CO1":{"Total":2.0}}
+      // Detect format:
+      // A) flat exam-wise:        {"Quiz 1": 8.5}
+      // B) component-wise nested: {"Quiz 1": {"Total": 8.5}}           ← what our xlsx template produces
+      // C) component-wise q-wise: {"Quiz 1": {"Q1": 2.5, "Q2": 1.5, "Total": 6.5}}  ← ideal
+      // D) co-wise:               {"CO1": {"Total": 8.5}}
       const firstMarks=records[0]?.marks||{};
+      const firstKey=Object.keys(firstMarks)[0]||'';
       const firstVal=Object.values(firstMarks)[0];
       const isFlat=firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object';
+      const isCoWise=!isFlat&&/^CO\d+$/i.test(firstKey);
 
-      if(!isFlat){setLoadFromDBErr('Marks are in CO-wise format, not exam-wise. Re-upload using the exam-wise xlsx first.');setLoadingFromDB(false);return;}
+      if(isCoWise){setLoadFromDBErr('Marks are in CO-wise format. Re-upload using the provided xlsx template (one sheet per component).');setLoadingFromDB(false);return;}
 
-      // Build a map: examName → {prn: mark}
-      const examMap={};
+      // Build examMap: componentName → {prn: {q1:mark, q2:mark, ..., _total:mark}}
+      // For flat format: just store _total. For nested: use Q-keys if present, else _total.
+      const examMap={};  // componentName → {prn → {q_no: val} or {_total: val}}
       records.forEach(rec=>{
         const prn=rec.student_id;
-        Object.entries(rec.marks||{}).forEach(([exam,mark])=>{
+        Object.entries(rec.marks||{}).forEach(([exam,markData])=>{
           if(!examMap[exam]) examMap[exam]={};
-          examMap[exam][prn]=parseFloat(mark)||0;
+          if(isFlat){
+            // flat: markData is a number
+            examMap[exam][prn]={_total:parseFloat(markData)||0};
+          } else {
+            // nested: markData is {Total:8.5} or {Q1:2.5, Q2:1.5, ..., Total:6.5}
+            const qKeys=Object.keys(markData||{}).filter(k=>k!=='Total'&&/^Q\d+$/i.test(k));
+            if(qKeys.length>0){
+              // Has per-question marks — store them by question number
+              const qMarks={};
+              qKeys.forEach(k=>{qMarks[parseInt(k.replace(/[^0-9]/g,''))]=parseFloat(markData[k])||0;});
+              examMap[exam][prn]=qMarks;
+            } else {
+              const tot=parseFloat(markData?.Total||markData)||0;
+              examMap[exam][prn]={_total:tot};
+            }
+          }
         });
       });
 
-      // Match each exam to a CA tab or ESE
+      // Match each exam name to a CA tab or ESE
       const matchTarget=(examName)=>{
         const sn=examName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
         if(/end.*sem|ese/.test(sn)) return '__ESE__';
-        // Exact CA name match
         let t=caNames.find(ca=>ca.toLowerCase()===sn); if(t) return t;
-        // One contains the other
         t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn)); if(t) return t;
-        // Token overlap
         const snToks=sn.split(/\s+/);
         t=caNames.find(ca=>ca.toLowerCase().split(/\s+/).some(tok=>snToks.includes(tok)&&tok.length>2)); if(t) return t;
         return null;
       };
 
       let matched=0;
-      const newCaSheets={...caSheets};
+      const newCaSheets=JSON.parse(JSON.stringify(caSheets));
       let newEseMarks={...eseMarks};
 
       Object.entries(examMap).forEach(([exam,prnMap])=>{
         const target=matchTarget(exam);
         if(!target) return;
         if(target==='__ESE__'){
-          Object.entries(prnMap).forEach(([prn,mark])=>{
-            newEseMarks[prn]={...(newEseMarks[prn]||{}),_total:mark};
+          Object.entries(prnMap).forEach(([prn,mdata])=>{
+            const tot=mdata._total!==undefined?mdata._total:Object.values(mdata).reduce((s,v)=>s+v,0);
+            newEseMarks[prn]={...(newEseMarks[prn]||{}),_total:tot};
           });
           matched++;
         } else {
           const qp=newCaSheets[target]?.qp||[];
-          const newMarks={};
-          Object.entries(prnMap).forEach(([prn,totalMark])=>{
-            if(qp.length>0&&totalMark>0){
-              const maxMarks=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
-              const perQMark={};
-              qp.forEach(q=>{perQMark[q.q_no]=Math.round((parseFloat(q.marks)||0)/maxMarks*totalMark*100)/100;});
-              newMarks[prn]=perQMark;
+          const existingMarks=newCaSheets[target]?.marks||{};
+          const newMarks={...existingMarks};
+          Object.entries(prnMap).forEach(([prn,mdata])=>{
+            const hasQKeys=Object.keys(mdata).some(k=>k!=='_total');
+            if(hasQKeys&&qp.length>0){
+              // We have per-question data — match by q_no directly
+              const qMark={};
+              qp.forEach(q=>{
+                const qn=parseInt(q.q_no);
+                if(mdata[qn]!==undefined) qMark[q.q_no]=mdata[qn];
+              });
+              newMarks[prn]=Object.keys(qMark).length>0?qMark:{_total:Object.values(mdata).reduce((s,v)=>s+(typeof v==='number'?v:0),0)};
+            } else if(hasQKeys){
+              // Have q-keys but no QP loaded yet — store _total
+              const tot=Object.values(mdata).reduce((s,v)=>s+(typeof v==='number'?v:0),0);
+              newMarks[prn]={_total:tot};
             } else {
-              newMarks[prn]={_total:totalMark};
+              // Only _total available
+              const totalMark=mdata._total||0;
+              if(qp.length>0&&totalMark>0){
+                const maxTotal=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                if(maxTotal>0){
+                  const perQ={};
+                  qp.forEach(q=>{perQ[q.q_no]=Math.round((parseFloat(q.marks)||0)/maxTotal*totalMark*100)/100;});
+                  newMarks[prn]=perQ;
+                } else {newMarks[prn]={_total:totalMark};}
+              } else {
+                newMarks[prn]={_total:totalMark};
+              }
             }
           });
-          newCaSheets[target]={...newCaSheets[target],marks:{...(newCaSheets[target]?.marks||{}),...newMarks}};
+          newCaSheets[target]={...newCaSheets[target],marks:newMarks};
           matched++;
         }
       });
@@ -5032,46 +5072,70 @@ function MasterAttainmentPage({course}){
         const wb=XLSX.read(ev.target.result,{type:'array'});
         let matched=0;
 
-        // Shared: find header row, PRN col, marks col, and extract student marks
-        const parseMarksSheet=(ws)=>{
+        // Parse one sheet from the marks template (Q1/Q2/Total columns) — returns {prn: {q_no: val} or {_total: val}}
+        const parseMarksSheet=(ws,targetCA)=>{
           const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-          // Find header row with PRN column
           let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().trim()==='roll no'));
           if(hdrIdx<0) return {};
           const hdrRow=rows[hdrIdx];
           const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().trim()==='roll no');
-          // Marks col: prefer "Marks\n/X" pattern, then "marks", then "total" but NOT "grand total" or "scaled"
-          const mIdx=hdrRow.findIndex(h=>{
-            const s=String(h).toLowerCase().replace(/\n/g,' ');
-            return (s.includes('marks')||s.includes('ese marks'))&&!s.includes('grand')&&!s.includes('scaled')&&!s.includes('out of');
+          if(prnIdx<0) return {};
+          // Map Q-columns and Total column
+          const qColMap={};   // colIdx → q_no (integer)
+          let totalColIdx=-1;
+          hdrRow.forEach((h,ci)=>{
+            const s=String(h).toLowerCase().replace(/\n/g,' ').trim();
+            const qm=s.match(/^q(\d+)/);
+            if(qm){qColMap[ci]=parseInt(qm[1]);}
+            else if(s==='total'||s==='total marks'){totalColIdx=ci;}
           });
+          const hasQCols=Object.keys(qColMap).length>0;
+          // If no total col found, try the last col that looks numeric
+          if(totalColIdx<0){
+            for(let ci=hdrRow.length-1;ci>=0;ci--){
+              const s=String(hdrRow[ci]||'').toLowerCase().replace(/\n/g,' ').trim();
+              if(s&&!s.includes('name')&&!s.includes('prn')&&!s.includes('roll')&&!s.includes('sr')&&!s.includes('section')){totalColIdx=ci;break;}
+            }
+          }
+          const curQP=targetCA?(caSheets[targetCA]?.qp||[]):[];
           const result={};
           rows.slice(hdrIdx+1).forEach(row=>{
             const prn=String(row[prnIdx]||'').trim();
-            // PRN must look like a student PRN: numeric, 8+ digits
             if(!prn||prn.length<6||isNaN(Number(prn))) return;
-            // Skip MAX MARKS row and section divider rows
             const name=String(row[2]||'').trim();
-            if(/max marks|section/i.test(name)) return;
-            const mark=mIdx>=0?parseFloat(row[mIdx]):NaN;
-            if(isNaN(mark)) return;
-            result[prn]=mark;
+            if(/max.*marks|max →|section|average/i.test(name)||/max.*marks|max →/i.test(prn)) return;
+            if(hasQCols&&curQP.length>0){
+              // Map by q_no directly to QP questions
+              const sm={};
+              curQP.forEach(q=>{
+                const qn=parseInt(q.q_no);
+                const ci=Object.keys(qColMap).find(k=>qColMap[k]===qn);
+                if(ci!==undefined){const v=parseFloat(row[parseInt(ci)]);if(!isNaN(v))sm[q.q_no]=v;}
+              });
+              if(Object.keys(sm).length>0){result[prn]=sm;return;}
+            }
+            if(hasQCols){
+              // No QP defined — store by integer question number for later matching
+              const sm={};
+              Object.entries(qColMap).forEach(([ci,qn])=>{const v=parseFloat(row[parseInt(ci)]);if(!isNaN(v))sm[qn]=v;});
+              if(Object.keys(sm).length>0){result[prn]=sm;return;}
+            }
+            // Fall back to Total column
+            const tot=totalColIdx>=0?parseFloat(row[totalColIdx])||0:0;
+            if(tot>0)result[prn]={_total:tot};
           });
           return result;
         };
 
-        // Match sheet to CA or ESE — same logic as QP matching
+        // Match sheet name to CA or ESE
         const matchTarget=(sheetName)=>{
           const sn=sheetName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
           if(/summary|grade|distribution/.test(sn)) return null;
-          // ESE check
           if(/end.*sem|ese|end sem/.test(sn)) return '__ESE__';
-          // CA match
           let t=caNames.find(ca=>ca.toLowerCase()===sn);if(t)return t;
           t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn));if(t)return t;
           const snToks=sn.split(/\s+/);
           t=caNames.find(ca=>ca.toLowerCase().split(/\s+/).some(tok=>snToks.includes(tok)&&tok.length>2));if(t)return t;
-          // Positional fallback
           const validSheets=wb.SheetNames.filter(s=>!/summary|grade|distribution/i.test(s));
           const pos=validSheets.indexOf(sheetName);
           if(pos>=0&&pos<caNames.length)return caNames[pos];
@@ -5082,29 +5146,42 @@ function MasterAttainmentPage({course}){
           const target=matchTarget(sheetName);
           if(!target) return;
           const ws=wb.Sheets[sheetName];
-          const studentMarks=parseMarksSheet(ws);
+          const studentMarks=parseMarksSheet(ws, target==='__ESE__'?null:target);
           const cnt=Object.keys(studentMarks).length;
           if(cnt===0) return;
 
           if(target==='__ESE__'){
-            // ESE: store as _total
             const newMarks={};
-            Object.entries(studentMarks).forEach(([prn,mark])=>{newMarks[prn]={_total:mark};});
+            Object.entries(studentMarks).forEach(([prn,mdata])=>{
+              const tot=mdata._total!==undefined?mdata._total:Object.values(mdata).reduce((s,v)=>s+(typeof v==='number'?v:0),0);
+              newMarks[prn]={_total:tot};
+            });
             setEseMarks(p=>({...p,...newMarks}));
             matched++;
           } else {
-            // CA: distribute across QP if available, else store as _total
             const qp=caSheets[target]?.qp||[];
             const newMarks={};
-            Object.entries(studentMarks).forEach(([prn,totalMark])=>{
-              if(qp.length>0&&totalMark>0){
-                const totalQMax=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
-                if(totalQMax>0){
-                  const sm={};
-                  qp.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
-                  newMarks[prn]=sm;
-                } else {newMarks[prn]={_total:totalMark};}
-              } else {newMarks[prn]={_total:totalMark};}
+            Object.entries(studentMarks).forEach(([prn,mdata])=>{
+              const hasQKeys=Object.keys(mdata).some(k=>k!=='_total');
+              if(hasQKeys&&qp.length>0){
+                // Already mapped by q_no — use directly
+                newMarks[prn]=mdata;
+              } else if(hasQKeys){
+                // No QP — store raw q_no mapping as integers
+                newMarks[prn]=mdata;
+              } else {
+                // Only _total — proportional distribute if QP available
+                const totalMark=mdata._total||0;
+                if(qp.length>0&&totalMark>0){
+                  const totalQMax=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                  if(totalQMax>0){
+                    const sm={};
+                    qp.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+                    newMarks[prn]=sm;return;
+                  }
+                }
+                if(totalMark>0)newMarks[prn]={_total:totalMark};
+              }
             });
             setCaSheets(prev=>({...prev,[target]:{...prev[target],marks:{...prev[target]?.marks,...newMarks}}}));
             matched++;
@@ -5272,28 +5349,66 @@ function MasterAttainmentPage({course}){
         try{
           if(typeof XLSX==='undefined'){setErr('XLSX library not loaded.');return;}
           const wb=XLSX.read(ev.target.result,{type:'array'});
+          // Prefer the sheet matching this CA name, else first sheet
           const sheetName=wb.SheetNames.find(s=>s.toLowerCase().includes(ca.toLowerCase()))||wb.SheetNames[0];
           if(!sheetName){setErr('No sheets found in file.');return;}
           const ws=wb.Sheets[sheetName];
           const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().includes('roll')));
+          // Find header row containing PRN
+          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().trim()==='roll no'));
           if(hdrIdx<0)hdrIdx=0;
           const hdrRow=rows[hdrIdx];
-          const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().includes('roll'));
-          const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark')||String(h).toLowerCase().includes('total'));
+          const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().trim()==='roll no');
           if(prnIdx<0){setErr('Could not find PRN/Roll No column.');return;}
+          // Detect Q-columns: Q1, Q2, Q3… and Total column
+          const SKIP_TOTAL=/total/i;
+          const qColMap={};  // colIdx → q_no (integer)
+          let totalColIdx=-1;
+          hdrRow.forEach((h,ci)=>{
+            const s=String(h).toLowerCase().replace(/
+/g,' ').trim();
+            const qm=s.match(/^q(\d+)/i);
+            if(qm){qColMap[ci]=parseInt(qm[1]);}
+            else if(s==='total'||s.includes('total marks'))totalColIdx=ci;
+          });
+          const hasQCols=Object.keys(qColMap).length>0;
           const curQP=caSheets[ca]?.qp||[];
           const newMarks={};
           rows.slice(hdrIdx+1).forEach(row=>{
             const prn=String(row[prnIdx]||'').trim();
-            if(!prn||prn.length<4)return;
-            const totalMark=mIdx>=0?parseFloat(row[mIdx])||0:0;
+            if(!prn||prn.length<4||isNaN(Number(prn)))return;
+            const name=String(row[2]||'').trim();
+            if(/max|section|average/i.test(name))return;
+            if(hasQCols&&curQP.length>0){
+              // Per-question marks — map q_no directly from QP
+              const sm={};
+              curQP.forEach(q=>{
+                const qn=parseInt(q.q_no);
+                // find col idx for this q_no
+                const ci=Object.keys(qColMap).find(k=>qColMap[k]===qn);
+                if(ci!==undefined){const v=parseFloat(row[parseInt(ci)]);if(!isNaN(v))sm[q.q_no]=v;}
+              });
+              if(Object.keys(sm).length>0){newMarks[prn]=sm;return;}
+            }
+            if(hasQCols&&curQP.length===0){
+              // No QP defined yet — store each Q as numeric key for later matching
+              const sm={};
+              Object.entries(qColMap).forEach(([ci,qn])=>{
+                const v=parseFloat(row[parseInt(ci)]);if(!isNaN(v))sm[qn]=v;
+              });
+              if(Object.keys(sm).length>0){newMarks[prn]=sm;return;}
+            }
+            // Fall back to Total column
+            const totalMark=totalColIdx>=0?parseFloat(row[totalColIdx])||0:0;
             if(curQP.length>0&&totalMark>0){
               const totalQMax=curQP.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
-              const sm={};
-              curQP.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
-              newMarks[prn]=sm;
-            }else{newMarks[prn]={_total:totalMark};}
+              if(totalQMax>0){
+                const sm={};
+                curQP.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+                newMarks[prn]=sm;return;
+              }
+            }
+            if(totalMark>0)newMarks[prn]={_total:totalMark};
           });
           const cnt=Object.keys(newMarks).length;
           setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...p[ca]?.marks,...newMarks}}}));
@@ -5755,24 +5870,26 @@ function MasterAttainmentPage({course}){
 
   const renderBulkUpload=()=>(
     <div style={{display:'flex',flexDirection:'column',gap:'1.5rem'}}>
-      {/* ── Load from already-uploaded marks ── */}
+      {/* ── Load marks from Upload Marks page ── */}
       <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:10,padding:'1.25rem'}}>
-        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.4rem',color:'#166534'}}>⚡ Load from Upload Marks Page</div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.4rem',color:'#166534'}}>⚡ Load Marks from Upload Marks Page</div>
         <div style={{fontSize:'.8rem',color:'#166534',marginBottom:'.85rem',lineHeight:1.6}}>
-          You've already uploaded marks via the <strong>Upload Marks</strong> page. Click below to instantly pull those marks (Case Study, Mind Map, Quiz, Unit Test, ESE) into the correct CA tabs — no file needed.
+          Upload your marks xlsx on the <strong>Upload Marks</strong> page first (one sheet per component — Quiz 1, Unit Test 1, Unit Test 2, Assignment, End Semester).
+          Then click below to pull all marks — including per-question breakdown — directly into the CA tabs. No extra files needed.
         </div>
         {loadFromDBErr&&<div style={{color:'var(--red)',fontSize:'.8rem',marginBottom:'.5rem'}}>{loadFromDBErr}</div>}
         {loadFromDBOk&&<div style={{color:'var(--green)',fontSize:'.8rem',marginBottom:'.5rem'}}>{loadFromDBOk}</div>}
         <button className="btn btn-primary" onClick={loadFromUploadedMarks} disabled={loadingFromDB||!course}
           style={{background:'#16a34a',borderColor:'#16a34a',width:'100%'}}>
-          {loadingFromDB?<><Spin/>Loading…</>:'⚡ Load Marks from Upload Marks Page'}
+          {loadingFromDB?<><Spin/>Loading...</>:'⚡ Pull Marks into CA Tabs'}
         </button>
       </div>
+      {/* ── Upload QPs (optional) ── */}
       <div>
-        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.75rem'}}>📄 Upload All Question Papers</div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.75rem'}}>📄 Upload Question Papers (Optional)</div>
         <div style={{background:'var(--blue3)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem',lineHeight:1.7}}>
-          Upload a single xlsx with <strong>one sheet per component</strong> (sheet names must match component names: Case Study, Quiz, Unit Test, etc.).
-          Each sheet: Question, Marks, CO, Bloom Level columns. Auto-distributed to the right CA tabs.
+          To manually add/override question-paper structure: upload a single xlsx with <strong>one sheet per component</strong>
+          (sheet names must match: Quiz 1, Unit Test 1, etc.). Each sheet: Q No, Question, Marks, CO, Bloom Level columns.
         </div>
         <div onClick={()=>document.getElementById('bulk-qp-input').click()}
           style={{border:'2px dashed '+(bulkQpFile?'var(--green)':'var(--border)'),borderRadius:10,padding:'1.5rem',
@@ -5785,32 +5902,11 @@ function MasterAttainmentPage({course}){
         {bulkQpErr&&<div style={{color:'var(--red)',fontSize:'.8rem',marginBottom:'.5rem'}}>{bulkQpErr}</div>}
         {bulkQpOk&&<div style={{color:'var(--green)',fontSize:'.8rem',marginBottom:'.5rem'}}>✓ {bulkQpOk}</div>}
         <button className="btn btn-primary" onClick={uploadBulkQP} disabled={bulkQpLoading||!bulkQpFile} style={{width:'100%'}}>
-          {bulkQpLoading?React.createElement(Spin,null):null}{bulkQpLoading?'Parsing…':'📤 Upload & Distribute QPs'}
-        </button>
-      </div>
-      <div>
-        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.75rem'}}>✏️ Upload All Marks</div>
-        <div style={{background:'var(--amber2)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'#92400e',marginBottom:'1rem',lineHeight:1.7,border:'1px solid var(--amber)'}}>
-          Upload marks xlsx with <strong>one sheet per component</strong>. Columns: PRN/Roll No, Student Name, Marks (Total).
-          If QPs are loaded first, marks will be distributed across questions proportionally.
-          <br/><strong>Tip: Upload QPs first, then marks.</strong>
-        </div>
-        <div onClick={()=>document.getElementById('bulk-marks-input').click()}
-          style={{border:'2px dashed '+(bulkMarksFile?'var(--green)':'var(--border)'),borderRadius:10,padding:'1.5rem',
-            textAlign:'center',cursor:'pointer',background:bulkMarksFile?'#f0fdf4':'var(--bg)',marginBottom:'.875rem'}}>
-          <div style={{fontSize:'1.8rem',marginBottom:'.4rem'}}>{bulkMarksFile?'✅':'✏️'}</div>
-          <div style={{fontWeight:600,color:bulkMarksFile?'var(--green)':'var(--text)',fontSize:'.85rem'}}>{bulkMarksFile?bulkMarksFile.name:'Click to select Marks xlsx'}</div>
-          <div style={{fontSize:'.74rem',color:'var(--text2)',marginTop:'.2rem'}}>{bulkMarksFile?'Ready to upload':'.xlsx files only'}</div>
-        </div>
-        <input id="bulk-marks-input" type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>{if(e.target.files[0])setBulkMarksFile(e.target.files[0]);}}/>
-        {bulkMarksErr&&<div style={{color:'var(--red)',fontSize:'.8rem',marginBottom:'.5rem'}}>{bulkMarksErr}</div>}
-        {bulkMarksOk&&<div style={{color:'var(--green)',fontSize:'.8rem',marginBottom:'.5rem'}}>✓ {bulkMarksOk}</div>}
-        <button className="btn btn-primary" onClick={uploadBulkMarks} disabled={bulkMarksLoading||!bulkMarksFile} style={{width:'100%',background:'#d97706',borderColor:'#d97706'}}>
-          {bulkMarksLoading?React.createElement(Spin,null):null}{bulkMarksLoading?'Parsing…':'📤 Upload & Distribute Marks'}
+          {bulkQpLoading?React.createElement(Spin,null):null}{bulkQpLoading?'Parsing...':'📤 Upload & Distribute QPs'}
         </button>
       </div>
       <div style={{background:'var(--bg2)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)'}}>
-        💡 <strong>Tab-by-tab upload also available:</strong> Go to any CA tab (e.g. 📝 Quiz) and use the "⬆ Upload Question Paper" button there, or enter marks directly in the marks grid.
+        💡 <strong>Tab-by-tab also available:</strong> Go to any CA tab (e.g. 📝 Quiz 1) and use the "⬆ Upload QP" or "✏ Upload Marks" button there, or enter marks directly in the grid.
       </div>
     </div>
   );
