@@ -4752,7 +4752,7 @@ function MasterAttainmentPage({course}){
         if(!max)return;
         const passed=students.filter(s=>{
           const sm=mks[s.prn]||{};
-          return qp.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0)/max*100>=60;
+          return qp.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0)/max*100>=60;
         }).length;
         total+=(passed/students.length)*100;count++;
       });
@@ -4814,7 +4814,7 @@ function MasterAttainmentPage({course}){
       const r=await fetch(API+'/co-po-template/upload-qp/'+course.id+'/'+ca,{method:'POST',headers:hdrForm(),body:fd});
       const d=await r.json();
       if(!r.ok)throw new Error(d.detail||r.statusText);
-      const qs=(d.questions||[]).map((q,i)=>({q_no:i+1,...q}));
+      const qs=(d.questions||[]).map((q,i)=>({...q,q_no:q.q_no||(i+1)}));
       setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qs}}));
       setOk('✓ Parsed '+d.extracted+' questions from '+file.name);
     }catch(e){setErr(e.message);}
@@ -4899,7 +4899,7 @@ function MasterAttainmentPage({course}){
             if(typeof markVal==='object'&&eseQP.length>0){
               const sm={};
               eseQP.forEach(q=>{
-                const qkey=q.q_no; // integer
+                const qkey=String(q.q_no); // DB keys are always strings after JSON parse
                 if(markVal[qkey]!==undefined) sm[qkey]=parseFloat(markVal[qkey])||0;
               });
               if(Object.keys(sm).length>0){newEseMarks[prn]=sm;return;}
@@ -4915,11 +4915,11 @@ function MasterAttainmentPage({course}){
             const total=isObj?parseFloat(markVal.Total||0):parseFloat(markVal)||0;
 
             if(isObj&&qp.length>0){
-              // Use exact per-question marks from DB (integer keys 1,2,3… match q_no)
+              // Use exact per-question marks from DB (JSON string keys "1","2","3"… match String(q.q_no))
               const sm={};
               let anyMatched=false;
               qp.forEach(q=>{
-                const qkey=q.q_no; // integer
+                const qkey=String(q.q_no); // JSON always gives string keys
                 if(markVal[qkey]!==undefined){
                   sm[qkey]=parseFloat(markVal[qkey])||0;
                   anyMatched=true;
@@ -4932,7 +4932,7 @@ function MasterAttainmentPage({course}){
               const maxMarks=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
               if(maxMarks>0){
                 const sm={};
-                qp.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)||0)/maxMarks*total*100)/100;});
+                qp.forEach(q=>{sm[String(q.q_no)]=Math.round((parseFloat(q.marks)||0)/maxMarks*total*100)/100;});
                 newMarks[prn]=sm;return;
               }
             }
@@ -5094,7 +5094,7 @@ function MasterAttainmentPage({course}){
             let anyQ=false;
             Object.entries(qColMap).forEach(([ci,qno])=>{
               const v=parseFloat(row[ci]);
-              if(!isNaN(v)){perQ[qno]=v;anyQ=true;}
+              if(!isNaN(v)){perQ[String(qno)]=v;anyQ=true;}
             });
             if(anyQ){result[prn]=perQ;return;}
             // fallback to Total col
@@ -5138,7 +5138,7 @@ function MasterAttainmentPage({course}){
                 // has per-q marks; map to eseQP if loaded
                 if(eseQP.length>0){
                   const sm={};
-                  eseQP.forEach(q=>{if(markData[q.q_no]!==undefined)sm[q.q_no]=markData[q.q_no];});
+                  eseQP.forEach(q=>{if(markData[String(q.q_no)]!==undefined)sm[String(q.q_no)]=markData[String(q.q_no)];});
                   if(Object.keys(sm).length>0){newMarks[prn]=sm;return;}
                 }
                 // no QP match — compute total
@@ -5159,7 +5159,7 @@ function MasterAttainmentPage({course}){
               if(isPerQ&&qp.length>0){
                 const sm={};
                 let anyMatched=false;
-                qp.forEach(q=>{if(markData[q.q_no]!==undefined){sm[q.q_no]=markData[q.q_no];anyMatched=true;}});
+                qp.forEach(q=>{if(markData[String(q.q_no)]!==undefined){sm[String(q.q_no)]=markData[String(q.q_no)];anyMatched=true;}});
                 if(anyMatched){newMarks[prn]=sm;return;}
               }
               // get total
@@ -5170,7 +5170,7 @@ function MasterAttainmentPage({course}){
                 const totalQMax=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
                 if(totalQMax>0){
                   const sm={};
-                  qp.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+                  qp.forEach(q=>{sm[String(q.q_no)]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
                   newMarks[prn]=sm;return;
                 }
               }
@@ -5334,7 +5334,7 @@ function MasterAttainmentPage({course}){
     };
     const updQ=(i,field,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.map((q,j)=>j===i?{...q,[field]:val}:q)}}));
     const delQ=(i)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.filter((_,j)=>j!==i)}}));
-    const updMark=(prn,qno,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...marks,[prn]:{...(marks[prn]||{}),[qno]:val}}}}));
+    const updMark=(prn,qno,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...marks,[prn]:{...(marks[prn]||{}),[String(qno)]:val}}}}));
     const uploadCAMarksFile=(file)=>{
       if(!file)return;
       const reader=new FileReader();
@@ -5375,13 +5375,13 @@ function MasterAttainmentPage({course}){
             let anyQ=false;
             Object.entries(qColMap).forEach(([ci,qno])=>{
               const v=parseFloat(row[ci]);
-              if(!isNaN(v)){perQ[qno]=v;anyQ=true;}
+              if(!isNaN(v)){perQ[String(qno)]=v;anyQ=true;}
             });
             const totalMark=totalColIdx>=0?parseFloat(row[totalColIdx])||0:0;
             if(anyQ&&curQP.length>0){
               // Map per-question marks to q_no
               const sm={};
-              curQP.forEach(q=>{if(perQ[q.q_no]!==undefined)sm[q.q_no]=perQ[q.q_no];});
+              curQP.forEach(q=>{if(perQ[q.q_no]!==undefined)sm[String(q.q_no)]=perQ[q.q_no];});
               if(Object.keys(sm).length>0){newMarks[prn]=sm;return;}
             }
             // Fallback: proportional from total if QP loaded
@@ -5389,7 +5389,7 @@ function MasterAttainmentPage({course}){
               const totalQMax=curQP.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
               if(totalQMax>0){
                 const sm={};
-                curQP.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+                curQP.forEach(q=>{sm[String(q.q_no)]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
                 newMarks[prn]=sm;return;
               }
             }
@@ -5509,7 +5509,7 @@ function MasterAttainmentPage({course}){
                 {students.map((s,si)=>{
                   const sm=marks[s.prn]||{};
                   const total=qp.length>0
-                    ? qp.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0)
+                    ? qp.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0)
                     : (parseFloat(sm._total)||0);
                   return(
                     <tr key={si} style={{background:si%2===0?'var(--bg)':'var(--white)'}}>
@@ -5518,7 +5518,7 @@ function MasterAttainmentPage({course}){
                         ? qp.map(q=>(
                           <TD key={q.q_no} center>
                             <input type="number" min="0" max={q.marks} step="0.01"
-                              value={sm[q.q_no]??''} onChange={e=>updMark(s.prn,q.q_no,e.target.value)}
+                              value={sm[String(q.q_no)]??''} onChange={e=>updMark(s.prn,q.q_no,e.target.value)}
                               style={{width:52,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px',
                                 textAlign:'center',fontSize:'.78rem',fontFamily:'DM Sans,sans-serif'}}/>
                           </TD>
@@ -5569,7 +5569,7 @@ function MasterAttainmentPage({course}){
           if(eseQP.length>0&&totalMark>0){
             const totalQMax=eseQP.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
             const sm={};
-            eseQP.forEach(q=>{sm[q.q_no]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+            eseQP.forEach(q=>{sm[String(q.q_no)]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
             newMarks[prn]=sm;
           }else{newMarks[prn]={_total:totalMark};}
         });
@@ -5587,7 +5587,7 @@ function MasterAttainmentPage({course}){
     fetch(API+'/co-po-template/upload-qp/'+course.id+'/ESE',{method:'POST',headers:hdrForm(),body:fd})
       .then(r=>r.json()).then(d=>{
         if(d.questions){
-          const qs=(d.questions||[]).map((q,i)=>({q_no:i+1,...q}));
+          const qs=(d.questions||[]).map((q,i)=>({...q,q_no:q.q_no||(i+1)}));
           setEseQP(qs);
           setOk('✓ ESE QP parsed: '+d.extracted+' questions.');
         }else{setErr(d.detail||'Failed to parse ESE QP.');}
@@ -5682,13 +5682,13 @@ function MasterAttainmentPage({course}){
               <tbody>
                 {students.map((s,si)=>{
                   const sm=eseMarks[s.prn]||{};
-                  const tot=eseQP.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0);
+                  const tot=eseQP.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0);
                   return(<tr key={si} style={{background:si%2===0?'var(--bg)':'var(--white)'}}>
                     <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
                     {eseQP.map(q=>(
                       <TD key={q.q_no} center>
-                        <input type="number" min="0" max={q.marks} step="0.01" value={sm[q.q_no]??''}
-                          onChange={e=>setEseMarks(p=>({...p,[s.prn]:{...(p[s.prn]||{}),[q.q_no]:e.target.value}}))}
+                        <input type="number" min="0" max={q.marks} step="0.01" value={sm[String(q.q_no)]??''}
+                          onChange={e=>setEseMarks(p=>({...p,[s.prn]:{...(p[s.prn]||{}),[String(q.q_no)]:e.target.value}}))}
                           style={{width:50,border:'1px solid var(--border)',borderRadius:4,padding:'2px',textAlign:'center',fontSize:'.78rem'}}/>
                       </TD>
                     ))}
@@ -5756,7 +5756,7 @@ function MasterAttainmentPage({course}){
                   if(!max||!students.length)return null;
                   const passed=students.filter(s=>{
                     const sm=mks[s.prn]||{};
-                    return qp.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0)/max*100>=60;
+                    return qp.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0)/max*100>=60;
                   }).length;
                   return Math.round(passed/students.length*100);
                 });
@@ -5768,7 +5768,7 @@ function MasterAttainmentPage({course}){
                 if(eMax&&students.length){
                   const p=students.filter(s=>{
                     const sm=eseMarks[s.prn]||{};
-                    return eCoQs.reduce((t,q)=>t+(parseFloat(sm[q.q_no])||0),0)/eMax*100>=60;
+                    return eCoQs.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0)/eMax*100>=60;
                   }).length;
                   eAttn=Math.round(p/students.length*100);
                 }

@@ -157,23 +157,58 @@ async def upload_question_paper(
                     hdr_idx = i
                     break
             if hdr_idx is not None:
+                hdr_row = rows[hdr_idx]
+                # Dynamically find column indices from header row
+                import re as _re
+                def _ci(keywords):
+                    for ki, kw in enumerate(keywords):
+                        for ci, h in enumerate(hdr_row):
+                            if h and kw.lower() in str(h).lower():
+                                return ci
+                    return -1
+                q_no_ci  = _ci(["q. no", "q no", "q#", "qno"])
+                q_txt_ci = _ci(["question text", "question"])
+                marks_ci = _ci(["marks"])
+                co_ci    = _ci(["co mapped", "co"])
+                bl_ci    = _ci(["bloom"])
+                q_counter = 0
                 for row in rows[hdr_idx+1:]:
                     if not any(row):
                         continue
-                    q_text = str(row[1]).strip() if len(row) > 1 and row[1] else ""
-                    marks  = row[6] if len(row) > 6 and row[6] else 0
-                    co     = str(row[7]).strip() if len(row) > 7 and row[7] else ""
-                    bl_raw = str(row[8]).strip() if len(row) > 8 and row[8] else "L1"
-                    bl     = int(bl_raw.replace("L", "")) if bl_raw.startswith("L") else 1
-                    if q_text and q_text not in ("Question", ""):
-                        questions.append({
-                            "question_text": q_text,
-                            "marks": int(marks) if marks else 5,
-                            "co_id": co,
-                            "bloom_level": bl,
-                            "source": "uploaded",
-                            "ca_label": ca_label,
-                        })
+                    q_text = str(row[q_txt_ci]).strip() if q_txt_ci >= 0 and q_txt_ci < len(row) and row[q_txt_ci] else ""
+                    if not q_text or q_text.lower() in ("question", "question text", "total", ""):
+                        continue
+                    if str(row[0] if row else "").strip().lower() in ("total", "max", "max marks", ""):
+                        if not q_text:
+                            continue
+                    raw_qno = row[q_no_ci] if q_no_ci >= 0 and q_no_ci < len(row) else None
+                    try:
+                        q_no = int(float(str(raw_qno))) if raw_qno is not None and str(raw_qno).strip() != "" else None
+                    except (ValueError, TypeError):
+                        q_no = None
+                    if q_no is None:
+                        q_counter += 1
+                        q_no = q_counter
+                    marks_val = row[marks_ci] if marks_ci >= 0 and marks_ci < len(row) else None
+                    try:
+                        marks = float(marks_val) if marks_val is not None else 5
+                    except (TypeError, ValueError):
+                        marks = 5
+                    co_val = row[co_ci] if co_ci >= 0 and co_ci < len(row) else ""
+                    co = str(co_val).strip() if co_val else ""
+                    bl_raw = str(row[bl_ci]).strip() if bl_ci >= 0 and bl_ci < len(row) and row[bl_ci] else "L1"
+                    # Extract L1-L6
+                    bl_match = _re.search(r'L([1-6])', bl_raw, _re.IGNORECASE)
+                    bl = int(bl_match.group(1)) if bl_match else 1
+                    questions.append({
+                        "question_text": q_text,
+                        "marks": marks,
+                        "co_id": co,
+                        "bloom_level": bl,
+                        "q_no": q_no,
+                        "source": "uploaded",
+                        "ca_label": ca_label,
+                    })
         except Exception as e:
             raise HTTPException(400, f"Failed to parse xlsx: {str(e)}")
 
