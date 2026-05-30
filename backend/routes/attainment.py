@@ -145,17 +145,15 @@ def _parse_one_sheet(ws, component_name: str) -> List[dict]:
         else:
             total_val = sum(sub_marks.values())
 
-        # Store Total AND per-question marks (Q1, Q2, …).
-        # Master attainment page uses Q-keys to populate the marks grid directly.
-        # The Current Marks tab only reads "Total" so it stays clean.
+        # Store Total AND per-question marks with integer keys (1, 2, 3…)
+        # matching q_no so the master attainment frontend can use them directly.
         component_marks = {"Total": round(total_val, 4)}
-        for q_label, q_val in sub_marks.items():
-            # Normalise label to a simple integer key so frontend lookup works
-            # e.g. "Q1" → key "1", "Q2" → "2"
+        for q_label, q_mark in sub_marks.items():
+            # Extract the question number: "Q1" → 1, "Q3" → 3
             import re as _re2
-            m = _re2.match(r'^Q(\d+)$', q_label, _re2.IGNORECASE)
+            m = _re2.match(r'Q(\d+)', str(q_label), _re2.IGNORECASE)
             if m:
-                component_marks[int(m.group(1))] = round(q_val, 4)
+                component_marks[int(m.group(1))] = round(q_mark, 4)
 
         if student_id in students:
             # Same student seen again (shouldn't happen within one sheet, but be safe)
