@@ -38,88 +38,262 @@ class MarksUploadRequest(BaseModel):
 
 # ── XLSX Parser ─────────────────────────────────────────────────────────
 
-def parse_marks_xlsx(file_bytes: bytes) -> List[dict]:
+def _parse_one_sheet(ws, component_name: str) -> List[dict]:
     """
-    Parse a marks xlsx file with this structure:
-      - Header rows at top (institute name, batch info, branch) — skipped
-      - Row with 'SR. No.' / 'PRN' / name = column header row
-      - Section rows (e.g. 'Section A') — skipped
-      - Student rows: col B = PRN (student_id), col C = name
-      - CO mark columns start from col D onward, named like CO1, CO2...
-      - Rows with formula strings in col A (=IF...) or numeric serial → student rows
+    Parse a single worksheet from the marks template.
+
+    The sheet layout is:
+      Row 0-2: title/info rows (skipped)
+      Row 3:   header row  — 'SR', 'PRN', 'Student Name', 'Q1\n(/3)', 'Q2\n(/3)', ..., 'Total'
+      Row 4:   max-marks row (skipped — PRN col contains 'Max →')
+      Row 5+:  student data rows
+
+    Returns a list of dicts:
+        { "student_id": str, "student_name": str,
+          "marks": { <component_name>: {"Total": float, "Q1": float, ...} } }
     """
-    import openpyxl
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-    ws = wb.active
+    import re as _re
 
     all_rows = list(ws.iter_rows(values_only=True))
 
-    # Find the header row — contains 'PRN' or 'prn'
+    # ── Find header row (contains 'PRN') ──────────────────────────────────
     header_row_idx = None
-    co_columns = {}  # col_index → CO name
     for i, row in enumerate(all_rows):
-        row_str = [str(v).strip().lower() if v else '' for v in row]
+        row_str = [str(v).strip().lower() if v is not None else '' for v in row]
         if 'prn' in row_str:
             header_row_idx = i
-            # Find CO columns (D onward)
+            break
+
+    if header_row_idx is None:
+        return []
+
+    header_row = all_rows[header_row_idx]
+
+    # ── Identify question sub-columns (Q1, Q2, …) and the Total column ──
+    # These are columns from index 3 onward that contain "Q<n>" or "Total"
+    SKIP_HEADER = {'sr', 'prn', 'roll no', 'student name', 'name', 'section', 'sec',
+                   'grade', 'scaled', 'ca total', 'grand total'}
+    question_cols = {}   # col_index → label ("Q1", "Q2", …)
+    total_col = None     # col_index of the aggregated "Total" column
+
+    for j, val in enumerate(header_row):
+        if val is None:
+            continue
+        raw = str(val).strip().replace('\n', ' ').strip()
+        raw_clean = raw.lower()
+        # Strip marks suffix like "(/3)", "/3"
+        label = _re.sub(r'\s*\(?\s*/\s*\d+\s*\)?\s*', '', raw).strip()
+
+        if raw_clean in SKIP_HEADER or not label:
+            continue
+        if label.lower() == 'total':
+            total_col = j
+            continue
+        # Detect question columns: Q1, Q2, Q3 … (any prefix+digit pattern)
+        if _re.match(r'^Q\d+', label, _re.IGNORECASE):
+            question_cols[j] = label
+        # Also capture any other named sub-questions (e.g. Part A, Part B) — generic fallback
+        elif j >= 3:
+            question_cols[j] = label
+
+    # ── Parse student rows ────────────────────────────────────────────────
+    students = {}  # student_id → dict
+
+    for row in all_rows[header_row_idx + 1:]:
+        if not row or len(row) < 3:
+            continue
+        prn = row[1]    # Column B
+        name = row[2]   # Column C
+
+        if not prn or not name:
+            continue
+        prn_str = str(prn).strip()
+        # Skip "Max →", section headers, averages
+        if isinstance(prn, str) and not prn_str.replace('.', '').isdigit():
+            continue
+        if isinstance(name, str) and any(
+            x in name.lower() for x in ['section', 'max', 'average', 'class avg', 'max marks']
+        ):
+            continue
+        try:
+            prn_int = int(float(prn_str))
+            if prn_int < 100000:
+                continue
+        except (ValueError, TypeError):
+            continue
+
+        student_id = str(int(float(prn_str)))
+        student_name = str(name).strip().replace('\xa0', '').strip()
+
+        # Collect per-question marks
+        sub_marks = {}
+        for col_idx, q_label in question_cols.items():
+            val = row[col_idx] if col_idx < len(row) else None
+            if val is None or str(val).strip() in ('', '—', 'N/A'):
+                continue
+            try:
+                sub_marks[q_label] = float(val)
+            except (TypeError, ValueError):
+                pass
+
+        # Prefer the pre-computed "Total" column; fall back to summing sub-marks
+        if total_col is not None and total_col < len(row) and row[total_col] is not None:
+            try:
+                total_val = float(row[total_col])
+            except (TypeError, ValueError):
+                total_val = sum(sub_marks.values())
+        else:
+            total_val = sum(sub_marks.values())
+
+        # Store ONLY the Total for each component.
+        # If we stored sub-questions (Q1, Q2, …) as well, the frontend's
+        # co-wise path would flatten them into columns and show Q1/Q2/Q3
+        # instead of the component name — exactly the original bug.
+        component_marks = {"Total": round(total_val, 4)}
+
+        if student_id in students:
+            # Same student seen again (shouldn't happen within one sheet, but be safe)
+            students[student_id]["marks"][component_name] = component_marks
+        else:
+            students[student_id] = {
+                "student_id": student_id,
+                "student_name": student_name,
+                "marks": {component_name: component_marks},
+            }
+
+    return list(students.values())
+
+
+def parse_marks_xlsx(file_bytes: bytes) -> List[dict]:
+    """
+    Parse a marks xlsx file.
+
+    Supports two layouts:
+
+    A) **Multi-sheet template** (preferred — used by the downloadable template):
+       Each sheet is named after the evaluation component it covers:
+         "Quiz 1", "Unit Test 1", "Unit Test 2", "Assignment", "End Semester"
+       Within each sheet:
+         - Info rows at top (skipped)
+         - Header row: SR | PRN | Student Name | Q1(/n) | Q2(/n) | … | Total
+         - Max-marks row (skipped)
+         - Student rows
+       Result: marks = { "Quiz 1": {"Total": 8.5, "Q1": 2.5, "Q2": 2.0, …},
+                          "Unit Test 1": {"Total": 14.5, …}, … }
+
+    B) **Single-sheet / CO-wise format** (legacy):
+       Active sheet, columns: PRN | Name | CO1 | CO2 | …
+       Result: marks = { "CO1": {"Total": 8.0}, "CO2": {"Total": 7.5}, … }
+
+    B2) **Exam-wise single sheet** (legacy flat):
+       Active sheet, columns: PRN | Name | Quiz | Unit Test | …
+       Result: marks = { "Quiz": 8.5, "Unit Test": 14.0, … }  (_format="exam_wise")
+    """
+    import openpyxl
+    import re as _re
+
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+
+    # ── Layout A: multi-sheet template ────────────────────────────────────
+    # Detect: workbook has > 1 sheet OR first sheet name != "Sheet1" / generic name
+    GENERIC_NAMES = {'sheet', 'sheet1', 'marks', 'data', 'student marks'}
+    sheet_names = [s.strip() for s in wb.sheetnames]
+    is_multi_sheet = (
+        len(sheet_names) > 1
+        or (len(sheet_names) == 1 and sheet_names[0].lower() not in GENERIC_NAMES)
+    )
+
+    if is_multi_sheet:
+        # Merge all sheets into one student dict, keyed by PRN
+        merged: dict[str, dict] = {}   # student_id → {student_id, student_name, marks:{…}}
+
+        for sheet_name in sheet_names:
+            ws = wb[sheet_name]
+            component_name = sheet_name.strip()
+            sheet_students = _parse_one_sheet(ws, component_name)
+
+            for s in sheet_students:
+                sid = s["student_id"]
+                if sid not in merged:
+                    merged[sid] = {
+                        "student_id": sid,
+                        "student_name": s["student_name"],
+                        "marks": {},
+                    }
+                merged[sid]["marks"].update(s["marks"])
+
+        students = list(merged.values())
+        if students:
+            return students
+        # Fall through to legacy single-sheet logic if nothing parsed
+
+    # ── Layout B / B2: single-sheet (legacy) ─────────────────────────────
+    ws = wb.active
+    all_rows = list(ws.iter_rows(values_only=True))
+
+    # Find header row
+    header_row_idx = None
+    co_columns = {}   # col_index → CO name  (e.g. "CO1")
+    for i, row in enumerate(all_rows):
+        row_str = [str(v).strip().lower() if v is not None else '' for v in row]
+        if 'prn' in row_str:
+            header_row_idx = i
             for j, val in enumerate(row):
                 if val and str(val).strip().upper().startswith('CO'):
-                    # Normalize: "CO1\n(Quiz /10)" -> "CO1"
-                    import re as _re
                     raw = str(val).strip().upper().split('\n')[0].strip()
-                    co_name = _re.match(r'(CO\d+)', raw)
-                    if co_name:
-                        co_columns[j] = co_name.group(1)
+                    m = _re.match(r'(CO\d+)', raw)
+                    if m:
+                        co_columns[j] = m.group(1)
             break
 
     if header_row_idx is None:
         raise ValueError("Could not find header row with 'PRN' column in the xlsx file.")
 
-    # Also look for exam-wise columns (non-CO columns like "Quiz", "Unit Test", "Case Study", etc.)
+    # Exam-wise columns (non-CO, non-skip)
     header_row = all_rows[header_row_idx]
-    exam_columns = {}   # col_index → exam name (cleaned)
-    SKIP_COLS = {'sr no', 'sr. no', 'sr.no', 'prn', 'roll no', 'student name', 'name',
-                 'sec', 'section', 'ca total', 'grand total', 'grade', 'scaled'}
+    exam_columns = {}
+    SKIP_COLS = {'sr', 'sr no', 'sr. no', 'sr.no', 'prn', 'roll no', 'student name', 'name',
+                 'sec', 'section', 'ca total', 'grand total', 'grade', 'scaled', 'total',
+                 'max', 'max →', 'max->', 'max marks'}
+
     for j, val in enumerate(header_row):
         if val is None:
             continue
-        # Normalize header: strip newlines and extra whitespace
         raw = str(val).strip().replace('\n', ' ').strip()
         raw_lower = raw.lower()
-        # Skip known non-exam columns
-        if any(s in raw_lower for s in SKIP_COLS):
+        # Strip marks suffix
+        label = _re.sub(r'\s*\(?\s*/\s*\d+\s*\)?\s*', '', raw).strip()
+        label_lower = label.lower()
+
+        if any(s in raw_lower for s in SKIP_COLS) or not label:
             continue
-        # Skip CO columns (already handled above)
         if raw.upper().startswith('CO') and raw[2:3].isdigit():
             continue
-        # Include columns that look like exam components: contain letters and are reasonable headers
-        if raw and not raw.replace('.','').replace('/','').isdigit():
-            # Strip marks suffix like "/10", "/5", "/60"
-            import re as _re2
-            clean = _re2.sub(r'\s*/\s*\d+', '', raw).strip()
-            if clean and clean.lower() not in SKIP_COLS:
-                exam_columns[j] = clean
+        # Skip Q1/Q2/… style sub-question columns (these are sub-marks, not components)
+        if _re.match(r'^Q\d+', label, _re.IGNORECASE):
+            continue
+        if label and not label.replace('.', '').replace('/', '').isdigit():
+            if label_lower not in SKIP_COLS:
+                exam_columns[j] = label
 
     students = []
     for row in all_rows[header_row_idx + 1:]:
         if not row or len(row) < 3:
             continue
-        prn = row[1]   # Column B
-        name = row[2]  # Column C
-
-        # Skip section headers, empty rows, formula-only rows, max-marks rows
+        prn = row[1]
+        name = row[2]
         if not prn or not name:
             continue
         prn_str = str(prn).strip()
-        # Skip non-PRN rows (headers, "Max →", section markers, class average)
-        if isinstance(prn, str) and not prn_str.replace('.','').isdigit():
+        if isinstance(prn, str) and not prn_str.replace('.', '').isdigit():
             continue
-        if isinstance(name, str) and any(x in name.lower() for x in ['section','max','average','class avg','max marks']):
+        if isinstance(name, str) and any(
+            x in name.lower() for x in ['section', 'max', 'average', 'class avg', 'max marks']
+        ):
             continue
-        # PRN must be a reasonable number (at least 6 digits)
         try:
             prn_int = int(float(prn_str))
-            if prn_int < 100000:  # not a valid PRN
+            if prn_int < 100000:
                 continue
         except (ValueError, TypeError):
             continue
@@ -127,26 +301,21 @@ def parse_marks_xlsx(file_bytes: bytes) -> List[dict]:
         student_id = str(int(float(str(prn)))).strip()
         student_name = str(name).strip().replace('\xa0', '').strip()
 
-        # Build marks dict
         marks = {}
         if exam_columns:
-            # Exam-wise format: store each exam as its own component under a "Marks" key
-            # Use component name as the CO key so the frontend can display columns per exam
             for col_idx, exam_name in exam_columns.items():
                 val = row[col_idx] if col_idx < len(row) else None
-                # Skip "—", "N/A", empty
                 if val is None or str(val).strip() in ('', '—', 'N/A'):
                     continue
                 try:
                     marks[exam_name] = float(val)
                 except (TypeError, ValueError):
                     pass
-            # Store as flat exam→mark mapping under a special key
             if marks:
                 students.append({
                     "student_id": student_id,
                     "student_name": student_name,
-                    "marks": marks,   # flat: {"Quiz": 8.5, "Unit Test": 7.0, ...}
+                    "marks": marks,
                     "_format": "exam_wise",
                 })
                 continue
@@ -158,7 +327,6 @@ def parse_marks_xlsx(file_bytes: bytes) -> List[dict]:
                 except (TypeError, ValueError):
                     marks[co_name] = {"Total": 0.0}
         else:
-            # No CO columns found — put all numeric values from col D onward as CO1, CO2...
             co_idx = 1
             for j in range(3, len(row)):
                 val = row[j]

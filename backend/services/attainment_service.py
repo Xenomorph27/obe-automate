@@ -123,9 +123,92 @@ class AttainmentService:
     # 2. Calculate attainment
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Internal helpers for calculate()
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detect_marks_format(records) -> str:
+        """
+        Detect the format of the stored marks dicts.
+
+        Returns one of:
+          "co_wise"        — keys are CO IDs: {"CO1": {"Quiz": 8, "UT1": 14}, ...}
+          "component_wise" — keys are component names: {"Quiz 1": {"Total": 8.5, "Q1": 2.5}, ...}
+          "exam_wise_flat" — keys are component names, values are floats: {"Quiz": 8.5, ...}
+        """
+        import re as _re
+        if not records:
+            return "component_wise"
+        sample = records[0].marks or {}
+        if not sample:
+            return "component_wise"
+        first_key = next(iter(sample))
+        first_val = sample[first_key]
+        # CO-wise: key looks like CO1, CO2, …
+        if _re.match(r'^CO\d+$', str(first_key), _re.IGNORECASE):
+            return "co_wise"
+        # Flat exam-wise: value is a plain number (not a dict)
+        if not isinstance(first_val, dict):
+            return "exam_wise_flat"
+        # Otherwise it's component-wise (value is a dict with "Total" etc.)
+        return "component_wise"
+
+    @staticmethod
+    def _student_total_from_marks(marks: dict, fmt: str) -> float:
+        """Return the grand total marks for a student given their marks dict and format."""
+        if fmt == "co_wise":
+            # Sum all component values across all COs
+            total = 0.0
+            for co_marks in marks.values():
+                if isinstance(co_marks, dict):
+                    total += sum(float(v) for v in co_marks.values() if v is not None)
+                elif co_marks is not None:
+                    total += float(co_marks)
+            return total
+        elif fmt == "component_wise":
+            # Each key is a component; value is a dict with at least "Total"
+            total = 0.0
+            for comp_marks in marks.values():
+                if isinstance(comp_marks, dict):
+                    t = comp_marks.get("Total")
+                    if t is not None:
+                        total += float(t)
+                elif comp_marks is not None:
+                    total += float(comp_marks)
+            return total
+        else:  # exam_wise_flat
+            return sum(float(v) for v in marks.values() if v is not None)
+
+    @staticmethod
+    def _max_marks_from_eval_cfg(eval_cfg: dict) -> float:
+        """Sum of all component max marks from the evaluation config."""
+        components = eval_cfg.get("components", {})
+        if not components:
+            return 100.0
+        return sum(float(v) for v in components.values())
+
+    # ------------------------------------------------------------------
+    # 2. Calculate attainment
+    # ------------------------------------------------------------------
+
     async def calculate(self, course_id: int) -> dict:
         """
         Returns full attainment calculation dict without writing any file.
+
+        Handles three marks storage formats produced by parse_marks_xlsx:
+
+        1. **co_wise**        — {"CO1": {"Quiz": 8, "UT": 14}, "CO2": {...}}
+           CO attainment is computed per-CO directly.
+
+        2. **component_wise** — {"Quiz 1": {"Total": 8.5}, "Unit Test 1": {"Total": 14}}
+           (produced by the multi-sheet template upload)
+           Attainment is computed on total marks across all components, then
+           applied uniformly to all COs (since the template doesn't carry CO-per-question
+           mapping). The CO-PO matrix still drives PO attainment weights.
+
+        3. **exam_wise_flat** — {"Quiz": 8.5, "Unit Test": 14}
+           Same as component_wise but values are floats instead of dicts.
         """
         course_svc = CourseService(self.db)
         course = await course_svc.get_course(course_id)
@@ -141,63 +224,123 @@ class AttainmentService:
                 status_code=400,
             )
 
-        cos = course.cos           # [{co_id, statement, bloom_level}]
-        eval_cfg = course.evaluation_config  # {components: {name: max_marks}, ...}
+        cos = course.cos                         # [{co_id, statement, bloom_level}]
+        eval_cfg = course.evaluation_config      # {components: {name: max_marks}, ...}
         co_po_matrix = course.co_po_matrix
         pos = course.pos
 
-        components = eval_cfg.get("components", {})   # {"Quiz": 10, "Unit Test": 10, ...}
-
-        # Build CO → max marks map
-        # We assume each component is mapped equally to all COs unless
-        # marks dict says otherwise. Max per CO = sum of all component maxes.
-        # (Faculty can structure marks dict per-CO with per-component sub-marks.)
+        components = eval_cfg.get("components", {})  # {"Quiz": 10, "Unit Test": 20, ...}
         all_co_ids = [co["co_id"] for co in cos]
 
-        # Per-CO max = sum of component maximums present in any student's marks for that CO
-        co_max: dict[str, float] = {}
-        for co_id in all_co_ids:
-            # Find all component names used for this CO across all students
-            component_names = set()
-            for rec in records:
-                co_marks = rec.marks.get(co_id, {})
-                component_names.update(co_marks.keys())
-            # Use the eval_cfg max for each component; fallback to 10 if unknown
-            co_max[co_id] = sum(components.get(c, 10) for c in component_names) or sum(components.values())
+        fmt = self._detect_marks_format(records)
+        logger.info(f"Marks format detected for course_id={course_id}: {fmt}")
 
         threshold = ATTAINMENT_THRESHOLD_PCT / 100
 
-        # Per-student total per CO
-        co_student_totals: dict[str, list[float]] = defaultdict(list)
-        for rec in records:
-            for co_id in all_co_ids:
-                co_marks = rec.marks.get(co_id, {})
-                total = sum(co_marks.values())
-                co_student_totals[co_id].append(total)
-
-        # CO attainment %
         co_attainment: dict[str, dict] = {}
-        for co_id in all_co_ids:
-            max_m = co_max.get(co_id, 1)
-            totals = co_student_totals[co_id]
-            passed = sum(1 for t in totals if t >= threshold * max_m)
-            attainment_pct = round((passed / len(totals)) * 100, 2) if totals else 0.0
-            avg_marks = round(sum(totals) / len(totals), 2) if totals else 0.0
 
-            co_attainment[co_id] = {
-                "co_id": co_id,
-                "statement": next((c["statement"] for c in cos if c["co_id"] == co_id), ""),
-                "bloom_level": next((c["bloom_level"] for c in cos if c["co_id"] == co_id), ""),
-                "max_marks": max_m,
-                "avg_marks_scored": avg_marks,
-                "students_passed_threshold": passed,
-                "total_students": len(totals),
-                "attainment_percentage": attainment_pct,
-                "attainment_level": self._attainment_level(attainment_pct),
-                "target_met": attainment_pct >= 60,
-            }
+        if fmt == "co_wise":
+            # ── Original CO-wise path ──────────────────────────────────────
+            co_max: dict[str, float] = {}
+            for co_id in all_co_ids:
+                component_names = set()
+                for rec in records:
+                    co_marks = rec.marks.get(co_id, {})
+                    if isinstance(co_marks, dict):
+                        component_names.update(co_marks.keys())
+                co_max[co_id] = (
+                    sum(components.get(c, 10) for c in component_names)
+                    or sum(components.values())
+                    or 40.0
+                )
 
-        # PO attainment (weighted average via CO-PO matrix)
+            co_student_totals: dict[str, list[float]] = defaultdict(list)
+            for rec in records:
+                for co_id in all_co_ids:
+                    co_marks = rec.marks.get(co_id, {})
+                    if isinstance(co_marks, dict):
+                        total = sum(float(v) for v in co_marks.values() if v is not None)
+                    else:
+                        total = float(co_marks) if co_marks is not None else 0.0
+                    co_student_totals[co_id].append(total)
+
+            for co_id in all_co_ids:
+                max_m = co_max.get(co_id, 1)
+                totals = co_student_totals[co_id]
+                passed = sum(1 for t in totals if t >= threshold * max_m)
+                attainment_pct = round((passed / len(totals)) * 100, 2) if totals else 0.0
+                avg_marks = round(sum(totals) / len(totals), 2) if totals else 0.0
+                co_attainment[co_id] = {
+                    "co_id": co_id,
+                    "statement": next((c["statement"] for c in cos if c["co_id"] == co_id), ""),
+                    "bloom_level": next((c["bloom_level"] for c in cos if c["co_id"] == co_id), ""),
+                    "max_marks": max_m,
+                    "avg_marks_scored": avg_marks,
+                    "students_passed_threshold": passed,
+                    "total_students": len(totals),
+                    "attainment_percentage": attainment_pct,
+                    "attainment_level": self._attainment_level(attainment_pct),
+                    "target_met": attainment_pct >= 60,
+                }
+
+        else:
+            # ── Component-wise or exam-wise flat path ─────────────────────
+            # Compute per-student grand total across all components/exams.
+            # Determine max possible marks from eval_cfg or from the stored data.
+            stored_component_maxes: dict[str, float] = {}
+            for rec in records:
+                for comp, val in rec.marks.items():
+                    if isinstance(val, dict):
+                        t = val.get("Total")
+                        if t is not None:
+                            stored_component_maxes[comp] = max(
+                                stored_component_maxes.get(comp, 0), float(t)
+                            )
+                    elif val is not None:
+                        stored_component_maxes[comp] = max(
+                            stored_component_maxes.get(comp, 0), float(val)
+                        )
+
+            # Max total = sum of eval_cfg component maxes if available, else inferred
+            eval_max_total = sum(float(v) for v in components.values()) if components else 0.0
+            if eval_max_total <= 0:
+                # Fallback: sum of observed max per component × 1.1 (generous ceiling)
+                eval_max_total = sum(stored_component_maxes.values()) * 1.1 or 100.0
+
+            # Per-student totals
+            student_totals: list[float] = [
+                self._student_total_from_marks(rec.marks, fmt) for rec in records
+            ]
+
+            passed_global = sum(1 for t in student_totals if t >= threshold * eval_max_total)
+            avg_total = round(sum(student_totals) / len(student_totals), 2) if student_totals else 0.0
+            global_attainment_pct = (
+                round((passed_global / len(student_totals)) * 100, 2) if student_totals else 0.0
+            )
+
+            logger.info(
+                f"Component-wise attainment: eval_max={eval_max_total}, "
+                f"avg={avg_total}, passed={passed_global}/{len(student_totals)}, "
+                f"attainment={global_attainment_pct}%"
+            )
+
+            # Apply the same attainment % to all COs
+            # (without a CO-per-question mapping we cannot split by CO)
+            for co_id in all_co_ids:
+                co_attainment[co_id] = {
+                    "co_id": co_id,
+                    "statement": next((c["statement"] for c in cos if c["co_id"] == co_id), ""),
+                    "bloom_level": next((c["bloom_level"] for c in cos if c["co_id"] == co_id), ""),
+                    "max_marks": round(eval_max_total, 2),
+                    "avg_marks_scored": avg_total,
+                    "students_passed_threshold": passed_global,
+                    "total_students": len(student_totals),
+                    "attainment_percentage": global_attainment_pct,
+                    "attainment_level": self._attainment_level(global_attainment_pct),
+                    "target_met": global_attainment_pct >= 60,
+                }
+
+        # ── PO attainment (weighted average via CO-PO matrix) ─────────────
         po_attainment: dict[str, dict] = {}
         for po in pos:
             po_id = po["po_id"]
@@ -224,6 +367,7 @@ class AttainmentService:
             "course_code": course.course_code,
             "total_students": len(records),
             "threshold_percentage": ATTAINMENT_THRESHOLD_PCT,
+            "marks_format": fmt,
             "co_attainment": co_attainment,
             "po_attainment": po_attainment,
             "overall_co_attainment": round(

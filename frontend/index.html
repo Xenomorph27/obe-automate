@@ -3581,7 +3581,21 @@ function MarksPage({course}){
   const saveEdit=async(rec)=>{
     setSavingRow(rec.student_id);setCurrentErr('');setCurrentOk('');
     try{
-      const payload={students:[{student_id:rec.student_id,student_name:rec.student_name,marks:editBuf}]};
+      // Determine format of this record's marks
+      const firstKey=Object.keys(rec.marks||{})[0]||'';
+      const firstVal=Object.values(rec.marks||{})[0];
+      const recIsExamWise=firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object';
+      const recIsCoWise=!recIsExamWise&&/^CO\d+$/i.test(firstKey);
+      const recIsComponentWise=!recIsExamWise&&!recIsCoWise;
+      // For component-wise, convert {comp: num} → {comp: {Total: num}}
+      let marksToSave=editBuf;
+      if(recIsComponentWise){
+        marksToSave={};
+        Object.entries(editBuf).forEach(([comp,val])=>{
+          marksToSave[comp]={Total:typeof val==='number'?val:parseFloat(val)||0};
+        });
+      }
+      const payload={students:[{student_id:rec.student_id,student_name:rec.student_name,marks:marksToSave}]};
       await api(`/attainment/marks/${course.id}/student/${encodeURIComponent(rec.student_id)}`,{method:'PUT',body:JSON.stringify(payload)});
       setCurrentOk(`✓ Marks updated for ${rec.student_name}`);
       setEditingRow(null);setEditBuf({});
@@ -3844,18 +3858,22 @@ function MarksPage({course}){
         (()=>{
           // Detect format: exam-wise (flat: {"Quiz": 8.5}) vs co-wise ({"CO1": {"Quiz": 8}})
           const firstMarks=currentMarks[0]?.marks||{};
+          const firstKey=Object.keys(firstMarks)[0]||'';
           const firstVal=Object.values(firstMarks)[0];
           const isExamWise=firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object';
+          // Component-wise: outer keys are component names (not CO IDs), values are {Total:X} dicts
+          const isCoWise=!isExamWise&&/^CO\d+$/i.test(firstKey);
+          const isComponentWise=!isExamWise&&!isCoWise;
 
           let evalComps, eseKey, caComps, allDisp;
-          if(isExamWise){
-            // Exam-wise: keys are exam names directly
+          if(isExamWise||isComponentWise){
+            // Both exam-wise and component-wise: outer keys ARE the component names
             evalComps=[...new Set(currentMarks.flatMap(r=>Object.keys(r.marks||{})))];
             eseKey=evalComps.find(c=>c.toLowerCase().includes('end')||c.toLowerCase().includes('ese')||c.toLowerCase().includes('sem'))||null;
             caComps=evalComps.filter(c=>c!==eseKey);
             allDisp=[...caComps,...(eseKey?[eseKey]:[])];
           } else {
-            evalComps = components.length ? components : [...new Set(currentMarks.flatMap(r=>Object.values(r.marks||{}).flatMap(co=>Object.keys(co||{}))))];
+            evalComps = components.length ? components : [...new Set(currentMarks.flatMap(r=>Object.values(r.marks||{}).flatMap(co=>Object.keys(co||{}).filter(k=>k!=='Total'))))];
             eseKey = evalComps.find(c=>c.toLowerCase().includes('end')||c.toLowerCase().includes('ese')||c.toLowerCase().includes('sem')) || null;
             caComps = evalComps.filter(c=>c!==eseKey);
             allDisp = [...caComps, ...(eseKey?[eseKey]:[])] ;
@@ -3868,6 +3886,16 @@ function MarksPage({course}){
               const n=parseFloat(v);
               return isNaN(n)?null:Math.round(n*100)/100;
             }
+            if(isComponentWise){
+              // marks[comp] = {Total: 8.5} — read Total directly
+              const sub=rec.marks?.[comp];
+              if(!sub) return null;
+              const v=typeof sub==='object'?sub.Total:sub;
+              if(v===undefined||v===null||v==='') return null;
+              const n=parseFloat(v);
+              return isNaN(n)?null:Math.round(n*100)/100;
+            }
+            // co-wise: sum over all CO sub-marks for this component
             let t=0;
             Object.values(rec.marks||{}).forEach(coMarks=>{
               const v=coMarks?.[comp];
@@ -3912,8 +3940,8 @@ function MarksPage({course}){
                   const totVal=getCompTotal(rec,comp);
                   const displayVal=totVal!==null?(Number.isInteger(totVal)?totVal:totVal.toFixed(2)):'—';
                   const isEse=comp===eseKey;
-                  // For exam-wise: editBuf is flat {comp: val}. For co-wise: editBuf is {CO1: {comp: val}}
-                  const editVal=isExamWise
+                  // For exam-wise: editBuf is flat {comp: val}. For component-wise: {comp: val}. For co-wise: {CO1: {comp: val}}
+                  const editVal=isExamWise||isComponentWise
                     ?(editBuf?.[comp]??totVal??'')
                     :(editBuf?.[Object.keys(rec.marks||{})[0]]?.[comp]??totVal??'');
                   return(<td key={comp} style={{textAlign:'center',background:isEditing?(isEse?'#fef9c3':'var(--blue3)'):''}}>
@@ -3925,7 +3953,7 @@ function MarksPage({course}){
                           const v=e.target.value;
                           setEditBuf(b=>{
                             const nb=JSON.parse(JSON.stringify(b));
-                            if(isExamWise){
+                            if(isExamWise||isComponentWise){
                               nb[comp]=v===''?'':parseFloat(v)||0;
                             } else {
                               const coKeys=Object.keys(rec.marks||{});
