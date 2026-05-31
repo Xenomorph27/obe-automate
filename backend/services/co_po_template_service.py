@@ -299,33 +299,66 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
                   _NAVY_FILL, _NAVY_FILL, _SKYBLUE_FILL, _SKYBLUE_FILL]
     for ci, (h, hf) in enumerate(zip(hdr_labels, hdr_fills), 1):
         _c(ws, r, ci, h, font=_HEADER_FONT, fill=hf)
+    ws.row_dimensions[r].height = 30
 
     bloom = [("L1", "Remembering"), ("L2", "Understanding"), ("L3", "Applying"),
              ("L4", "Analyzing"),   ("L5", "Evaluating"),    ("L6", "Creating")]
     bl_row_fills = [_LIGHT_FILL, _GREEN_FILL, _YELLOW_FILL,
                     _ORANGE_FILL, _PINK_FILL, _LIME_FILL]
 
-    for i in range(6):
+    # Pre-compute CO summary and BL summary from questions (Python SUMIF)
+    cos = [c["co_id"] for c in course.cos]
+    co_marks_sum = {}   # co_id -> total marks assigned to it
+    bl_marks_sum = {}   # bl_label -> total marks assigned to it
+    total_marks_qp = 0
+    if questions:
+        for q in questions:
+            marks = q.get("marks") or 0
+            try:
+                marks = float(marks)
+            except (TypeError, ValueError):
+                marks = 0
+            co_id = q.get("co_id", "")
+            if co_id:
+                co_marks_sum[co_id] = co_marks_sum.get(co_id, 0.0) + marks
+            bl_raw = str(q.get("bloom_level", ""))
+            bl_str = bl_raw if bl_raw.startswith("L") else (f"L{bl_raw}" if bl_raw else "")
+            if bl_str:
+                bl_marks_sum[bl_str] = bl_marks_sum.get(bl_str, 0.0) + marks
+            total_marks_qp += marks
+
+    for i, (bl_label, bl_name) in enumerate(bloom):
         sr = r + 1 + i   # rows 8-13
-        co_list_row = 14 + i
         bf = bl_row_fills[i]
-        _c(ws, sr, 11, f'=IF(ISBLANK(CO_List!A{co_list_row}),"",CO_List!A{co_list_row})',
-           fill=bf, align=_CENTER)
-        _c(ws, sr, 12,
-           f'=IF(SUMIF($H$8:$H$39,K{sr},$G$8:$G$39)=0,"",SUMIF($H$8:$H$39,K{sr},$G$8:$G$39))',
-           fill=bf, align=_CENTER)
-        _c(ws, sr, 13,
-           f'=IFERROR(L{sr}/SUM($L$8:$L$13)*100,"")',
-           fill=bf, align=_CENTER, number_format="0.00")
-        bl_label, bl_name = bloom[i]
+
+        # CO summary: col K = CO name from course COs list, L = marks for that CO, M = %
+        co_id_for_row = cos[i] if i < len(cos) else ""
+        co_marks = co_marks_sum.get(co_id_for_row, "") if co_id_for_row else ""
+        co_pct   = ""
+        if co_marks and total_marks_qp > 0:
+            try:
+                co_pct = round(float(co_marks) / total_marks_qp * 100, 2)
+            except (TypeError, ValueError):
+                co_pct = ""
+
+        _c(ws, sr, 11, co_id_for_row if co_id_for_row else "", fill=bf, align=_CENTER)
+        _c(ws, sr, 12, co_marks if co_marks else "", fill=bf, align=_CENTER)
+        _c(ws, sr, 13, co_pct if co_pct != "" else "", fill=bf, align=_CENTER, number_format="0.00")
+
+        # BL summary: col O = BL code, P = name, Q = marks for BL, R = %
+        bl_marks = bl_marks_sum.get(bl_label, "")
+        bl_pct   = ""
+        if bl_marks and total_marks_qp > 0:
+            try:
+                bl_pct = round(float(bl_marks) / total_marks_qp * 100, 2)
+            except (TypeError, ValueError):
+                bl_pct = ""
+
         _c(ws, sr, 15, bl_label, fill=bf, bold=True, align=_CENTER)
         _c(ws, sr, 16, bl_name,  fill=bf, align=_LEFT)
-        _c(ws, sr, 17,
-           f'=IF(SUMIF($I$8:$I$39,O{sr},$G$8:$G$39)=0,"",SUMIF($I$8:$I$39,O{sr},$G$8:$G$39))',
-           fill=bf, align=_CENTER)
-        _c(ws, sr, 18,
-           f'=IFERROR(Q{sr}/SUM($Q$8:$Q$13)*100,"")',
-           fill=bf, align=_CENTER, number_format="0.00")
+        _c(ws, sr, 17, bl_marks if bl_marks else "", fill=bf, align=_CENTER)
+        _c(ws, sr, 18, bl_pct   if bl_pct   != "" else "", fill=bf, align=_CENTER, number_format="0.00")
+        ws.row_dimensions[sr].height = 22
 
     q_row = r + 1
     q_row_fills = [_GREEN_FILL, _LIGHT_FILL]
@@ -344,6 +377,7 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
             bl_raw = str(q.get("bloom_level", ""))
             bl_str = bl_raw if bl_raw.startswith("L") else f"L{bl_raw}" if bl_raw else ""
             _c(ws, q_row, 9, bl_str, fill=_LIME_FILL, bold=True, align=_CENTER)
+            ws.row_dimensions[q_row].height = 40
             q_row += 1
     else:
         for i in range(1, 16):
@@ -357,6 +391,7 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
             _c(ws, q_row, 7, "", fill=_YELLOW_FILL, align=_CENTER)
             _c(ws, q_row, 8, "", fill=_ORANGE_FILL, align=_CENTER)
             _c(ws, q_row, 9, "", fill=_LIME_FILL,   align=_CENTER)
+            ws.row_dimensions[q_row].height = 40
             q_row += 1
 
     ws.column_dimensions["A"].width = 7
@@ -364,8 +399,8 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
     ws.column_dimensions["G"].width = 8
     ws.column_dimensions["H"].width = 14
     ws.column_dimensions["I"].width = 6
-    ws.column_dimensions["K"].width = 6
-    ws.column_dimensions["L"].width = 14
+    ws.column_dimensions["K"].width = 8
+    ws.column_dimensions["L"].width = 16
     ws.column_dimensions["M"].width = 12
     ws.column_dimensions["O"].width = 10
     ws.column_dimensions["P"].width = 14
@@ -628,7 +663,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
     for i, co_id in enumerate(cos):
         r_co = s0 + 1 + i
         # Compute percentage from marks in Python
-        if has_questions and saved_qp:
+        if has_questions and saved_qp and any(q.get("co_id") for q in saved_qp):
             # Find which question columns map to this CO
             co_q_cols = []
             for qi, q in enumerate(saved_qp):
@@ -675,7 +710,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
             pct = (n_scored / n_total) * 100 if n_total > 0 else 0
             level = 3 if pct >= 70 else (2 if pct > 40 else 1)
             co_levels[co_id] = level
-        elif not has_questions:
+        elif not has_questions or not saved_qp or not any(q.get("co_id") for q in (saved_qp or [])):
             # No question breakdown — use overall total marks
             target = (total_marks or 0) * 0.60
             n_total = len([s for s in students if s.get("prn")])
@@ -779,6 +814,7 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
     r = 10
     co_fills = [_GREEN_FILL, _LIGHT_FILL, _YELLOW_FILL, _ORANGE_FILL, _PINK_FILL]
     internal_levels = []  # list of per-CO internal (CIE) level values
+    final_co_values = {}  # co_id -> final attainment value (for PO_Attainment)
     for ci, co_id in enumerate(cos):
         cfill = co_fills[ci % len(co_fills)]
         # Hardcode CO ID (avoid formula referencing CO_List which may be uncalculated)
@@ -815,17 +851,17 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
             final_val = None
         _c(ws, r, g + 2, final_val, fill=_TEAL_FILL, bold=True, align=_CENTER,
            number_format="0.00")
+        final_co_values[co_id] = final_val
 
         r += 1
 
     final_col = get_column_letter(g + 2)
-    # Overall CO Attainment — average of final CO attainment column
-    final_data_start = 10
-    final_data_end = 10 + len(cos) - 1
+    # Overall CO Attainment — hardcoded average of final CO attainment values
+    final_vals_list = [v for v in final_co_values.values() if v is not None]
+    overall_val = round(sum(final_vals_list) / len(final_vals_list), 2) if final_vals_list else None
     _c(ws, r, 1, "Overall CO Attainment",
        bold=True, fill=_SKYBLUE_FILL, align=_LEFT)
-    _c(ws, r, g + 4,
-       f'=IFERROR(AVERAGE({final_col}{final_data_start}:{final_col}{final_data_end}),"")',
+    _c(ws, r, g + 4, overall_val,
        fill=_LIME_FILL, bold=True, align=_CENTER, number_format="0.00")
     r += 2
 
@@ -846,11 +882,13 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
     for i in range(n_ca + 6):
         ws.column_dimensions[get_column_letter(i + 2)].width = 12
 
+    return final_co_values
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PO_Attainment
 # ─────────────────────────────────────────────────────────────────────────────
-def _build_po_attainment(wb, course, n_ca):
+def _build_po_attainment(wb, course, n_ca, final_co_values=None):
     ws = wb.create_sheet("PO_Attainment")
     _course_header_block(ws, course)
 
@@ -858,6 +896,7 @@ def _build_po_attainment(wb, course, n_ca):
     cos    = [c["co_id"] for c in course.cos]
     pos    = course.pos
     po_ids = [p["po_id"] for p in pos] if pos else [f"PO{i}" for i in range(1, 13)]
+    final_co_values = final_co_values or {}
 
     r = 7
     _c(ws, r, 1, "CO",         bold=True, fill=_NAVY_FILL, font=_HEADER_FONT)
@@ -867,16 +906,14 @@ def _build_po_attainment(wb, course, n_ca):
 
     r = 8
     data_start = r
-    final_col  = get_column_letter(n_ca + 4)
 
     co_fills = [_GREEN_FILL, _LIGHT_FILL, _YELLOW_FILL, _ORANGE_FILL, _PINK_FILL]
     for ci_idx, co_id in enumerate(cos):
         cfill = co_fills[ci_idx % len(co_fills)]
         _c(ws, r, 1, co_id, bold=True, fill=cfill, align=_CENTER)
-        final_co_attn_row = 10 + ci_idx
-        _c(ws, r, 2,
-           f"=Final_CO_Attn!{final_col}{final_co_attn_row}",
-           fill=_YELLOW_FILL, bold=True, align=_CENTER, number_format="0.00")
+        # Hardcode final CO attainment value instead of cross-sheet formula
+        final_val = final_co_values.get(co_id)
+        _c(ws, r, 2, final_val, fill=_YELLOW_FILL, bold=True, align=_CENTER, number_format="0.00")
         mapping = co_po.get(co_id, {})
         for pi, po in enumerate(po_ids, 3):
             val = mapping.get(po, None)
@@ -1284,10 +1321,10 @@ class COPOTemplateService:
             marks_meta_list.append(meta)
 
         # 6. Final_CO_Attn
-        _build_final_co_attn(wb, course, ca_names, marks_meta_list, ese_meta)
+        final_co_values = _build_final_co_attn(wb, course, ca_names, marks_meta_list, ese_meta)
 
         # 7. PO_Attainment
-        _build_po_attainment(wb, course, len(ca_names))
+        _build_po_attainment(wb, course, len(ca_names), final_co_values=final_co_values)
 
         # Save
         import tempfile
