@@ -962,13 +962,32 @@ class COPOTemplateService:
             logger.warning(f"Could not load saved CA sheets: {e}")
             return {}
 
-    @staticmethod
-    def _norm_label(label: str) -> str:
-        """Normalize a CA label for fuzzy matching: lowercase, strip trailing numbers."""
-        import re as _re2
+    # All names that mean "End Semester Exam" — mapped to canonical key "ese"
+    _ESE_ALIASES = {
+        "ese", "end semester", "end-semester", "end sem", "end-sem",
+        "final exam", "final examination", "semester exam", "semester examination",
+        "end semester exam", "end semester examination", "endsem",
+    }
+
+    @classmethod
+    def _norm_label(cls, label: str) -> str:
+        """Lowercase + map all ESE aliases → 'ese'. Otherwise return as-is lowercase."""
         s = label.lower().strip()
-        s = _re2.sub(r'\s*\d+\s*$', '', s).strip()
+        if s in cls._ESE_ALIASES:
+            return "ese"
+        for suffix in (" exam", " examination"):
+            if s.endswith(suffix):
+                base = s[: -len(suffix)].strip()
+                if base in cls._ESE_ALIASES:
+                    return "ese"
         return s
+
+    @classmethod
+    def _norm_base(cls, label: str) -> str:
+        """Strip trailing number: 'Unit Test 2' → 'unit test', 'Quiz 1' → 'quiz'."""
+        import re as _re2
+        s = cls._norm_label(label)
+        return _re2.sub(r'\s*\d+\s*$', '', s).strip()
 
     async def _get_attainment_marks(self, course_id: int) -> dict:
         """
@@ -1093,45 +1112,53 @@ class COPOTemplateService:
                     f"saved_sheets={list(saved_sheets.keys())} "
                     f"attainment_comps={list(attainment_marks.keys())}")
 
-        # Build CA name list: merge all sources, deduplicating by normalised label
-        # Priority: CASheet saved labels > eval_config labels
-        # If eval_config has "Quiz" and COAttainment has "Quiz 1", keep "Quiz 1" (more specific)
-        ESE_KEYWORDS = {"end semester", "ese", "end-semester", "final exam", "end sem"}
+        # Build CA name list — merge all three sources with smart deduplication:
+        # - Numbered variants like "Unit Test 1" and "Unit Test 2" are DIFFERENT → both kept
+        # - Only deduplicate when norm labels are identical (e.g. "quiz" == "quiz")
+        # - ESE variants all map to "ese" → excluded from CA list regardless of name
+        ESE_KEYWORDS = {"end semester", "ese", "end-semester", "final exam", "end sem",
+                        "endsem", "end sem", "semester exam", "final examination"}
         def _is_ese(name):
-            return any(k in name.lower() for k in ESE_KEYWORDS)
+            return self._norm_label(name) == "ese"
 
         comp_ca_names  = sorted([k for k in components.keys() if not _is_ese(k)])
-        saved_ca_names = [k for k in saved_sheets.keys() if not _is_ese(k)]
+        saved_ca_names = [k for k in saved_sheets.keys()    if not _is_ese(k)]
         attn_ca_names  = [k for k in attainment_marks.keys() if not _is_ese(k)]
 
-        # Deduplicate: track which normalised keys we've already included
+        # Deduplicate by exact normalised label (NOT by base — keep numbered variants)
         _seen_norm: set = set()
         ca_names: list = []
 
-        # First pass: CASheet labels (highest priority — user entered them)
+        def _add_if_new(label):
+            nk = self._norm_label(label)
+            if nk not in _seen_norm:
+                _seen_norm.add(nk)
+                ca_names.append(label)
+
+        # Priority order: CASheet > COAttainment > eval_config
         for label in saved_ca_names:
-            nk = self._norm_label(label)
-            if nk not in _seen_norm:
-                _seen_norm.add(nk)
-                ca_names.append(label)
-
-        # Second pass: attainment labels (uploaded marks)
+            _add_if_new(label)
         for label in attn_ca_names:
-            nk = self._norm_label(label)
-            if nk not in _seen_norm:
-                _seen_norm.add(nk)
-                ca_names.append(label)
-
-        # Third pass: eval_config labels (fallback — add any not already covered)
+            _add_if_new(label)
         for label in comp_ca_names:
-            nk = self._norm_label(label)
-            if nk not in _seen_norm:
-                _seen_norm.add(nk)
-                ca_names.append(label)
+            _add_if_new(label)
 
         if not ca_names:
             ca_names = [f"CA{i}" for i in range(1, 4)]
-        ca_names = ca_names[:10]  # safety cap
+
+        # Final cleanup: remove generic eval_config names that are base-subsumed
+        # e.g. if "Quiz 1" already in list, drop "Quiz" (its base norm "quiz" is covered)
+        _covered_bases = {self._norm_base(n) for n in ca_names}
+        ca_names = [
+            n for n in ca_names
+            if self._norm_label(n) not in _covered_bases   # not a pure-base duplicate
+            or not any(
+                self._norm_base(other) == self._norm_label(n) and other != n
+                for other in ca_names
+            )
+        ]
+
+        ca_names = ca_names[:12]  # safety cap
 
         wb = Workbook()
         del wb[wb.sheetnames[0]]
@@ -1145,33 +1172,38 @@ class COPOTemplateService:
         # 3. CO_List
         _build_co_list(wb, course)
 
-        # Build normalised lookup for attainment_marks: norm_key → list of actual keys
-        # e.g. "quiz" → ["Quiz 1", "Quiz 2"], "unit test" → ["Unit Test 1", "Unit Test 2"]
-        _attn_norm: dict = {}
+        # Build normalised lookups for attainment_marks
+        # exact_norm: normalised label → actual key  (for exact match after ESE canonicalisation)
+        # base_norm:  base label (no trailing number) → list of actual keys  (for fuzzy grouping)
+        _exact_norm: dict = {}
+        _base_norm: dict = {}
         for ak in attainment_marks.keys():
             nk = self._norm_label(ak)
-            _attn_norm.setdefault(nk, []).append(ak)
+            _exact_norm[nk] = ak
+            bk = self._norm_base(ak)
+            _base_norm.setdefault(bk, []).append(ak)
 
         def _find_attn_key(label: str) -> dict:
-            """Return merged attainment marks for label using exact then fuzzy match."""
+            """Return attainment marks for label using exact → ESE-alias → base-fuzzy match."""
             # 1. Exact match
             if label in attainment_marks:
                 return attainment_marks[label]
-            # 2. Case-insensitive exact
-            for ak, av in attainment_marks.items():
-                if ak.lower().strip() == label.lower().strip():
-                    return av
-            # 3. Normalised prefix match (strip trailing numbers)
-            norm = self._norm_label(label)
-            matches = _attn_norm.get(norm, [])
+            # 2. Normalised exact (handles ESE aliases: "End Semester" → "ese" == "ESE" → "ese")
+            nk = self._norm_label(label)
+            if nk in _exact_norm:
+                return attainment_marks[_exact_norm[nk]]
+            # 3. Base fuzzy: "Quiz" matches "Quiz 1", "Unit Test" matches "Unit Test 1"+"Unit Test 2"
+            bk = self._norm_base(label)
+            matches = _base_norm.get(bk, [])
+            if not matches:
+                # also try exact norm as base key
+                matches = _base_norm.get(nk, [])
             if matches:
-                # Merge all matched keys into one dict (union of students)
                 merged_attn: dict = {}
                 for ak in matches:
                     for prn, mks in attainment_marks[ak].items():
                         if prn not in merged_attn:
                             merged_attn[prn] = mks
-                        # If same PRN appears in multiple matching components, prefer non-_total
                         elif "_total" in merged_attn[prn] and "_total" not in mks:
                             merged_attn[prn] = mks
                 return merged_attn
