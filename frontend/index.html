@@ -4599,14 +4599,11 @@ function CourseFilePage({course}){
     </div>,
     misc:<div>
       {field('Learning Material Links (one per line)','learning_material_links',true,4,
-        'https://lms.example.edu/mod/folder/...
-https://nptel.ac.in/...')}
+        'https://lms.example.edu/mod/folder/...\nhttps://nptel.ac.in/...')}
       {field('Attendance Links (one per line)','attendance_links',true,3,
-        'Division A: https://lms.example.edu/attendance/...
-Division B: https://lms.example.edu/attendance/...')}
+        'Division A: https://lms.example.edu/attendance/...\nDivision B: https://lms.example.edu/attendance/...')}
       {field('Activity Reports','activity_reports',true,5,
-        'Guest Lecture by Dr. X on Topic Y — 10 Feb 2025
-Kaggle Competition conducted — 15 Apr 2025...')}
+        'Guest Lecture by Dr. X on Topic Y — 10 Feb 2025\nKaggle Competition conducted — 15 Apr 2025...')}
     </div>,
     uploads:<div>
       <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1.2rem'}}>
