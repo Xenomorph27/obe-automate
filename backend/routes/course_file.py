@@ -2,13 +2,19 @@
 """
 Routes for generating and managing the full OBE Course File.
 
-POST /course-file/generate/{course_id}    — generate the complete .docx
-GET  /course-file/download/{course_id}    — download the generated .docx
-GET  /course-file/extra/{course_id}       — get saved extra fields (vision, mission, etc.)
-POST /course-file/extra/{course_id}       — save extra fields
+POST /course-file/generate/{course_id}          — generate the complete .docx
+GET  /course-file/download/{course_id}          — download the generated .docx
+GET  /course-file/extra/{course_id}             — get saved extra fields
+POST /course-file/extra/{course_id}             — save extra fields
+POST /course-file/upload/{course_id}            — upload a dept-specific attachment
+GET  /course-file/attachments/{course_id}       — list all attachments for a course
+DELETE /course-file/attachment/{attachment_id}  — delete an attachment
+GET  /course-file/attachment/{attachment_id}/download — download an attachment
 """
 import os
-from fastapi import APIRouter, Depends, HTTPException
+import uuid
+import mimetypes
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -18,14 +24,20 @@ from sqlalchemy import select
 from backend.core.auth import require_auth
 from backend.core.exceptions import OBEException
 from backend.core.logger import get_logger
+from backend.core.storage import get_storage
 from backend.database.connection import get_db
 from backend.database.user_models import User
-from backend.database.models import CourseFileExtra
+from backend.database.models import CourseFileExtra, CourseFileAttachment
 from backend.services.course_file_service import CourseFileService
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/course-file", tags=["Course File"])
 
+_ATTACH_CATEGORY = "course_file_attachments"
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+# ── Pydantic schemas ──────────────────────────────────────────────────────────
 
 class CourseFileExtraPayload(BaseModel):
     vision_text: Optional[str] = ""
@@ -39,6 +51,8 @@ class CourseFileExtraPayload(BaseModel):
     learning_material_links: Optional[str] = ""
     attendance_links: Optional[str] = ""
 
+
+# ── Existing endpoints ────────────────────────────────────────────────────────
 
 @router.post("/generate/{course_id}", status_code=201)
 async def generate_course_file(
@@ -125,3 +139,113 @@ async def save_course_file_extra(
     await db.commit()
     logger.info(f"Course file extra saved for course_id={course_id}")
     return {"status": "success", "message": "Saved successfully"}
+
+
+# ── Attachment endpoints ──────────────────────────────────────────────────────
+
+@router.post("/upload/{course_id}", status_code=201)
+async def upload_attachment(
+    course_id: int,
+    file: UploadFile = File(...),
+    label: str = Form(...),
+    section_no: Optional[int] = Form(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """
+    Upload a department-specific file (timetable, event photo, email screenshot, etc.)
+    and attach it to the given course's file. Max 50 MB.
+    """
+    data = await file.read()
+    if len(data) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large — maximum size is 50 MB.")
+
+    # Build a unique stored filename so collisions are impossible
+    ext = os.path.splitext(file.filename or "")[-1].lower()
+    stored_name = f"course{course_id}_{uuid.uuid4().hex}{ext}"
+
+    storage = get_storage()
+    stored_path = storage.save(_ATTACH_CATEGORY, stored_name, data)
+
+    mime = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
+
+    attachment = CourseFileAttachment(
+        course_id=course_id,
+        section_no=section_no,
+        label=label.strip(),
+        filename=file.filename or stored_name,
+        stored_path=str(stored_path),
+        mime_type=mime,
+        file_size=len(data),
+    )
+    db.add(attachment)
+    await db.commit()
+    await db.refresh(attachment)
+
+    logger.info(f"Attachment uploaded: course={course_id} label='{label}' file={stored_name}")
+    return {"status": "success", "data": attachment.to_dict()}
+
+
+@router.get("/attachments/{course_id}")
+async def list_attachments(
+    course_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """List all department-specific attachments for a course."""
+    result = await db.execute(
+        select(CourseFileAttachment)
+        .where(CourseFileAttachment.course_id == course_id)
+        .order_by(CourseFileAttachment.section_no, CourseFileAttachment.uploaded_at)
+    )
+    attachments = result.scalars().all()
+    return {"status": "success", "data": [a.to_dict() for a in attachments]}
+
+
+@router.delete("/attachment/{attachment_id}", status_code=200)
+async def delete_attachment(
+    attachment_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Delete a department attachment (removes DB record and stored file)."""
+    result = await db.execute(
+        select(CourseFileAttachment).where(CourseFileAttachment.id == attachment_id)
+    )
+    attachment = result.scalar_one_or_none()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+
+    # Remove from disk
+    storage = get_storage()
+    stored_name = os.path.basename(attachment.stored_path)
+    storage.delete(_ATTACH_CATEGORY, stored_name)
+
+    await db.delete(attachment)
+    await db.commit()
+    logger.info(f"Attachment deleted: id={attachment_id}")
+    return {"status": "success", "message": "Attachment deleted."}
+
+
+@router.get("/attachment/{attachment_id}/download")
+async def download_attachment(
+    attachment_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Download a specific department attachment."""
+    result = await db.execute(
+        select(CourseFileAttachment).where(CourseFileAttachment.id == attachment_id)
+    )
+    attachment = result.scalar_one_or_none()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+
+    if not os.path.exists(attachment.stored_path):
+        raise HTTPException(status_code=404, detail="File not found on disk.")
+
+    return FileResponse(
+        path=attachment.stored_path,
+        media_type=attachment.mime_type or "application/octet-stream",
+        filename=attachment.filename,
+    )

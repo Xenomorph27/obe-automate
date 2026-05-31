@@ -225,18 +225,59 @@ def _build_docx(data: dict) -> bytes:
     _section_title(doc, 2, "Program Outcomes (POs), Program Educational Objectives (PEOs) and Program Specific Outcomes (PSOs)")
     _heading2(doc, "Program Outcomes (POs)")
     pos = data.get("pos") or []
-    if pos:
-        _make_table(doc,
-                    ["PO", "Statement"],
-                    [[p.get("po_id",""), p.get("statement", p.get("description",""))] for p in pos],
-                    [1.5, 14.5])
-    else:
-        _add_para(doc, "[POs not configured. Add POs during course setup.]", color=(136,136,136))
+    # Use DB POs if they have real statement text; otherwise fall back to the
+    # standard NBA 12 POs for engineering programmes.
+    _STANDARD_POS = [
+        ("PO 1",  "Engineering Knowledge: Apply the knowledge of mathematics, science, engineering fundamentals, and an engineering specialization to the solution of complex engineering problems."),
+        ("PO 2",  "Problem analysis: Identify, formulate, review research literature, and analyze complex engineering problems reaching substantiated conclusions using first principles of mathematics, natural sciences, and engineering sciences."),
+        ("PO 3",  "Design/development of solutions: Design solutions for complex engineering problems and design system components or processes that meet the specified needs with appropriate consideration for the public health and safety, and the cultural, societal, and environmental considerations."),
+        ("PO 4",  "Conduct investigations of complex problems: Use research-based knowledge and research methods including design of experiments, analysis and interpretation of data, and synthesis of the information to provide valid conclusions."),
+        ("PO 5",  "Modern tool usage: Create, select, and apply appropriate techniques, resources, and modern engineering and IT tools including prediction and modeling to complex engineering activities with an understanding of the limitations."),
+        ("PO 6",  "The engineer and society: Apply reasoning informed by the contextual knowledge to assess societal, health, safety, legal and cultural issues and the consequent responsibilities relevant to the professional engineering practice."),
+        ("PO 7",  "Environment and sustainability: Understand the impact of the professional engineering solutions in societal and environmental contexts, and demonstrate the knowledge of, and need for sustainable development."),
+        ("PO 8",  "Ethics: Apply ethical principles and commit to professional ethics and responsibilities and norms of the engineering practice."),
+        ("PO 9",  "Individual and team work: Function effectively as an individual, and as a member or leader in diverse teams, and in multidisciplinary settings."),
+        ("PO 10", "Communication: Communicate effectively on complex engineering activities with the engineering community and with society at large, such as, being able to comprehend and write effective reports and design documentation, make effective presentations, and give and receive clear instructions."),
+        ("PO 11", "Project management and finance: Demonstrate knowledge and understanding of the engineering and management principles and apply these to one's own work, as a member and leader in a team, to manage projects and in multidisciplinary environments."),
+        ("PO 12", "Life-long learning: Recognize the need for, and have the preparation and ability to engage in independent and life-long learning in the broadest context of technological change."),
+    ]
+    # Check if DB POs have actual statement text (not just IDs)
+    db_pos_have_text = any(
+        p.get("statement", p.get("description", "")).strip()
+        for p in pos
+    )
+    po_rows = (
+        [[p.get("po_id",""), p.get("statement", p.get("description",""))] for p in pos]
+        if db_pos_have_text
+        else [[pid, stmt] for pid, stmt in _STANDARD_POS]
+    )
+    _make_table(doc, ["", "Program Outcomes"], po_rows, [1.5, 14.5])
 
     _heading2(doc, "Program Educational Objectives (PEOs)")
-    _add_para(doc, "[PEOs to be added by faculty — standard institutional PEOs apply.]", color=(136,136,136))
+    peos = [
+        ("PEO1", "Apply the knowledge of the latest trends of AIML and will be engaged in technology development and deployment for engineering systems in their profession."),
+        ("PEO2", "To be competent AIML engineers with innovative thinking and research attitude to solve the real-world problems."),
+        ("PEO3", "To have enhanced interpersonal and managerial skills to function effectively in their profession with social awareness and responsibility."),
+    ]
+    for pid, ptext in peos:
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(3)
+        p.paragraph_format.space_after  = Pt(3)
+        r = p.add_run(f"{pid}: ")
+        r.bold = True
+        r.font.size = Pt(10)
+        r2 = p.add_run(ptext)
+        r2.font.size = Pt(10)
+
     _heading2(doc, "Program Specific Outcomes (PSOs)")
-    _add_para(doc, "[PSOs to be added by faculty — standard institutional PSOs apply.]", color=(136,136,136))
+    psos = [
+        ("PSO1", "To apply the concepts of Artificial Intelligence and Machine Learning with practical knowledge in analysis, design and development of intelligent systems and applications to multi-disciplinary problems."),
+        ("PSO2", "To provide a concrete foundation to the students in the cutting-edge areas Artificial Intelligence and Machine Learning and excelling in the specialized areas like Natural Language Processing, Computer Vision, Reinforcement Learning, Internet of Things, Cloud computing, Data Security and privacy etc."),
+    ]
+    _make_table(doc,
+                ["", "Program Specific Outcomes"],
+                [[pid, ptext] for pid, ptext in psos],
+                [1.5, 14.5])
 
     # ── 3. Syllabus & Timetable ───────────────────────────────────────────────
     _section_title(doc, 3, "Syllabus, Personal Timetable")
@@ -252,7 +293,40 @@ def _build_docx(data: dict) -> bytes:
         _add_para(doc, "[Syllabus will be extracted from session plan. Generate session plan first.]",
                   color=(136,136,136))
     _heading2(doc, "Personal Timetable")
-    _add_para(doc, "[Faculty timetable — to be attached separately.]", color=(136,136,136))
+    timetable_attachments = [
+        a for a in (data.get("attachments") or [])
+        if a.get("section_no") == 3
+    ]
+    if timetable_attachments:
+        for a in timetable_attachments:
+            _add_para(doc, f"Attached: {a['label']}  ({a['filename']})", size=10)
+    else:
+        _add_para(doc, "[Faculty timetable — upload via Dept. Uploads tab, tagged to Section 3.]",
+                  color=(136,136,136))
+
+    # ── List of Students ──────────────────────────────────────────────────────
+    _heading2(doc, "List of Students")
+    students_all = data.get("students") or []
+    if students_all:
+        from collections import defaultdict as _dd
+        by_section = _dd(list)
+        for s in students_all:
+            sec = (s.get("section") or "").strip().upper() or "All"
+            by_section[sec].append(s)
+        for sec_label in sorted(by_section.keys()):
+            sec_students = by_section[sec_label]
+            if len(by_section) > 1:
+                _add_para(doc, f"Section {sec_label}", bold=True, size=11,
+                          space_before=6, space_after=2)
+            _make_table(
+                doc,
+                ["Sr. No", "PRN", "Name"],
+                [[str(i+1), s.get("prn",""), s.get("name","")] for i, s in enumerate(sec_students)],
+                [1.2, 3.5, 11.3],
+            )
+    else:
+        _add_para(doc, "[Student list not available. Add students via the Students page.]",
+                  color=(136,136,136))
 
     # ── 4. CO Statements + CO-PO Mapping ─────────────────────────────────────
     _section_title(doc, 4, "CO Statements, CO-PO-PSO Mapping with justification")
@@ -580,6 +654,15 @@ class CourseFileService:
         extra = result.scalar_one_or_none()
         return extra.to_dict() if extra else {}
 
+    async def _get_attachments(self, course_id: int):
+        from backend.database.models import CourseFileAttachment
+        result = await self.db.execute(
+            select(CourseFileAttachment)
+            .where(CourseFileAttachment.course_id == course_id)
+            .order_by(CourseFileAttachment.section_no, CourseFileAttachment.uploaded_at)
+        )
+        return [a.to_dict() for a in result.scalars().all()]
+
     def _extract_syllabus_from_session(self, session_rows):
         units = {}
         for row in session_rows:
@@ -651,6 +734,8 @@ class CourseFileService:
             "advanced_learners": extra.get("advanced_learners", "") or
                                  "\n".join(f"{s['prn']} — {s['name']} ({s['marks']})" for s in advanced_list),
             "slow_learners_parsed": slow_list,
+            "students":       students,
+            "attachments":    await self._get_attachments(course_id),
             "co_attainment":  co_attainment,
             "activity_reports": extra.get("activity_reports", ""),
             "learning_material_links": extra.get("learning_material_links", ""),

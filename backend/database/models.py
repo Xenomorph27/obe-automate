@@ -229,5 +229,35 @@ class CourseFileExtra(Base):
         }
 
 
+class CourseFileAttachment(Base):
+    """
+    Stores arbitrary file uploads attached to a course file section.
+    Faculty can upload timetables, event photos, email screenshots, etc.
+    Each attachment belongs to a course and is tagged with a section number + label.
+    """
+    __tablename__ = "course_file_attachments"
+    id          = Column(Integer, primary_key=True, index=True)
+    course_id   = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    section_no  = Column(Integer, nullable=True)          # 1-13, which section it belongs to
+    label       = Column(String(200), nullable=False)     # human-readable label e.g. "Faculty Timetable"
+    filename    = Column(String(300), nullable=False)     # original filename
+    stored_path = Column(String(500), nullable=False)     # path on disk
+    mime_type   = Column(String(100), nullable=True)
+    file_size   = Column(Integer, nullable=True)          # bytes
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id":          self.id,
+            "course_id":   self.course_id,
+            "section_no":  self.section_no,
+            "label":       self.label,
+            "filename":    self.filename,
+            "mime_type":   self.mime_type,
+            "file_size":   self.file_size,
+            "uploaded_at": self.uploaded_at.isoformat() if self.uploaded_at else None,
+        }
+
+
 # Import user models so they're registered in Base metadata
 from backend.database.user_models import User  # noqa

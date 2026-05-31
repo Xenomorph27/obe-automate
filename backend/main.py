@@ -137,7 +137,7 @@ from backend.core.storage import get_storage as _gs
 _storage_base = _gs().base
 _storage_base.mkdir(parents=True, exist_ok=True)
 # Pre-create all category subdirs so StaticFiles doesn't fail on first request
-for _cat in ["session_plans", "evaluation_plans", "attainment_reports", "nba_reports", "question_papers", "co_po_templates", "course_files"]:
+for _cat in ["session_plans", "evaluation_plans", "attainment_reports", "nba_reports", "question_papers", "co_po_templates", "course_files", "course_file_attachments"]:
     (_storage_base / _cat).mkdir(parents=True, exist_ok=True)
 app.mount("/files", StaticFiles(directory=str(_storage_base)), name="files")
 
