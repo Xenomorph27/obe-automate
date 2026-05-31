@@ -456,17 +456,41 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
            fill=_YELLOW_FILL, bold=True, align=_CENTER)
 
         student_marks = _saved.get(prn_norm, {})
-        for qi in range(n_qs):
-            col = 6 + qi
-            mark_val = None
-            if student_marks:
-                mark_val = student_marks.get(str(qi + 1))
-                if mark_val is None and saved_qp and qi < len(saved_qp):
-                    actual_qno = str(saved_qp[qi].get("q_no", qi + 1))
-                    mark_val = student_marks.get(actual_qno)
-                if mark_val is None:
-                    mark_val = student_marks.get(qi + 1)
-            _c(ws, r, col, mark_val, fill=fill, align=_CENTER)
+
+        # Case 1: marks saved as {_total: X} (no per-question breakdown)
+        # Write the total directly into col E and leave question cols empty
+        if student_marks and "_total" in student_marks and len(student_marks) == 1:
+            total_val = student_marks.get("_total")
+            try:
+                total_val = float(total_val) if total_val not in (None, "") else None
+            except (TypeError, ValueError):
+                total_val = None
+            # Override col E with the direct total value (not a SUM formula)
+            ws.cell(row=r, column=5).value = total_val
+            ws.cell(row=r, column=5).fill = _YELLOW_FILL
+            ws.cell(row=r, column=5).font = Font(name="Calibri", size=10, bold=True)
+            ws.cell(row=r, column=5).border = _BORDER
+            ws.cell(row=r, column=5).alignment = _CENTER
+            for qi in range(n_qs):
+                _c(ws, r, 6 + qi, None, fill=fill, align=_CENTER)
+        else:
+            # Case 2: marks saved per question as {"1": v, "2": v, ...}
+            for qi in range(n_qs):
+                col = 6 + qi
+                mark_val = None
+                if student_marks:
+                    mark_val = student_marks.get(str(qi + 1))
+                    if mark_val is None and saved_qp and qi < len(saved_qp):
+                        actual_qno = str(saved_qp[qi].get("q_no", qi + 1))
+                        mark_val = student_marks.get(actual_qno)
+                    if mark_val is None:
+                        mark_val = student_marks.get(qi + 1)
+                    if mark_val is not None:
+                        try:
+                            mark_val = float(mark_val)
+                        except (TypeError, ValueError):
+                            pass
+                _c(ws, r, col, mark_val, fill=fill, align=_CENTER)
 
     # ── Summary rows ──────────────────────────────────────────────────────
     s0 = count_end + 3
@@ -844,7 +868,7 @@ class COPOTemplateService:
         ese_meta  = _build_marks_sheet(
             wb, "ESE_MKS", course, "ESE", "ESE_QP", students, ese_total,
             saved_marks=ese_saved_marks,
-            saved_qp=ese_saved_qp or ese_questions,
+            saved_qp=ese_saved_qp if ese_saved_qp else ese_questions,
         )
 
         # 5. CA sheets
@@ -871,7 +895,7 @@ class COPOTemplateService:
             meta = _build_marks_sheet(
                 wb, mks_name, course, ca, qp_name, students, ca_total,
                 saved_marks=ca_saved_marks,
-                saved_qp=ca_saved_qp or ca_questions,
+                saved_qp=ca_saved_qp if ca_saved_qp else ca_questions,
             )
             marks_meta_list.append(meta)
 
