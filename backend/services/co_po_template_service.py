@@ -922,27 +922,39 @@ def _build_po_attainment(wb, course, n_ca, final_co_values=None):
                align=_CENTER, bold=bool(val))
         r += 1
 
+    # Articulation Average — hardcoded average of non-empty CO-PO mapping values per PO
     _c(ws, r, 1, "Articulation Average", bold=True, fill=_TEAL_FILL, align=_LEFT)
     _c(ws, r, 2, "", fill=_TEAL_FILL)
     for pi, po in enumerate(po_ids, 3):
-        col = get_column_letter(pi)
-        _c(ws, r, pi,
-           f'=IFERROR(AVERAGEIF({col}{data_start}:{col}{r-1},"<>",{col}{data_start}:{col}{r-1}),"-")',
-           fill=_ORANGE_FILL, bold=True, align=_CENTER, number_format="0.00")
+        vals = []
+        for co_id in cos:
+            v = co_po.get(co_id, {}).get(po)
+            if v:
+                try:
+                    vals.append(float(v))
+                except (TypeError, ValueError):
+                    pass
+        avg = round(sum(vals) / len(vals), 2) if vals else "-"
+        _c(ws, r, pi, avg, fill=_ORANGE_FILL, bold=True, align=_CENTER, number_format="0.00")
     r += 1
 
+    # CO-PO_PSO Attainment — hardcoded: sum(mapping * co_attainment) / (3 * mapped_count)
     _c(ws, r, 1, "CO-PO_PSO Attainment", bold=True, fill=_LIME_FILL, align=_LEFT)
     _c(ws, r, 2, "", fill=_LIME_FILL)
-    attn_col_ltr = "B"
     for pi, po in enumerate(po_ids, 3):
-        col = get_column_letter(pi)
-        terms = "+".join(
-            [f"{col}{data_start + i}*${attn_col_ltr}${data_start + i}"
-             for i in range(len(cos))]
-        )
-        _c(ws, r, pi,
-           f'=IFERROR(({terms})/(3*COUNT({col}{data_start}:{col}{data_start+len(cos)-1})),"-")',
-           fill=_SKYBLUE_FILL, bold=True, align=_CENTER, number_format="0.00")
+        numerator = 0.0
+        mapped_count = 0
+        for co_id in cos:
+            mapping_val = co_po.get(co_id, {}).get(po)
+            attn_val = final_co_values.get(co_id)
+            if mapping_val and attn_val is not None:
+                try:
+                    numerator += float(mapping_val) * float(attn_val)
+                    mapped_count += 1
+                except (TypeError, ValueError):
+                    pass
+        result = round(numerator / (3 * mapped_count), 2) if mapped_count > 0 else "-"
+        _c(ws, r, pi, result, fill=_SKYBLUE_FILL, bold=True, align=_CENTER, number_format="0.00")
 
     ws.column_dimensions["A"].width = 22
     ws.column_dimensions["B"].width = 12
