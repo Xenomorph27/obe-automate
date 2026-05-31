@@ -2,7 +2,7 @@
 """
 Generates a pre-filled CO-PO Attainment Excel workbook (.xlsx) for a course.
 Matches the SIT template structure exactly.
-
+ 
 Sheet layout (fixed rows):
   Course_Info   — labels in col A, values in col C (rows 1-11)
   Roll_List     — header block; students from row 8
@@ -13,25 +13,25 @@ Sheet layout (fixed rows):
   Final_CO_Attn — references CA_Marks summary rows and CO_List
   PO_Attainment — CO-PO matrix + attainment formulas
 """
-
+ 
 import os
 from pathlib import Path
 from typing import Optional
-
+ 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
+ 
 from backend.core.logger import get_logger
 from backend.core.storage import get_storage
 from backend.services.course_service import CourseService
-
+ 
 logger = get_logger(__name__)
-
+ 
 _CATEGORY = "co_po_templates"
-
+ 
 # ── Colours ──────────────────────────────────────────────────────────────────
 _NAVY_HEX    = "1F3864"
 _LIGHT_HEX   = "D6DCE4"
@@ -42,7 +42,7 @@ _SKYBLUE_HEX = "BDD7EE"
 _TEAL_HEX    = "00B0F0"
 _LIME_HEX    = "92D050"
 _PINK_HEX    = "FF99CC"
-
+ 
 _HEADER_FONT = Font(name="Calibri", bold=True, color="FFFFFF", size=10)
 _SUBHDR_FONT = Font(name="Calibri", bold=True, size=10)
 _BODY_FONT   = Font(name="Calibri", size=10)
@@ -55,18 +55,18 @@ _SKYBLUE_FILL= PatternFill("solid", fgColor=_SKYBLUE_HEX)
 _TEAL_FILL   = PatternFill("solid", fgColor=_TEAL_HEX)
 _LIME_FILL   = PatternFill("solid", fgColor=_LIME_HEX)
 _PINK_FILL   = PatternFill("solid", fgColor=_PINK_HEX)
-
+ 
 _THICK  = Side(style="medium")
 _THIN   = Side(style="thin")
 _BORDER = Border(left=_THICK, right=_THICK, top=_THICK, bottom=_THICK)
 _THIN_BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
 _LEFT   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
-
+ 
 # Maximum number of question columns in marks sheets (matches template)
 _MAX_Q = 30
-
-
+ 
+ 
 def _c(ws, row, col, value=None, font=None, fill=None, align=None, border=True, bold=False, number_format=None):
     """Write a styled cell with bold black border by default."""
     cell = ws.cell(row=row, column=col, value=value)
@@ -78,12 +78,12 @@ def _c(ws, row, col, value=None, font=None, fill=None, align=None, border=True, 
     if number_format:
         cell.number_format = number_format
     return cell
-
-
+ 
+ 
 def _navy(ws, row, col, value, align=None):
     return _c(ws, row, col, value, font=_HEADER_FONT, fill=_NAVY_FILL, align=align or _CENTER)
-
-
+ 
+ 
 def _merge(ws, r1, r2, c1, c2, value=None, font=None, fill=None, align=None):
     ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
     cell = ws.cell(row=r1, column=c1, value=value)
@@ -93,15 +93,15 @@ def _merge(ws, r1, r2, c1, c2, value=None, font=None, fill=None, align=None):
     cell.border = _BORDER
     cell.alignment = align or _CENTER
     return cell
-
-
+ 
+ 
 def _qp_sheet_name(name):
     """Return sheet name quoted with single quotes if it contains spaces."""
     if " " in name:
         return f"'{name}'"
     return name
-
-
+ 
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # Standard 6-row course header block (used in every sheet)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ def _course_header_block(ws, course):
     c.fill = _SKYBLUE_FILL
     c.border = _BORDER
     c.alignment = _CENTER
-
+ 
     # Row 2: "CO Attainment" merged
     ws.merge_cells("A2:J2")
     c = ws.cell(row=2, column=1, value="CO Attainment")
@@ -122,11 +122,11 @@ def _course_header_block(ws, course):
     c.fill = _TEAL_FILL
     c.border = _BORDER
     c.alignment = _CENTER
-
+ 
     academic_year = course.academic_year
     batch = getattr(course, "batch", course.academic_year)
     exam_season = getattr(course, "exam_season", "")
-
+ 
     # Row 4: Academic Year | Batch | Exam Season
     _c(ws, 4, 1, "Academic Year",      bold=True, fill=_LIGHT_FILL, align=_LEFT)
     _c(ws, 4, 3, academic_year,         fill=_YELLOW_FILL, align=_CENTER)
@@ -134,36 +134,36 @@ def _course_header_block(ws, course):
     _c(ws, 4, 6, batch,                fill=_YELLOW_FILL, align=_CENTER)
     _c(ws, 4, 8, "Examination Season", bold=True, fill=_LIGHT_FILL, align=_LEFT)
     _c(ws, 4, 10, exam_season,          fill=_YELLOW_FILL, align=_CENTER)
-
+ 
     # Row 5: Course Name | Course Code
     _c(ws, 5, 1, "Course Name",        bold=True, fill=_LIGHT_FILL, align=_LEFT)
     _c(ws, 5, 3, course.course_name,   fill=_YELLOW_FILL, align=_LEFT)
     _c(ws, 5, 8, "Course Code",        bold=True, fill=_LIGHT_FILL, align=_LEFT)
     _c(ws, 5, 10, course.course_code,  fill=_YELLOW_FILL, align=_CENTER)
-
+ 
     return 7  # first usable content row
-
-
+ 
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # Course_Info sheet
 # ─────────────────────────────────────────────────────────────────────────────
 def _build_course_info(wb, course):
     ws = wb.create_sheet("Course_Info")
-
+ 
     ws.merge_cells("A1:K1")
     c = ws.cell(row=1, column=1, value=f"Department of : {course.department}")
     c.font = Font(name="Calibri", bold=True, size=12)
     c.fill = _SKYBLUE_FILL
     c.border = _BORDER
     c.alignment = _CENTER
-
+ 
     ws.merge_cells("A2:K2")
     c = ws.cell(row=2, column=1, value="CO Attainment")
     c.font = Font(name="Calibri", bold=True, size=11)
     c.fill = _TEAL_FILL
     c.border = _BORDER
     c.alignment = _CENTER
-
+ 
     labels = ["Academic Year", "Batch", "Examination Season", "Course Name",
               "Course Code", "Semester", "Credit", "Faculty Name"]
     vals = [
@@ -182,24 +182,24 @@ def _build_course_info(wb, course):
         r = i + 4
         _c(ws, r, 1, lbl, bold=True, fill=_LIGHT_FILL, align=_LEFT)
         _c(ws, r, 3, val, fill=fill, align=_LEFT)
-
+ 
     ws.column_dimensions["A"].width = 22
     ws.column_dimensions["C"].width = 50
-
-
+ 
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # Roll_List
 # ─────────────────────────────────────────────────────────────────────────────
 def _build_roll_list(wb, course, students):
     ws = wb.create_sheet("Roll_List")
     r = _course_header_block(ws, course)
-
+ 
     headers = ["Sr. No.", "Seat No", "PRN", "Name of the Student", "Section"]
     hdr_fills = [_NAVY_FILL, _NAVY_FILL, _NAVY_FILL, _NAVY_FILL, _NAVY_FILL]
     for ci, (h, hf) in enumerate(zip(headers, hdr_fills), 1):
         _c(ws, r, ci, h, font=_HEADER_FONT, fill=hf)
     r += 1
-
+ 
     row_fills = [_GREEN_FILL, _LIGHT_FILL]
     for idx, s in enumerate(students, 1):
         fill = row_fills[idx % 2]
@@ -210,19 +210,19 @@ def _build_roll_list(wb, course, students):
         _c(ws, r, 4, s["name"],                  fill=fill, align=_LEFT)
         _c(ws, r, 5, s.get("section", ""),       fill=fill, align=_CENTER)
         r += 1
-
+ 
     ws.column_dimensions["C"].width = 16
     ws.column_dimensions["D"].width = 32
     ws.column_dimensions["A"].width = 8
-
-
+ 
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # CO_List
 # ─────────────────────────────────────────────────────────────────────────────
 def _build_co_list(wb, course):
     ws = wb.create_sheet("CO_List")
     _course_header_block(ws, course)
-
+ 
     r = 7
     # Rubric header — merged A7:H7
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
@@ -235,7 +235,7 @@ def _build_co_list(wb, course):
     _c(ws, r, 10, "",      fill=_NAVY_FILL)
     _c(ws, r, 11, "Level", bold=True, fill=_NAVY_FILL, font=_HEADER_FONT)
     r += 1
-
+ 
     rubric_data = [
         ("If the percentage of students is less than equal to 40% secured >= 60%  marks ", "<= 40%",        1, _LIGHT_FILL),
         ("If the percentage of students is > 40% and  < 70% secured >= 60% marks ",        "> 40% & < 70%", 2, _GREEN_FILL),
@@ -252,7 +252,7 @@ def _build_co_list(wb, course):
         _c(ws, r, 10, "",  fill=rfill)
         _c(ws, r, 11, lvl, fill=_YELLOW_FILL, align=_CENTER, bold=True)
         r += 1
-
+ 
     # Blank row 11, header row 12
     r = 13
     _c(ws, r, 1,  "CO No",    bold=True, fill=_NAVY_FILL, font=_HEADER_FONT, align=_CENTER)
@@ -264,7 +264,7 @@ def _build_co_list(wb, course):
     c.alignment = _LEFT
     _c(ws, r, 10, "Target (% of maximum marks)", bold=True, fill=_NAVY_FILL, font=_HEADER_FONT, align=_CENTER)
     r += 1
-
+ 
     co_fills = [_GREEN_FILL, _LIGHT_FILL, _YELLOW_FILL, _ORANGE_FILL, _PINK_FILL]
     for i, co in enumerate(course.cos):
         fill = co_fills[i % len(co_fills)]
@@ -277,18 +277,18 @@ def _build_co_list(wb, course):
         c.alignment = _LEFT
         _c(ws, r, 10, 60, fill=_YELLOW_FILL, bold=True, align=_CENTER)
         r += 1
-
+ 
     ws.column_dimensions["A"].width = 8
     ws.column_dimensions["B"].width = 70
-
-
+ 
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # QP sheet (ESE_QP or CA{n}_QP)
 # ─────────────────────────────────────────────────────────────────────────────
 def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
     ws = wb.create_sheet(sheet_name)
     _course_header_block(ws, course)
-
+ 
     r = 7
     hdr_labels = ["Q. No", "Question", "", "", "", "", "Marks",
                   "CO Map to question", "BL", "",
@@ -300,13 +300,13 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
                   _NAVY_FILL, _NAVY_FILL, _SKYBLUE_FILL, _SKYBLUE_FILL]
     for ci, (h, hf) in enumerate(zip(hdr_labels, hdr_fills), 1):
         _c(ws, r, ci, h, font=_HEADER_FONT, fill=hf)
-
+ 
     bloom = [("L1", "Remembering"), ("L2", "Understanding"), ("L3", "Applying"),
              ("L4", "Analyzing"),   ("L5", "Evaluating"),    ("L6", "Creating")]
-
+ 
     bl_row_fills = [_LIGHT_FILL, _GREEN_FILL, _YELLOW_FILL,
                     _ORANGE_FILL, _PINK_FILL, _LIME_FILL]
-
+ 
     for i in range(6):
         sr = r + 1 + i   # rows 8-13
         co_list_row = 14 + i
@@ -328,7 +328,7 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
         _c(ws, sr, 18,
            f'=IFERROR(Q{sr}/SUM($Q$8:$Q$13)*100,"")',
            fill=bf, align=_CENTER, number_format="0.00")
-
+ 
     q_row = r + 1
     q_row_fills = [_GREEN_FILL, _LIGHT_FILL]
     if questions:
@@ -360,7 +360,7 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
             _c(ws, q_row, 8, "", fill=_ORANGE_FILL, align=_CENTER)
             _c(ws, q_row, 9, "", fill=_LIME_FILL,   align=_CENTER)
             q_row += 1
-
+ 
     ws.column_dimensions["A"].width = 7
     ws.column_dimensions["B"].width = 60
     ws.column_dimensions["G"].width = 8
@@ -374,8 +374,8 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
     ws.column_dimensions["Q"].width = 12
     ws.column_dimensions["R"].width = 12
     return ws
-
-
+ 
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # Marks sheet (ESE_MKS or CA{n}_Marks)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -383,19 +383,19 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
                        students, total_marks, saved_marks=None, saved_qp=None):
     ws = wb.create_sheet(sheet_name)
     _course_header_block(ws, course)
-
+ 
     n_students = len(students)
     data_start = 10
     data_end   = data_start + n_students - 1
     count_end  = max(data_end, 224)
-
+ 
     # ── Row 7: column headers ─────────────────────────────────────────────
     r = 7
     hdr_info  = ["Sr. No.", "Seat No", "Roll No.", "Name of the Student", ca_label]
     hdr_fills = [_NAVY_FILL, _NAVY_FILL, _NAVY_FILL, _NAVY_FILL, _TEAL_FILL]
     for ci, (h, hf) in enumerate(zip(hdr_info, hdr_fills), 1):
         _c(ws, r, ci, h, font=_HEADER_FONT, fill=hf)
-
+ 
     qp_ref = _qp_sheet_name(qp_sheet_name)
     n_qs = len(saved_qp) if saved_qp else _MAX_Q
     for qi in range(n_qs):
@@ -404,7 +404,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
         _c(ws, r, col,
            f'=IF({qp_ref}!$A{qp_row}=0,"",{qp_ref}!$A{qp_row})',
            font=_HEADER_FONT, fill=_NAVY_FILL)
-
+ 
     # ── Row 8: "Marks" label + CO mapping from QP col H ──────────────────
     r = 8
     _c(ws, r, 5, "Marks", fill=_LIGHT_FILL, bold=True, align=_CENTER)
@@ -414,7 +414,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
         _c(ws, r, col,
            f'=IF({qp_ref}!$H{qp_row}=0,"",{qp_ref}!$H{qp_row})',
            fill=_ORANGE_FILL, bold=True, align=_CENTER)
-
+ 
     # ── Row 9: total marks + per-question max (from QP col G) ────────────
     r = 9
     _c(ws, r, 5, total_marks, fill=_GREEN_FILL, bold=True, align=_CENTER)
@@ -424,7 +424,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
         _c(ws, r, col,
            f'=IF({qp_ref}!$G{qp_row}=0,"",{qp_ref}!$G{qp_row})',
            fill=_LIME_FILL, bold=True, align=_CENTER)
-
+ 
     # ── Build normalised saved marks lookup ───────────────────────────────
     _saved = {}
     if saved_marks:
@@ -434,7 +434,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
             except (ValueError, TypeError):
                 norm = str(prn_key).strip()
             _saved[norm] = qmarks
-
+ 
     # ── Rows 10+: students ────────────────────────────────────────────────
     last_q_col = get_column_letter(6 + n_qs - 1)
     row_fills = [_GREEN_FILL, _LIGHT_FILL]
@@ -446,7 +446,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
             prn_norm = str(int(float(prn_val))) if prn_val else ""
         except (ValueError, TypeError):
             prn_norm = prn_val
-
+ 
         _c(ws, r, 1, idx,        fill=fill, bold=True,  align=_CENTER)
         _c(ws, r, 2, "",         fill=fill, align=_CENTER)
         _c(ws, r, 3, prn_val,    fill=fill, align=_CENTER)
@@ -454,9 +454,9 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
         _c(ws, r, 5,
            f"=SUM(F{r}:{last_q_col}{r})",
            fill=_YELLOW_FILL, bold=True, align=_CENTER)
-
+ 
         student_marks = _saved.get(prn_norm, {})
-
+ 
         # Case 1: marks saved as {_total: X} (no per-question breakdown)
         # Write the total directly into col E and leave question cols empty
         if student_marks and "_total" in student_marks and len(student_marks) == 1:
@@ -491,13 +491,13 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
                         except (TypeError, ValueError):
                             pass
                 _c(ws, r, col, mark_val, fill=fill, align=_CENTER)
-
+ 
     # ── Summary rows ──────────────────────────────────────────────────────
     s0 = count_end + 3
-
+ 
     cos    = [c["co_id"] for c in course.cos]
     n_cos  = len(cos)
-
+ 
     # s0: "No of students who attempted"
     _c(ws, s0, 1, "CO No",  bold=True, fill=_NAVY_FILL, font=_HEADER_FONT, align=_CENTER)
     _c(ws, s0, 2, "Level",  bold=True, fill=_NAVY_FILL, font=_HEADER_FONT, align=_CENTER)
@@ -509,10 +509,10 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
         _c(ws, s0, col,
            f'=IF(OR({col_ltr}$8="",{col_ltr}$9=""),"",COUNT({col_ltr}{data_start}:{col_ltr}{count_end}))',
            fill=_LIGHT_FILL, align=_CENTER)
-
+ 
     row_labels      = ["CO No", "Max", "Target", "No. of students scored >= target", "Percentage"]
     summary_fills   = [_LIGHT_FILL, _GREEN_FILL, _YELLOW_FILL, _ORANGE_FILL, _SKYBLUE_FILL]
-
+ 
     for i, co_id in enumerate(cos):
         r_co   = s0 + 1 + i
         sfill  = summary_fills[i % len(summary_fills)]
@@ -521,7 +521,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
         _c(ws, r_co, 4,
            row_labels[i] if i < len(row_labels) else "",
            bold=True, fill=sfill, align=_LEFT)
-
+ 
         for qi in range(n_qs):
             col     = 6 + qi
             col_ltr = get_column_letter(col)
@@ -548,13 +548,13 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
                    f'=IF(OR({col_ltr}$8="",{col_ltr}$9=""),'
                    f'"",IFERROR({col_ltr}{r_co-1}/{col_ltr}{s0}*100,0))',
                    fill=sfill, align=_CENTER, number_format="0.00")
-
+ 
     # CO attainment level in col B (AVERAGEIF across percentage row)
     pct_row       = s0 + 5
     co_row_start  = s0 + 1
     q_start_col   = get_column_letter(6)
     q_end_col     = get_column_letter(6 + n_qs - 1)
-
+ 
     for i, co_id in enumerate(cos):
         r_co   = s0 + 1 + i
         sfill  = summary_fills[i % len(summary_fills)]
@@ -566,7 +566,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
            f'{q_start_col}{pct_row}:{q_end_col}{pct_row})>40,2,1)),"")'
            f')',
            fill=_YELLOW_FILL, bold=True, align=_CENTER)
-
+ 
     # Level row
     r_level = s0 + 1 + n_cos
     _c(ws, r_level, 4, "Level", bold=True, fill=_TEAL_FILL, align=_LEFT)
@@ -577,26 +577,26 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
            f'=IF(OR({col_ltr}$8="",{col_ltr}$9=""),'
            f'"",IF({col_ltr}{pct_row}>=70,3,IF({col_ltr}{pct_row}>40,2,IF({col_ltr}{pct_row}<=40,1,0))))',
            fill=_SKYBLUE_FILL, bold=True, align=_CENTER)
-
+ 
     ws.column_dimensions["A"].width = 8
     ws.column_dimensions["B"].width = 8
     ws.column_dimensions["C"].width = 14
     ws.column_dimensions["D"].width = 30
     ws.column_dimensions["E"].width = 12
-
+ 
     return {"s0": s0, "co_rows": [s0 + 1 + i for i in range(n_cos)]}
-
-
+ 
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # Final_CO_Attn
 # ─────────────────────────────────────────────────────────────────────────────
 def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
     ws = wb.create_sheet("Final_CO_Attn")
     _course_header_block(ws, course)
-
+ 
     cos  = [c["co_id"] for c in course.cos]
     n_ca = len(ca_names)
-
+ 
     r = 7
     # Header row 7
     _c(ws, r, 1, "CO No / Weightage",
@@ -609,7 +609,7 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
     c.font = _HEADER_FONT; c.fill = _ORANGE_FILL; c.border = _BORDER; c.alignment = _CENTER
     _c(ws, r, n_ca + 5, "Overall Att",
        fill=_LIME_FILL, font=Font(name="Calibri", bold=True, size=10), bold=True)
-
+ 
     # Row 8: CA component names
     r = 8
     _c(ws, r, 1, "", fill=_LIGHT_FILL, align=_CENTER)
@@ -619,7 +619,7 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
     _c(ws, r, g,     "Internal", bold=True, fill=_GREEN_FILL,  align=_CENTER)
     _c(ws, r, g + 1, "External", bold=True, fill=_ORANGE_FILL, align=_CENTER)
     _c(ws, r, g + 2, "Final",    bold=True, fill=_TEAL_FILL,   align=_CENTER)
-
+ 
     # Row 9: weightages
     r = 9
     _c(ws, r, 1, "", fill=_LIGHT_FILL, align=_CENTER)
@@ -629,7 +629,7 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
     _c(ws, r, g + 1, 60,  fill=_ORANGE_FILL, bold=True, align=_CENTER)
     _c(ws, r, g + 2, 100, fill=_TEAL_FILL,   bold=True, align=_CENTER)
     wt_row = r
-
+ 
     # Rows 10+: one row per CO
     r = 10
     co_fills = [_GREEN_FILL, _LIGHT_FILL, _YELLOW_FILL, _ORANGE_FILL, _PINK_FILL]
@@ -639,31 +639,31 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
         _c(ws, r, 1,
            f'=IF(CO_List!A{co_list_row}="","",CO_List!A{co_list_row})',
            fill=_NAVY_FILL, font=_HEADER_FONT, bold=True, align=_CENTER)
-
+ 
         for cai, ca in enumerate(ca_names):
             mks_sheet = _qp_sheet_name(f"{ca}_Marks")
             co_row    = marks_meta[cai]["co_rows"][ci]
             _c(ws, r, cai + 2, f"={mks_sheet}!B{co_row}",
                fill=cfill, bold=True, align=_CENTER)
-
+ 
         ca_cols = ",".join([f"{get_column_letter(cai + 2)}{r}" for cai in range(n_ca)])
         _c(ws, r, g,
            f'=IF(A{r}="","",IFERROR(AVERAGE({ca_cols}),""))',
            fill=_GREEN_FILL, bold=True, align=_CENTER)
-
+ 
         ese_co_row = ese_meta["co_rows"][ci]
         _c(ws, r, g + 1, f"=ESE_MKS!B{ese_co_row}",
            fill=_ORANGE_FILL, bold=True, align=_CENTER)
-
+ 
         g_ltr   = get_column_letter(g)
         gp1_ltr = get_column_letter(g + 1)
         _c(ws, r, g + 2,
            f'=IF(A{r}="","",IFERROR({g_ltr}{r}*${g_ltr}${wt_row}/100,0)'
            f'+IFERROR({gp1_ltr}{r}*${gp1_ltr}${wt_row}/100,0))',
            fill=_TEAL_FILL, bold=True, align=_CENTER, number_format="0.00")
-
+ 
         r += 1
-
+ 
     final_col = get_column_letter(g + 2)
     # Overall CO Attainment row
     _c(ws, r, 1, "Overall CO Attainment",
@@ -672,7 +672,7 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
        f'=IFERROR(AVERAGE({final_col}10:{final_col}{r-1}),"")',
        fill=_LIME_FILL, bold=True, align=_CENTER, number_format="0.00")
     r += 2
-
+ 
     # Legend rows
     _c(ws, r, 1, "Final CO attainment", bold=True, fill=_LIGHT_FILL, align=_LEFT)
     r += 1
@@ -686,24 +686,24 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
     _c(ws, r, 2, "Both", fill=_GREEN_FILL)
     _c(ws, r, 4, "Only ESE", fill=_ORANGE_FILL)
     _c(ws, r, 6, "Only CIE", fill=_SKYBLUE_FILL)
-
+ 
     ws.column_dimensions["A"].width = 20
     for i in range(n_ca + 6):
         ws.column_dimensions[get_column_letter(i + 2)].width = 12
-
-
+ 
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # PO_Attainment
 # ─────────────────────────────────────────────────────────────────────────────
 def _build_po_attainment(wb, course, n_ca):
     ws = wb.create_sheet("PO_Attainment")
     _course_header_block(ws, course)
-
+ 
     co_po  = course.co_po_matrix
     cos    = [c["co_id"] for c in course.cos]
     pos    = course.pos
     po_ids = [p["po_id"] for p in pos] if pos else [f"PO{i}" for i in range(1, 13)]
-
+ 
     r = 7
     _c(ws, r, 1, "CO",         bold=True, fill=_NAVY_FILL, font=_HEADER_FONT)
     _c(ws, r, 2, "Attainment", bold=True, fill=_NAVY_FILL, font=_HEADER_FONT)
@@ -712,11 +712,11 @@ def _build_po_attainment(wb, course, n_ca):
     for ci, po in enumerate(po_ids, 3):
         hf = po_hdr_fills[ci % len(po_hdr_fills)]
         _c(ws, r, ci, po, bold=True, fill=_NAVY_FILL, font=_HEADER_FONT)
-
+ 
     r = 8
     data_start = r
     final_col  = get_column_letter(n_ca + 4)
-
+ 
     co_fills = [_GREEN_FILL, _LIGHT_FILL, _YELLOW_FILL, _ORANGE_FILL, _PINK_FILL]
     for ci_idx, co_id in enumerate(cos):
         cfill = co_fills[ci_idx % len(co_fills)]
@@ -732,7 +732,7 @@ def _build_po_attainment(wb, course, n_ca):
             _c(ws, r, pi, val if val else "", fill=cell_fill,
                align=_CENTER, bold=bool(val))
         r += 1
-
+ 
     # Articulation Average row
     _c(ws, r, 1, "Articulation Average", bold=True, fill=_TEAL_FILL, align=_LEFT)
     _c(ws, r, 2, "", fill=_TEAL_FILL)
@@ -742,7 +742,7 @@ def _build_po_attainment(wb, course, n_ca):
            f'=IFERROR(AVERAGEIF({col}{data_start}:{col}{r-1},"<>",{col}{data_start}:{col}{r-1}),"-")',
            fill=_ORANGE_FILL, bold=True, align=_CENTER, number_format="0.00")
     r += 1
-
+ 
     # CO-PO Attainment row
     _c(ws, r, 1, "CO-PO_PSO Attainment", bold=True, fill=_LIME_FILL, align=_LEFT)
     _c(ws, r, 2, "", fill=_LIME_FILL)
@@ -756,20 +756,20 @@ def _build_po_attainment(wb, course, n_ca):
         _c(ws, r, pi,
            f'=IFERROR(({terms})/(3*COUNT({col}{data_start}:{col}{data_start+len(cos)-1})),"-")',
            fill=_SKYBLUE_FILL, bold=True, align=_CENTER, number_format="0.00")
-
+ 
     ws.column_dimensions["A"].width = 22
     ws.column_dimensions["B"].width = 12
     for pi in range(3, 3 + len(po_ids)):
         ws.column_dimensions[get_column_letter(pi)].width = 8
-
-
+ 
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main service
 # ─────────────────────────────────────────────────────────────────────────────
 class COPOTemplateService:
     def __init__(self, db: AsyncSession):
         self.db = db
-
+ 
     @staticmethod
     def get_filepath(course_id: int) -> str:
         storage = get_storage()
@@ -777,7 +777,7 @@ class COPOTemplateService:
         return str(p) if p else str(
             get_storage()._dir(_CATEGORY) / f"co_po_template_{course_id}.xlsx"
         )
-
+ 
     async def _get_students(self, course_id: int):
         try:
             result = await self.db.execute(
@@ -789,7 +789,7 @@ class COPOTemplateService:
         except Exception as e:
             logger.warning(f"Could not fetch students: {e}")
             return []
-
+ 
     async def _get_questions(self, course_id: int):
         from sqlalchemy import select
         from backend.database.models import Question
@@ -797,7 +797,7 @@ class COPOTemplateService:
             select(Question).where(Question.course_id == course_id)
         )
         return result.scalars().all()
-
+ 
     async def _get_saved_sheets(self, course_id: int) -> dict:
         """Load all saved CASheet records. Returns {ca_label: {qp:[...], marks:{...}}}."""
         from sqlalchemy import select
@@ -811,26 +811,115 @@ class COPOTemplateService:
         except Exception as e:
             logger.warning(f"Could not load saved CA sheets: {e}")
             return {}
-
+ 
+    async def _get_attainment_marks(self, course_id: int) -> dict:
+        """
+        Load COAttainment records and return per-component total marks as:
+            { component_name: { prn: {"_total": float} } }
+        Handles all three storage formats: co_wise, component_wise, exam_wise_flat.
+        """
+        from sqlalchemy import select
+        from backend.database.models import COAttainment
+        try:
+            result = await self.db.execute(
+                select(COAttainment).where(COAttainment.course_id == course_id)
+            )
+            records = result.scalars().all()
+        except Exception as e:
+            logger.warning(f"Could not load COAttainment records: {e}")
+            return {}
+ 
+        if not records:
+            return {}
+ 
+        # Detect format from first record
+        sample = records[0].marks or {}
+        first_val = next(iter(sample.values()), None) if sample else None
+        if isinstance(first_val, dict):
+            first_inner = next(iter(first_val.values()), None)
+            if isinstance(first_inner, dict):
+                fmt = "co_wise"          # {CO1: {Quiz: 8, UT: 14}}
+            else:
+                fmt = "component_wise"   # {Quiz: {Total: 8.5, Q1: 2.5}}
+        else:
+            fmt = "exam_wise_flat"       # {Quiz: 8.5, UT: 14}
+ 
+        # Build { component: { prn: {"_total": val} } }
+        comp_marks: dict = {}
+ 
+        for rec in records:
+            prn = str(rec.student_id).strip()
+            marks = rec.marks or {}
+ 
+            if fmt == "co_wise":
+                # Flatten: sum marks per component across all COs
+                comp_totals: dict = {}
+                for co_id, co_dict in marks.items():
+                    if not isinstance(co_dict, dict):
+                        continue
+                    for comp, val in co_dict.items():
+                        try:
+                            comp_totals[comp] = comp_totals.get(comp, 0) + float(val)
+                        except (TypeError, ValueError):
+                            pass
+                for comp, total in comp_totals.items():
+                    comp_marks.setdefault(comp, {})[prn] = {"_total": total}
+ 
+            elif fmt == "component_wise":
+                # {comp: {Total: 8.5, Q1: 2.5, ...}}
+                for comp, val in marks.items():
+                    if isinstance(val, dict):
+                        # Use per-question marks if available, else Total
+                        q_marks = {k: v for k, v in val.items()
+                                   if k != "Total" and v is not None}
+                        if q_marks:
+                            comp_marks.setdefault(comp, {})[prn] = {
+                                str(k): float(v) for k, v in q_marks.items()
+                                if v is not None
+                            }
+                        else:
+                            total = val.get("Total")
+                            if total is not None:
+                                try:
+                                    comp_marks.setdefault(comp, {})[prn] =                                         {"_total": float(total)}
+                                except (TypeError, ValueError):
+                                    pass
+                    else:
+                        try:
+                            comp_marks.setdefault(comp, {})[prn] =                                 {"_total": float(val)}
+                        except (TypeError, ValueError):
+                            pass
+ 
+            else:  # exam_wise_flat
+                for comp, val in marks.items():
+                    try:
+                        comp_marks.setdefault(comp, {})[prn] =                             {"_total": float(val)}
+                    except (TypeError, ValueError):
+                        pass
+ 
+        return comp_marks
+ 
     async def generate(self, course_id: int, qp_source: str = "blank") -> dict:
         course_svc = CourseService(self.db)
         course     = await course_svc.get_course(course_id)
         students   = await self._get_students(course_id)
         eval_cfg   = course.evaluation_config
         components = eval_cfg.get("components", {})
-
+ 
         # Load all saved CA sheets (QP + marks entered by the user in the frontend)
         saved_sheets = await self._get_saved_sheets(course_id)
-
+        # Load COAttainment marks as fallback for sheets with no CASheet data
+        attainment_marks = await self._get_attainment_marks(course_id)
+ 
         # Build CA name list: start from evaluation_config components (excluding ESE),
         # then add any saved sheet labels not already present
         ESE_KEYWORDS = {"end semester", "ese", "end-semester", "final exam"}
         def _is_ese(name):
             return any(k in name.lower() for k in ESE_KEYWORDS)
-
+ 
         comp_ca_names = sorted([k for k in components.keys() if not _is_ese(k)])
         saved_ca_names = [k for k in saved_sheets.keys() if not _is_ese(k)]
-
+ 
         ca_names = list(comp_ca_names)
         for label in saved_ca_names:
             if label not in ca_names:
@@ -838,23 +927,26 @@ class COPOTemplateService:
         if not ca_names:
             ca_names = [f"CA{i}" for i in range(1, 4)]
         ca_names = ca_names[:5]
-
+ 
         wb = Workbook()
         del wb[wb.sheetnames[0]]
-
+ 
         # 1. Course_Info
         _build_course_info(wb, course)
-
+ 
         # 2. Roll_List
         _build_roll_list(wb, course, students)
-
+ 
         # 3. CO_List
         _build_co_list(wb, course)
-
+ 
         # 4. ESE sheets — prefer saved ESE data, fall back to question bank
         ese_saved       = saved_sheets.get("ESE", {})
         ese_saved_qp    = ese_saved.get("qp") or []
-        ese_saved_marks = ese_saved.get("marks") or {}
+        # Use CASheet marks first; fall back to COAttainment for any missing PRNs
+        _ese_ca_marks   = ese_saved.get("marks") or {}
+        _ese_attn_marks = attainment_marks.get("ESE", {})
+        ese_saved_marks = {**_ese_attn_marks, **_ese_ca_marks} or {}
         ese_questions   = ese_saved_qp or None
         if not ese_questions and qp_source == "question_bank":
             qs = await self._get_questions(course_id)
@@ -870,16 +962,19 @@ class COPOTemplateService:
             saved_marks=ese_saved_marks,
             saved_qp=ese_saved_qp if ese_saved_qp else ese_questions,
         )
-
+ 
         # 5. CA sheets
         marks_meta_list = []
         for ca in ca_names:
             qp_name  = f"{ca}_QP"
             mks_name = f"{ca}_Marks"
-
+ 
             ca_saved       = saved_sheets.get(ca, {})
             ca_saved_qp    = ca_saved.get("qp") or []
-            ca_saved_marks = ca_saved.get("marks") or {}
+            # Use CASheet marks first; fall back to COAttainment for any missing PRNs
+            _ca_sheet_marks  = ca_saved.get("marks") or {}
+            _ca_attn_marks   = attainment_marks.get(ca, {})
+            ca_saved_marks   = {**_ca_attn_marks, **_ca_sheet_marks} or {}
             ca_questions   = ca_saved_qp or None
             if not ca_questions and qp_source == "question_bank":
                 qs = await self._get_questions(course_id)
@@ -898,13 +993,13 @@ class COPOTemplateService:
                 saved_qp=ca_saved_qp if ca_saved_qp else ca_questions,
             )
             marks_meta_list.append(meta)
-
+ 
         # 6. Final_CO_Attn
         _build_final_co_attn(wb, course, ca_names, marks_meta_list, ese_meta)
-
+ 
         # 7. PO_Attainment
         _build_po_attainment(wb, course, len(ca_names))
-
+ 
         # Save
         import tempfile
         _storage  = get_storage()
@@ -913,10 +1008,10 @@ class COPOTemplateService:
             tmp_path = Path(tmp) / _filename
             wb.save(str(tmp_path))
             _storage.save_from_path(_CATEGORY, _filename, tmp_path)
-
+ 
         filepath = str(_storage.get_path(_CATEGORY, _filename))
         logger.info(f"CO-PO template saved -> {filepath}")
-
+ 
         return {
             "course_id":    course_id,
             "course_name":  course.course_name,
