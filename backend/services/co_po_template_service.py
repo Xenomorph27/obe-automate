@@ -617,25 +617,104 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
                        f'=IFERROR(E{r_co-1}/E{s0}*100,0)',
                        fill=sfill, align=_CENTER, number_format="0.00")
 
-    # CO attainment level in col B
+    # CO attainment level in col B — compute in Python and hardcode
+    # This ensures Final_CO_Attn can read them without formula recalculation
     pct_row      = s0 + 5
     co_row_start = s0 + 1
-    if has_questions:
-        q_start_col = get_column_letter(6)
-        q_end_col   = get_column_letter(6 + n_sum_cols - 1)
-    else:
-        q_start_col = q_end_col = "E"
+
+    # Collect per-CO percentage values (computed above in summary rows)
+    # We need to derive the level from the actual student marks data
+    co_levels = {}
+    for i, co_id in enumerate(cos):
+        r_co = s0 + 1 + i
+        # Compute percentage from marks in Python
+        if has_questions and saved_qp:
+            # Find which question columns map to this CO
+            co_q_cols = []
+            for qi, q in enumerate(saved_qp):
+                if q.get("co_id") == co_id:
+                    co_q_cols.append(qi)
+            if not co_q_cols:
+                # No QP mapping, try all questions
+                co_q_cols = list(range(n_qs))
+            # Max marks for this CO
+            max_co = sum(
+                (saved_qp[qi].get("marks") or 0) for qi in co_q_cols
+                if qi < len(saved_qp)
+            )
+            if max_co <= 0:
+                co_levels[co_id] = None
+                continue
+            target = max_co * 0.60
+            n_total = len([s for s in students if s.get("prn")])
+            if n_total == 0:
+                co_levels[co_id] = None
+                continue
+            n_scored = 0
+            for s in students:
+                prn_val = str(s["prn"]) if s["prn"] is not None else ""
+                try:
+                    prn_norm = str(int(float(prn_val))) if prn_val else ""
+                except (ValueError, TypeError):
+                    prn_norm = prn_val
+                sm = _saved.get(prn_norm, {})
+                student_co_total = 0
+                for qi in co_q_cols:
+                    if saved_qp and qi < len(saved_qp):
+                        actual_qno = str(saved_qp[qi].get("q_no", qi + 1))
+                        v = sm.get(actual_qno) or sm.get(str(qi + 1)) or sm.get(qi + 1)
+                    else:
+                        v = sm.get(str(qi + 1)) or sm.get(qi + 1)
+                    if v is not None:
+                        try:
+                            student_co_total += float(v)
+                        except (TypeError, ValueError):
+                            pass
+                if student_co_total >= target:
+                    n_scored += 1
+            pct = (n_scored / n_total) * 100 if n_total > 0 else 0
+            level = 3 if pct >= 70 else (2 if pct > 40 else 1)
+            co_levels[co_id] = level
+        elif not has_questions:
+            # No question breakdown — use overall total marks
+            target = (total_marks or 0) * 0.60
+            n_total = len([s for s in students if s.get("prn")])
+            if n_total == 0:
+                co_levels[co_id] = None
+                continue
+            n_scored = 0
+            for s in students:
+                prn_val = str(s["prn"]) if s["prn"] is not None else ""
+                try:
+                    prn_norm = str(int(float(prn_val))) if prn_val else ""
+                except (ValueError, TypeError):
+                    prn_norm = prn_val
+                sm = _saved.get(prn_norm, {})
+                val = None
+                if "_total" in sm:
+                    try:
+                        val = float(sm["_total"])
+                    except (TypeError, ValueError):
+                        pass
+                elif sm:
+                    try:
+                        val = round(sum(float(v) for v in sm.values()
+                                        if v is not None and str(v) not in ("", "None")), 4)
+                    except (TypeError, ValueError):
+                        pass
+                if val is not None and target > 0 and val >= target:
+                    n_scored += 1
+            pct = (n_scored / n_total) * 100 if n_total > 0 else 0
+            level = 3 if pct >= 70 else (2 if pct > 40 else 1)
+            co_levels[co_id] = level
+        else:
+            co_levels[co_id] = None
 
     for i, co_id in enumerate(cos):
         r_co  = s0 + 1 + i
         sfill = summary_fills[i % len(summary_fills)]
-        _c(ws, r_co, 2,
-           f'=IF(A{r_co}="","",IFERROR('
-           f'IF(AVERAGEIF({q_start_col}{co_row_start}:{q_end_col}{co_row_start},A{r_co},'
-           f'{q_start_col}{pct_row}:{q_end_col}{pct_row})>=70,3,'
-           f'IF(AVERAGEIF({q_start_col}{co_row_start}:{q_end_col}{co_row_start},A{r_co},'
-           f'{q_start_col}{pct_row}:{q_end_col}{pct_row})>40,2,1)),""))',
-           fill=_YELLOW_FILL, bold=True, align=_CENTER)
+        level_val = co_levels.get(co_id)
+        _c(ws, r_co, 2, level_val, fill=_YELLOW_FILL, bold=True, align=_CENTER)
 
     # Level row
     r_level = s0 + 1 + n_cos
@@ -654,7 +733,7 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
     ws.column_dimensions["D"].width = 30
     ws.column_dimensions["E"].width = 12
 
-    return {"s0": s0, "co_rows": [s0 + 1 + i for i in range(n_cos)]}
+    return {"s0": s0, "co_rows": [s0 + 1 + i for i in range(n_cos)], "co_levels": co_levels}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -699,42 +778,54 @@ def _build_final_co_attn(wb, course, ca_names, marks_meta, ese_meta):
 
     r = 10
     co_fills = [_GREEN_FILL, _LIGHT_FILL, _YELLOW_FILL, _ORANGE_FILL, _PINK_FILL]
+    internal_levels = []  # list of per-CO internal (CIE) level values
     for ci, co_id in enumerate(cos):
         cfill = co_fills[ci % len(co_fills)]
-        co_list_row = 14 + ci
-        _c(ws, r, 1,
-           f'=IF(CO_List!A{co_list_row}="","",CO_List!A{co_list_row})',
-           fill=_NAVY_FILL, font=_HEADER_FONT, bold=True, align=_CENTER)
+        # Hardcode CO ID (avoid formula referencing CO_List which may be uncalculated)
+        _c(ws, r, 1, co_id, fill=_NAVY_FILL, font=_HEADER_FONT, bold=True, align=_CENTER)
 
+        # CA levels: hardcoded from co_levels computed in Python
+        ca_level_vals = []
         for cai, ca in enumerate(ca_names):
-            mks_sheet = _qp_sheet_name(f"{ca}_Marks")
-            co_row    = marks_meta[cai]["co_rows"][ci]
-            _c(ws, r, cai + 2, f"={mks_sheet}!B{co_row}",
-               fill=cfill, bold=True, align=_CENTER)
+            level_val = marks_meta[cai].get("co_levels", {}).get(co_id)
+            _c(ws, r, cai + 2, level_val, fill=cfill, bold=True, align=_CENTER)
+            if level_val is not None:
+                ca_level_vals.append(level_val)
 
-        ca_cols = ",".join([f"{get_column_letter(cai + 2)}{r}" for cai in range(n_ca)])
-        _c(ws, r, g,
-           f'=IF(A{r}="","",IFERROR(AVERAGE({ca_cols}),""))',
-           fill=_GREEN_FILL, bold=True, align=_CENTER)
+        # Internal (CIE) = average of CA levels
+        if ca_level_vals:
+            internal_val = round(sum(ca_level_vals) / len(ca_level_vals), 2)
+        else:
+            internal_val = None
+        _c(ws, r, g, internal_val, fill=_GREEN_FILL, bold=True, align=_CENTER,
+           number_format="0.00")
+        internal_levels.append(internal_val)
 
-        ese_co_row = ese_meta["co_rows"][ci]
-        _c(ws, r, g + 1, f"=ESE_MKS!B{ese_co_row}",
-           fill=_ORANGE_FILL, bold=True, align=_CENTER)
+        # External (ESE) level
+        ese_level_val = ese_meta.get("co_levels", {}).get(co_id)
+        _c(ws, r, g + 1, ese_level_val, fill=_ORANGE_FILL, bold=True, align=_CENTER,
+           number_format="0.00")
 
-        g_ltr   = get_column_letter(g)
-        gp1_ltr = get_column_letter(g + 1)
-        _c(ws, r, g + 2,
-           f'=IF(A{r}="","",IFERROR({g_ltr}{r}*${g_ltr}${wt_row}/100,0)'
-           f'+IFERROR({gp1_ltr}{r}*${gp1_ltr}${wt_row}/100,0))',
-           fill=_TEAL_FILL, bold=True, align=_CENTER, number_format="0.00")
+        # Final = Internal*0.4 + External*0.6
+        int_v = internal_val or 0
+        ext_v = ese_level_val or 0
+        if internal_val is not None or ese_level_val is not None:
+            final_val = round(int_v * 0.40 + ext_v * 0.60, 2)
+        else:
+            final_val = None
+        _c(ws, r, g + 2, final_val, fill=_TEAL_FILL, bold=True, align=_CENTER,
+           number_format="0.00")
 
         r += 1
 
     final_col = get_column_letter(g + 2)
+    # Overall CO Attainment — average of final CO attainment column
+    final_data_start = 10
+    final_data_end = 10 + len(cos) - 1
     _c(ws, r, 1, "Overall CO Attainment",
        bold=True, fill=_SKYBLUE_FILL, align=_LEFT)
     _c(ws, r, g + 4,
-       f'=IFERROR(AVERAGE({final_col}10:{final_col}{r-1}),"")' ,
+       f'=IFERROR(AVERAGE({final_col}{final_data_start}:{final_col}{final_data_end}),"")',
        fill=_LIME_FILL, bold=True, align=_CENTER, number_format="0.00")
     r += 2
 
@@ -871,6 +962,14 @@ class COPOTemplateService:
             logger.warning(f"Could not load saved CA sheets: {e}")
             return {}
 
+    @staticmethod
+    def _norm_label(label: str) -> str:
+        """Normalize a CA label for fuzzy matching: lowercase, strip trailing numbers."""
+        import re as _re2
+        s = label.lower().strip()
+        s = _re2.sub(r'\s*\d+\s*$', '', s).strip()
+        return s
+
     async def _get_attainment_marks(self, course_id: int) -> dict:
         """
         Load COAttainment records and return per-component marks as:
@@ -994,7 +1093,9 @@ class COPOTemplateService:
                     f"saved_sheets={list(saved_sheets.keys())} "
                     f"attainment_comps={list(attainment_marks.keys())}")
 
-        # Build CA name list: eval_config components (excl. ESE) + any saved sheet labels
+        # Build CA name list: merge all sources, deduplicating by normalised label
+        # Priority: CASheet saved labels > eval_config labels
+        # If eval_config has "Quiz" and COAttainment has "Quiz 1", keep "Quiz 1" (more specific)
         ESE_KEYWORDS = {"end semester", "ese", "end-semester", "final exam", "end sem"}
         def _is_ese(name):
             return any(k in name.lower() for k in ESE_KEYWORDS)
@@ -1003,14 +1104,34 @@ class COPOTemplateService:
         saved_ca_names = [k for k in saved_sheets.keys() if not _is_ese(k)]
         attn_ca_names  = [k for k in attainment_marks.keys() if not _is_ese(k)]
 
-        # Merge all sources preserving order: eval_config first, then saved, then attainment
-        ca_names = list(comp_ca_names)
-        for label in saved_ca_names + attn_ca_names:
-            if label not in ca_names:
+        # Deduplicate: track which normalised keys we've already included
+        _seen_norm: set = set()
+        ca_names: list = []
+
+        # First pass: CASheet labels (highest priority — user entered them)
+        for label in saved_ca_names:
+            nk = self._norm_label(label)
+            if nk not in _seen_norm:
+                _seen_norm.add(nk)
                 ca_names.append(label)
+
+        # Second pass: attainment labels (uploaded marks)
+        for label in attn_ca_names:
+            nk = self._norm_label(label)
+            if nk not in _seen_norm:
+                _seen_norm.add(nk)
+                ca_names.append(label)
+
+        # Third pass: eval_config labels (fallback — add any not already covered)
+        for label in comp_ca_names:
+            nk = self._norm_label(label)
+            if nk not in _seen_norm:
+                _seen_norm.add(nk)
+                ca_names.append(label)
+
         if not ca_names:
             ca_names = [f"CA{i}" for i in range(1, 4)]
-        ca_names = ca_names[:8]  # safety cap
+        ca_names = ca_names[:10]  # safety cap
 
         wb = Workbook()
         del wb[wb.sheetnames[0]]
@@ -1024,16 +1145,49 @@ class COPOTemplateService:
         # 3. CO_List
         _build_co_list(wb, course)
 
+        # Build normalised lookup for attainment_marks: norm_key → list of actual keys
+        # e.g. "quiz" → ["Quiz 1", "Quiz 2"], "unit test" → ["Unit Test 1", "Unit Test 2"]
+        _attn_norm: dict = {}
+        for ak in attainment_marks.keys():
+            nk = self._norm_label(ak)
+            _attn_norm.setdefault(nk, []).append(ak)
+
+        def _find_attn_key(label: str) -> dict:
+            """Return merged attainment marks for label using exact then fuzzy match."""
+            # 1. Exact match
+            if label in attainment_marks:
+                return attainment_marks[label]
+            # 2. Case-insensitive exact
+            for ak, av in attainment_marks.items():
+                if ak.lower().strip() == label.lower().strip():
+                    return av
+            # 3. Normalised prefix match (strip trailing numbers)
+            norm = self._norm_label(label)
+            matches = _attn_norm.get(norm, [])
+            if matches:
+                # Merge all matched keys into one dict (union of students)
+                merged_attn: dict = {}
+                for ak in matches:
+                    for prn, mks in attainment_marks[ak].items():
+                        if prn not in merged_attn:
+                            merged_attn[prn] = mks
+                        # If same PRN appears in multiple matching components, prefer non-_total
+                        elif "_total" in merged_attn[prn] and "_total" not in mks:
+                            merged_attn[prn] = mks
+                return merged_attn
+            return {}
+
         # ── Helper: merge CASheet marks + COAttainment marks for a component ──
         def _merged_marks(ca_label):
             """
             Returns (saved_qp, merged_marks_dict) for a component.
             CASheet data wins over COAttainment data (more granular).
+            Uses fuzzy matching for COAttainment keys.
             """
             ca_saved     = saved_sheets.get(ca_label, {})
             ca_saved_qp  = ca_saved.get("qp") or []
             ca_sheet_mks = ca_saved.get("marks") or {}
-            ca_attn_mks  = attainment_marks.get(ca_label, {})
+            ca_attn_mks  = _find_attn_key(ca_label)
 
             # Merge: attainment as base, CASheet on top
             merged = {**ca_attn_mks}
