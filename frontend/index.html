@@ -4625,27 +4625,34 @@ function CourseFilePage({course}){
 
   // ── Save + Generate ────────────────────────────────────────────────────────
   const saveExtra=async()=>{
-    if(!course){setErr('Select a course first.');return;}
+    if(!course){setErr('No course selected. Please select a course first.');return false;}
     setSaving(true);setErr('');
     try{
       const r=await fetch(API+'/course-file/extra/'+course.id,{method:'POST',headers:hdr(),body:JSON.stringify(extra)});
       if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
-    }catch(e){setErr(e.message);}
-    setSaving(false);
+      setSaving(false);
+      return true;
+    }catch(e){setErr('Save failed: '+e.message);setSaving(false);return false;}
   };
 
   const generate=async()=>{
-    if(!course){setErr('Select a course first.');return;}
-    await saveExtra();
-    setGenerating(true);setErr('');setOk('');
+    if(!course){setErr('No course selected. Please go to Courses and select a course first.');return;}
+    setErr('');setOk('');
+    const saved=await saveExtra();
+    if(!saved){return;}  // saveExtra already set the error
+    setGenerating(true);
     try{
       const r=await fetch(API+'/course-file/generate/'+course.id,{method:'POST',headers:hdr()});
-      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
+      if(!r.ok){
+        let errMsg='Generation failed';
+        try{const d=await r.json();errMsg=d.detail||errMsg;}catch{}
+        throw new Error(errMsg+' (HTTP '+r.status+')');
+      }
       const pages=buildPages(course,extra,attachments);
       setDocPages(pages);
       setActivePage(0);
       setMode('editor');
-      setChatHistory([{role:'ai',text:`✅ Course file generated for **${course.course_name}**!\n\nYou can now browse all 13 sections using the page thumbnails below, edit any field directly, and I'm here to help. Try:\n• "Update the vision text to..."\n• "Add an activity report for March 15"\n• "What's missing in section 6?"`}]);
+      setChatHistory([{role:'ai',text:`✅ Course file generated for ${course.course_name}!\n\nBrowse all 13 sections using the thumbnails below, and edit any field directly on the page. Try asking me:\n• "Update the vision text to..."\n• "Add an activity report for March 15"\n• "What's missing in section 6?"`}]);
     }catch(e){setErr(e.message);}
     setGenerating(false);
   };
@@ -4683,12 +4690,17 @@ function CourseFilePage({course}){
   };
 
   const regenerateDocx=async()=>{
-    setGenerating(true);setErr('');
+    setErr('');setOk('');
+    const saved=await saveExtra();
+    if(!saved)return;
+    setGenerating(true);
     try{
-      await saveExtra();
       const r=await fetch(API+'/course-file/generate/'+course.id,{method:'POST',headers:hdr()});
-      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
-      setOk('Regenerated!');setTimeout(()=>setOk(''),2000);
+      if(!r.ok){let m='Regen failed';try{const d=await r.json();m=d.detail||m;}catch{}throw new Error(m+' ('+r.status+')');}
+      // Rebuild pages with latest extra
+      const pages=buildPages(course,extra,attachments);
+      setDocPages(pages);
+      setOk('✅ Regenerated!');setTimeout(()=>setOk(''),3000);
     }catch(e){setErr(e.message);}
     setGenerating(false);
   };
@@ -5027,23 +5039,41 @@ Respond helpfully. If the user wants to update a field, provide the updated text
 
     return(
       <div style={{maxWidth:900,margin:'0 auto',padding:'0 0 3rem'}}>
+        {/* No course selected warning */}
+        {!course&&(
+          <div style={{background:'#fff7ed',border:'2px solid #fb923c',borderRadius:10,padding:'1rem 1.4rem',marginBottom:'1.2rem',display:'flex',alignItems:'center',gap:'0.8rem'}}>
+            <span style={{fontSize:'1.4rem'}}>⚠️</span>
+            <div>
+              <div style={{fontWeight:700,fontSize:'.92rem',color:'#c2410c'}}>No course selected</div>
+              <div style={{fontSize:'.83rem',color:'#92400e',marginTop:2}}>Please go to <b>Courses</b> in the sidebar and select a course before generating the course file.</div>
+            </div>
+          </div>
+        )}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.5rem',flexWrap:'wrap',gap:'0.5rem'}}>
           <div>
             <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--text)'}}>📄 Full Course File Generator</div>
-            <div style={{fontSize:'.85rem',color:'var(--muted)',marginTop:2}}>Fill in the details below, then click Generate to open the live editor.</div>
+            <div style={{fontSize:'.85rem',color:'var(--muted)',marginTop:2}}>
+              {course
+                ?<>Active course: <b style={{color:'var(--text)'}}>{course.course_name} ({course.course_code})</b></>
+                :<span style={{color:'#f97316'}}>No course selected — select a course from the sidebar first</span>
+              }
+            </div>
           </div>
           <div style={{display:'flex',gap:'0.5rem'}}>
             <button onClick={saveExtra} disabled={saving} style={{padding:'0.55rem 1.2rem',background:'var(--card-bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',fontWeight:600,fontSize:'.85rem'}}>
               {saving?'Saving…':'💾 Save'}
             </button>
             <button onClick={generate} disabled={generating||!course}
-              style={{padding:'0.6rem 1.6rem',background:generating?'var(--muted)':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:generating?'not-allowed':'pointer',fontWeight:800,fontSize:'.95rem',display:'flex',alignItems:'center',gap:6}}>
-              {generating?'⏳ Generating…':'⚡ Generate & Open Editor'}
+              style={{padding:'0.6rem 1.6rem',background:!course?'#9ca3af':generating?'#6b7280':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:generating||!course?'not-allowed':'pointer',fontWeight:800,fontSize:'.95rem',display:'flex',alignItems:'center',gap:6,transition:'background .2s'}}>
+              {generating?'⏳ Generating… (this may take 10–30s)':!course?'⚡ Generate (select a course first)':'⚡ Generate & Open Editor'}
             </button>
           </div>
         </div>
 
-        {err&&<div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'0.75rem 1rem',marginBottom:'1rem',color:'#b91c1c',fontSize:'.85rem'}}>{err}</div>}
+        {err&&<div style={{background:'#fef2f2',border:'2px solid #f87171',borderRadius:8,padding:'0.85rem 1rem',marginBottom:'1rem',color:'#b91c1c',fontSize:'.87rem',fontWeight:600,display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:'1.1rem'}}>❌</span> {err}
+          <button onClick={()=>setErr('')} style={{marginLeft:'auto',background:'none',border:'none',cursor:'pointer',color:'#b91c1c',fontSize:'1rem'}}>✕</button>
+        </div>}
 
         {/* Checklist */}
         <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem 1.2rem',marginBottom:'1.5rem'}}>
@@ -5098,8 +5128,8 @@ Respond helpfully. If the user wants to update a field, provide the updated text
             ⬇ Download .docx
           </button>
         </div>
-        {ok&&<div style={{fontSize:'11px',color:'#86efac',marginLeft:8}}>{ok}</div>}
-        {err&&<div style={{fontSize:'11px',color:'#fca5a5',marginLeft:8,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{err}</div>}
+        {ok&&<div style={{fontSize:'12px',color:'#86efac',marginLeft:8,fontWeight:600}}>{ok}</div>}
+        {err&&<div style={{fontSize:'12px',color:'#fca5a5',marginLeft:8,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:600,cursor:'pointer'}} title={err} onClick={()=>setErr('')}>❌ {err}</div>}
       </div>
 
       {/* Main 3-column layout */}
