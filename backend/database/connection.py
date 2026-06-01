@@ -78,8 +78,48 @@ async def get_db():
 
 
 async def init_db():
-    """Creates all tables on startup if they don't exist."""
+    """Creates all tables on startup if they don't exist.
+    Also runs safe ADD COLUMN migrations for any new columns added to existing tables.
+    Uses IF NOT EXISTS / DO NOTHING patterns so it's safe to run on every startup.
+    """
     async with engine.begin() as conn:
         from backend.database import models  # noqa — ensures models are registered
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database initialised successfully")
+
+    # ── Safe column migrations ─────────────────────────────────────────────
+    # SQLAlchemy create_all won't add new columns to existing tables.
+    # We use raw SQL with IF NOT EXISTS (SQLite) / DO NOTHING (Postgres) guards.
+    _new_columns = [
+        # (table, column, type_sql)
+        ("course_file_extra", "institution_name",    "VARCHAR(200) DEFAULT 'Symbiosis Institute of Technology'"),
+        ("course_file_extra", "institution_address", "VARCHAR(300) DEFAULT 'SIU Pune 412115, Maharashtra, India'"),
+        ("course_file_extra", "co_po_justification", "TEXT DEFAULT ''"),
+    ]
+    async with engine.begin() as conn:
+        for table, column, col_type in _new_columns:
+            try:
+                if is_postgres:
+                    # PostgreSQL: ADD COLUMN IF NOT EXISTS
+                    await conn.execute(
+                        __import__("sqlalchemy", fromlist=["text"]).text(
+                            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"
+                        )
+                    )
+                else:
+                    # SQLite: check if column exists first
+                    result = await conn.execute(
+                        __import__("sqlalchemy", fromlist=["text"]).text(
+                            f"PRAGMA table_info({table})"
+                        )
+                    )
+                    cols = [r[1] for r in result.fetchall()]
+                    if column not in cols:
+                        await conn.execute(
+                            __import__("sqlalchemy", fromlist=["text"]).text(
+                                f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+                            )
+                        )
+            except Exception as e:
+                logger.warning(f"Migration {table}.{column}: {e}")
+
+    logger.info("Database initialised and migrations applied successfully")

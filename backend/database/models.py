@@ -223,12 +223,12 @@ class CourseFileExtra(Base):
 
     def to_dict(self):
         return {
-            "institution_name": self.institution_name or "Symbiosis Institute of Technology",
-            "institution_address": self.institution_address or "SIU Pune 412115, Maharashtra, India",
+            "institution_name": getattr(self, "institution_name", None) or "Symbiosis Institute of Technology",
+            "institution_address": getattr(self, "institution_address", None) or "SIU Pune 412115, Maharashtra, India",
             "vision_text": self.vision_text or "",
             "mission_text": self.mission_text or "",
             "batch": self.batch or "",
-            "co_po_justification": self.co_po_justification or "",
+            "co_po_justification": getattr(self, "co_po_justification", None) or "",
             "prev_co_attainment": self.prev_co_attainment or "",
             "action_plan": self.action_plan or "",
             "slow_learners": self.slow_learners or "",
