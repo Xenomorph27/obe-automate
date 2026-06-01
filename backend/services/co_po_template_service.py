@@ -116,13 +116,20 @@ def _course_header_block(ws, course):
     batch = getattr(course, "batch", course.academic_year)
     exam_season = getattr(course, "exam_season", "")
 
+    def _border_all_in_range(ws, min_row, max_row, min_col, max_col):
+        """Apply border to every cell in range including merged ghost cells."""
+        for r in range(min_row, max_row + 1):
+            for c in range(min_col, max_col + 1):
+                cell = ws.cell(r, c)
+                cell.border = _BORDER
+
     # Row 1 — Department header (merged A:J)
     ws.merge_cells("A1:J1")
     c = ws.cell(row=1, column=1, value=f"Department of : {course.department}")
     c.font = Font(name="Calibri", bold=True, size=12)
     c.fill = _SKYBLUE_FILL
-    c.border = _BORDER
     c.alignment = _CENTER
+    _border_all_in_range(ws, 1, 1, 1, 10)
     ws.row_dimensions[1].height = 20
 
     # Row 2 — CO Attainment title (merged A:J)
@@ -130,17 +137,15 @@ def _course_header_block(ws, course):
     c = ws.cell(row=2, column=1, value="CO Attainment")
     c.font = Font(name="Calibri", bold=True, size=11)
     c.fill = _TEAL_FILL
-    c.border = _BORDER
     c.alignment = _CENTER
+    _border_all_in_range(ws, 2, 2, 1, 10)
     ws.row_dimensions[2].height = 18
 
-    # Row 3 — empty spacer with border across
-    for col in range(1, 11):
-        c = ws.cell(row=3, column=col, value=None)
-        c.border = _BORDER
+    # Row 3 — empty spacer
+    _border_all_in_range(ws, 3, 3, 1, 10)
+    ws.row_dimensions[3].height = 6
 
     # Row 4 — Academic Year | value | Batch | value | Examination Season | value
-    # Proper table: label merged A:B, value merged C:D, label E, value F, label merged G:H, value merged I:J
     ws.merge_cells("A4:B4")
     _c(ws, 4, 1, "Academic Year", bold=True, fill=_LIGHT_FILL, align=_LEFT)
     ws.merge_cells("C4:D4")
@@ -151,6 +156,7 @@ def _course_header_block(ws, course):
     ws.merge_cells("H4:I4")
     _c(ws, 4, 8, "Examination Season", bold=True, fill=_LIGHT_FILL, align=_CENTER)
     _c(ws, 4, 10, exam_season, fill=_YELLOW_FILL, align=_CENTER)
+    _border_all_in_range(ws, 4, 4, 1, 10)
     ws.row_dimensions[4].height = 18
 
     # Row 5 — Course Name | value (merged C:G) | Course Code | value
@@ -161,12 +167,12 @@ def _course_header_block(ws, course):
     ws.merge_cells("H5:I5")
     _c(ws, 5, 8, "Course Code", bold=True, fill=_LIGHT_FILL, align=_CENTER)
     _c(ws, 5, 10, course.course_code, fill=_YELLOW_FILL, align=_CENTER)
+    _border_all_in_range(ws, 5, 5, 1, 10)
     ws.row_dimensions[5].height = 18
 
     # Row 6 — empty spacer
-    for col in range(1, 11):
-        c = ws.cell(row=6, column=col, value=None)
-        c.border = _BORDER
+    _border_all_in_range(ws, 6, 6, 1, 10)
+    ws.row_dimensions[6].height = 6
 
     return 7  # first usable content row
 
@@ -465,7 +471,10 @@ def _add_qp_charts(ws, co_marks_sum, bl_marks_sum, cos, bloom, q_row_end):
     n_co = len(co_with_data)
     n_bl = len(bl_with_data)
 
-    # CO Bar Chart — anchor at K8
+    # CO Bar Chart — anchor BELOW question rows
+    anchor_row_co = q_row_end + 2
+    anchor_row_bl = anchor_row_co + 18
+
     if n_co > 0:
         co_chart = BarChart()
         co_chart.type    = "col"
@@ -481,9 +490,9 @@ def _add_qp_charts(ws, co_marks_sum, bl_marks_sum, cos, bloom, q_row_end):
                             min_row=co_label_row, max_row=co_label_row)
         co_chart.add_data(co_data)
         co_chart.set_categories(co_cats)
-        ws.add_chart(co_chart, "K8")
+        ws.add_chart(co_chart, f"A{anchor_row_co}")
 
-    # BL Bar Chart — anchor at K25
+    # BL Bar Chart — anchor below CO chart
     if n_bl > 0:
         bl_chart = BarChart()
         bl_chart.type    = "col"
@@ -499,7 +508,7 @@ def _add_qp_charts(ws, co_marks_sum, bl_marks_sum, cos, bloom, q_row_end):
                             min_row=bl_label_row, max_row=bl_label_row)
         bl_chart.add_data(bl_data)
         bl_chart.set_categories(bl_cats)
-        ws.add_chart(bl_chart, "K25")
+        ws.add_chart(bl_chart, f"A{anchor_row_bl}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -554,18 +563,22 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
     for ci, (h, hf) in enumerate(zip(hdr_info, hdr_fills), 1):
         _c(ws, r, ci, h, font=_HEADER_FONT, fill=hf)
 
+    last_col_r7 = 5 + n_qs if has_questions else 5
     if has_questions:
-        # Write hardcoded Q.no headers (not formula-dependent on QP sheet)
         for qi in range(n_qs):
             q_no_val = saved_qp[qi].get("q_no", qi + 1) if saved_qp and qi < len(saved_qp) else qi + 1
             col = 6 + qi
             _c(ws, r, col, q_no_val, font=_HEADER_FONT, fill=_NAVY_FILL)
-    else:
-        # No questions — leave row 7 question cols blank (they'll be empty template)
-        pass
+    # Border all cells in row 7 up to last_col
+    for c in range(1, last_col_r7 + 2):
+        if ws.cell(r, c).border.left.style is None:
+            ws.cell(r, c).border = _BORDER
 
     # ── Row 8: "Marks" label + CO mapping (hardcoded from QP) ────────────
     r = 8
+    # Border A-D first (empty info cols)
+    for c in range(1, 5):
+        _c(ws, r, c, "", fill=_LIGHT_FILL)
     _c(ws, r, 5, "Marks", fill=_LIGHT_FILL, bold=True, align=_CENTER)
     if has_questions and saved_qp:
         for qi in range(n_qs):
@@ -578,6 +591,8 @@ def _build_marks_sheet(wb, sheet_name, course, ca_label, qp_sheet_name,
 
     # ── Row 9: total marks + per-question max (hardcoded from QP) ────────
     r = 9
+    for c in range(1, 5):
+        _c(ws, r, c, "", fill=_GREEN_FILL)
     _c(ws, r, 5, total_marks, fill=_GREEN_FILL, bold=True, align=_CENTER)
     if has_questions and saved_qp:
         for qi in range(n_qs):
