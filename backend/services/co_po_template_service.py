@@ -112,36 +112,61 @@ def _qp_sheet_name(name):
 # Standard 6-row course header block (used in every sheet)
 # ─────────────────────────────────────────────────────────────────────────────
 def _course_header_block(ws, course):
-    dept_text = f"Department of : {course.department}"
+    academic_year = course.academic_year
+    batch = getattr(course, "batch", course.academic_year)
+    exam_season = getattr(course, "exam_season", "")
+
+    # Row 1 — Department header (merged A:J)
     ws.merge_cells("A1:J1")
-    c = ws.cell(row=1, column=1, value=dept_text)
+    c = ws.cell(row=1, column=1, value=f"Department of : {course.department}")
     c.font = Font(name="Calibri", bold=True, size=12)
     c.fill = _SKYBLUE_FILL
     c.border = _BORDER
     c.alignment = _CENTER
+    ws.row_dimensions[1].height = 20
 
+    # Row 2 — CO Attainment title (merged A:J)
     ws.merge_cells("A2:J2")
     c = ws.cell(row=2, column=1, value="CO Attainment")
     c.font = Font(name="Calibri", bold=True, size=11)
     c.fill = _TEAL_FILL
     c.border = _BORDER
     c.alignment = _CENTER
+    ws.row_dimensions[2].height = 18
 
-    academic_year = course.academic_year
-    batch = getattr(course, "batch", course.academic_year)
-    exam_season = getattr(course, "exam_season", "")
+    # Row 3 — empty spacer with border across
+    for col in range(1, 11):
+        c = ws.cell(row=3, column=col, value=None)
+        c.border = _BORDER
 
-    _c(ws, 4, 1, "Academic Year",      bold=True, fill=_LIGHT_FILL, align=_LEFT)
-    _c(ws, 4, 3, academic_year,         fill=_YELLOW_FILL, align=_CENTER)
-    _c(ws, 4, 5, "Batch",              bold=True, fill=_LIGHT_FILL, align=_LEFT)
-    _c(ws, 4, 6, batch,                fill=_YELLOW_FILL, align=_CENTER)
-    _c(ws, 4, 8, "Examination Season", bold=True, fill=_LIGHT_FILL, align=_LEFT)
-    _c(ws, 4, 10, exam_season,          fill=_YELLOW_FILL, align=_CENTER)
+    # Row 4 — Academic Year | value | Batch | value | Examination Season | value
+    # Proper table: label merged A:B, value merged C:D, label E, value F, label merged G:H, value merged I:J
+    ws.merge_cells("A4:B4")
+    _c(ws, 4, 1, "Academic Year", bold=True, fill=_LIGHT_FILL, align=_LEFT)
+    ws.merge_cells("C4:D4")
+    _c(ws, 4, 3, academic_year, fill=_YELLOW_FILL, align=_CENTER)
+    _c(ws, 4, 5, "Batch", bold=True, fill=_LIGHT_FILL, align=_CENTER)
+    ws.merge_cells("F4:G4")
+    _c(ws, 4, 6, batch, fill=_YELLOW_FILL, align=_CENTER)
+    ws.merge_cells("H4:I4")
+    _c(ws, 4, 8, "Examination Season", bold=True, fill=_LIGHT_FILL, align=_CENTER)
+    _c(ws, 4, 10, exam_season, fill=_YELLOW_FILL, align=_CENTER)
+    ws.row_dimensions[4].height = 18
 
-    _c(ws, 5, 1, "Course Name",        bold=True, fill=_LIGHT_FILL, align=_LEFT)
-    _c(ws, 5, 3, course.course_name,   fill=_YELLOW_FILL, align=_LEFT)
-    _c(ws, 5, 8, "Course Code",        bold=True, fill=_LIGHT_FILL, align=_LEFT)
-    _c(ws, 5, 10, course.course_code,  fill=_YELLOW_FILL, align=_CENTER)
+    # Row 5 — Course Name | value (merged C:G) | Course Code | value
+    ws.merge_cells("A5:B5")
+    _c(ws, 5, 1, "Course Name", bold=True, fill=_LIGHT_FILL, align=_LEFT)
+    ws.merge_cells("C5:G5")
+    _c(ws, 5, 3, course.course_name, fill=_YELLOW_FILL, align=_LEFT)
+    ws.merge_cells("H5:I5")
+    _c(ws, 5, 8, "Course Code", bold=True, fill=_LIGHT_FILL, align=_CENTER)
+    _c(ws, 5, 10, course.course_code, fill=_YELLOW_FILL, align=_CENTER)
+    ws.row_dimensions[5].height = 18
+
+    # Row 6 — empty spacer
+    for col in range(1, 11):
+        c = ws.cell(row=6, column=col, value=None)
+        c.border = _BORDER
 
     return 7  # first usable content row
 
@@ -406,7 +431,75 @@ def _build_qp_sheet(wb, sheet_name, course, ca_label, questions=None):
     ws.column_dimensions["P"].width = 14
     ws.column_dimensions["Q"].width = 12
     ws.column_dimensions["R"].width = 12
+
+    # Add CO and BL bar charts
+    _add_qp_charts(ws, co_marks_sum, bl_marks_sum, cos, bloom, q_row)
     return ws
+
+
+def _add_qp_charts(ws, co_marks_sum, bl_marks_sum, cos, bloom, q_row_end):
+    """Add CO Weightage % and BL Weightage % bar charts to a QP sheet."""
+    from openpyxl.chart import BarChart, Reference
+
+    # Write chart source data in far-right columns (col 21+) to keep it out of view
+    data_col = 21
+
+    # --- CO chart data ---
+    co_with_data = [(co, co_marks_sum.get(co, 0)) for co in cos if co_marks_sum.get(co, 0) > 0]
+    total_co = sum(v for _, v in co_with_data) or 1
+    co_label_row = 2
+    co_val_row   = 3
+    for ci, (co_id, marks) in enumerate(co_with_data):
+        ws.cell(co_label_row, data_col + ci, co_id)
+        ws.cell(co_val_row,   data_col + ci, round(marks / total_co * 100, 2))
+
+    # --- BL chart data ---
+    bl_with_data = [(bl, bl_marks_sum.get(bl, 0)) for bl, _ in bloom if bl_marks_sum.get(bl, 0) > 0]
+    total_bl = sum(v for _, v in bl_with_data) or 1
+    bl_label_row = 5
+    bl_val_row   = 6
+    for bi, (bl_id, marks) in enumerate(bl_with_data):
+        ws.cell(bl_label_row, data_col + bi, bl_id)
+        ws.cell(bl_val_row,   data_col + bi, round(marks / total_bl * 100, 2))
+
+    n_co = len(co_with_data)
+    n_bl = len(bl_with_data)
+
+    # CO Bar Chart — anchor at K8
+    if n_co > 0:
+        co_chart = BarChart()
+        co_chart.type    = "col"
+        co_chart.title   = "CO Weightage in %"
+        co_chart.y_axis.title = "CO Weightage in %"
+        co_chart.x_axis.title = "CO Number"
+        co_chart.legend  = None
+        co_chart.width   = 15
+        co_chart.height  = 10
+        co_data = Reference(ws, min_col=data_col, max_col=data_col + n_co - 1,
+                            min_row=co_val_row, max_row=co_val_row)
+        co_cats = Reference(ws, min_col=data_col, max_col=data_col + n_co - 1,
+                            min_row=co_label_row, max_row=co_label_row)
+        co_chart.add_data(co_data)
+        co_chart.set_categories(co_cats)
+        ws.add_chart(co_chart, "K8")
+
+    # BL Bar Chart — anchor at K25
+    if n_bl > 0:
+        bl_chart = BarChart()
+        bl_chart.type    = "col"
+        bl_chart.title   = "BL Weightage in %"
+        bl_chart.y_axis.title = "BL Weightage in %"
+        bl_chart.x_axis.title = "BL Number"
+        bl_chart.legend  = None
+        bl_chart.width   = 15
+        bl_chart.height  = 10
+        bl_data = Reference(ws, min_col=data_col, max_col=data_col + n_bl - 1,
+                            min_row=bl_val_row, max_row=bl_val_row)
+        bl_cats = Reference(ws, min_col=data_col, max_col=data_col + n_bl - 1,
+                            min_row=bl_label_row, max_row=bl_label_row)
+        bl_chart.add_data(bl_data)
+        bl_chart.set_categories(bl_cats)
+        ws.add_chart(bl_chart, "K25")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
