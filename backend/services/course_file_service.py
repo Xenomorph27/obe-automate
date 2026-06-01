@@ -367,14 +367,23 @@ def _build_docx(data: dict) -> bytes:
     _section_title(doc, 6, "Session Plan with CO mapping to each lecture")
     session_rows = data.get("session_rows") or []
     if session_rows:
+        def _sp_lect(r):
+            return str(r.get("lect") or r.get("lect_no") or r.get("lectNo") or r.get("session_number") or "")
+        def _sp_unit(r):
+            return str(r.get("unit") or r.get("unit_no") or r.get("unitNo") or r.get("unit_number") or "")
+        def _sp_topic(r):
+            return r.get("topic") or r.get("points_to_cover") or r.get("pointsToCover") or ""
+        def _sp_method(r):
+            return r.get("method") or r.get("methodology") or r.get("teaching_method") or "Classroom Teaching"
+        def _sp_type(r):
+            return r.get("type") or r.get("lecture_exp_eval") or "Lecture"
+        def _sp_co(r):
+            v = r.get("co") or r.get("co_mapped") or r.get("coMapped") or ""
+            return ", ".join(v) if isinstance(v, list) else str(v)
         _make_table(doc,
                     ["Lect. No", "Unit No", "Points to Cover", "Methodology", "Type", "CO Mapped"],
-                    [[r.get("lect_no", r.get("lectNo","")),
-                      r.get("unit_no", r.get("unitNo","")),
-                      r.get("points_to_cover", r.get("pointsToCover", r.get("topic",""))),
-                      r.get("methodology",""),
-                      r.get("lecture_exp_eval", r.get("type","Lecture")),
-                      r.get("co", r.get("co_mapped",""))] for r in session_rows],
+                    [[_sp_lect(r), _sp_unit(r), _sp_topic(r), _sp_method(r), _sp_type(r), _sp_co(r)]
+                     for r in session_rows],
                     [1.5, 1.5, 8.0, 2.5, 2.0, 2.0])
     else:
         _add_para(doc, "[Session plan not yet generated. Use the Session Plan page first.]",
@@ -393,13 +402,14 @@ def _build_docx(data: dict) -> bytes:
     if eval_rows:
         _make_table(doc,
                     ["Sr.No", "Component", "Units/Syllabus", "CO Mapped", "Marks", "Weightage", "Tentative Date"],
-                    [[r.get("sr_no", r.get("srNo","")),
-                      r.get("component", r.get("comp", r.get("name",""))),
-                      r.get("unit_syllabus", r.get("units","")),
-                      r.get("co", r.get("co_mapped","")),
-                      r.get("marks", r.get("total_marks","")),
-                      r.get("weightage",""),
-                      r.get("date", r.get("tentative_date",""))] for r in eval_rows],
+                    [[str(i+1),
+                      r.get("comp") or r.get("component") or r.get("name") or "",
+                      r.get("unit_syllabus") or r.get("units") or r.get("remarks") or "",
+                      r.get("co") or r.get("co_mapped") or "",
+                      r.get("marks") or r.get("total_marks") or "",
+                      str(r.get("weightage") or ""),
+                      r.get("date") or r.get("tentative_date") or ""]
+                     for i, r in enumerate(eval_rows)],
                     [1.0, 3.0, 4.5, 2.0, 1.2, 1.8, 3.0])
     else:
         _add_para(doc, "[Evaluation plan not yet generated. Use the Evaluation Plan page first.]",
@@ -423,14 +433,17 @@ def _build_docx(data: dict) -> bytes:
             student_map = data.get("student_map") or {}
             mk_rows = []
             for prn, mks in marks_data.items():
-                row = [prn, student_map.get(prn,"")]
+                name = student_map.get(str(prn), student_map.get(prn, "—"))
+                row = [str(prn), name]
                 tot = 0.0
                 for q in qp:
                     v = float((mks or {}).get(q.get("q_no"), 0) or 0)
-                    row.append(v or "")
+                    row.append(str(v) if v else "")
                     tot += v
-                row.append(tot or "")
+                row.append(str(round(tot, 1)) if tot else "")
                 mk_rows.append(row)
+            # Sort by name for readability
+            mk_rows.sort(key=lambda r: r[1])
             n = len(q_nos)
             col_w = [2.0, 3.5] + [round(8.0/max(n,1),2)]*n + [1.5]
             _make_table(doc, ["PRN", "Name"] + q_nos + ["Total"], mk_rows, col_w)
@@ -600,22 +613,30 @@ class CourseFileService:
                  "bloom_level": q.bloom_level, "marks": q.marks} for q in qs]
 
     async def _get_co_attainment(self, course_id, students, ca_sheets, cos):
+        # Only compute when marks are actually entered
+        sheets_with_marks = [s for s in ca_sheets if s.get("marks") and len(s["marks"]) > 0]
+        if not sheets_with_marks or not students:
+            return {}  # Return empty — will show placeholder text in docx
         attainment = {}
         for co in cos:
             cid = co["co_id"]
             total_pct, count = 0, 0
-            for sheet in ca_sheets:
+            for sheet in sheets_with_marks:
                 qp = [q for q in (sheet.get("qp") or []) if q.get("co_id") == cid]
                 max_marks = sum(float(q.get("marks", 0)) for q in qp)
-                if not max_marks or not students:
+                if not max_marks:
                     continue
                 marks_data = sheet.get("marks") or {}
+                # Only count students who actually have marks entered for this sheet
+                students_in_sheet = [s for s in students if s["prn"] in marks_data]
+                if not students_in_sheet:
+                    continue
                 passed = sum(
-                    1 for s in students
+                    1 for s in students_in_sheet
                     if sum(float((marks_data.get(s["prn"]) or {}).get(q.get("q_no"), 0))
                            for q in qp) / max_marks * 100 >= 60
                 )
-                total_pct += (passed / len(students)) * 100
+                total_pct += (passed / len(students_in_sheet)) * 100
                 count += 1
             attainment[cid] = round(total_pct / count, 1) if count else 0.0
         return attainment
@@ -623,9 +644,14 @@ class CourseFileService:
     async def _get_slow_advanced(self, course_id, students, ca_sheets, cos):
         if not students or not ca_sheets:
             return [], []
+        # Only process sheets that actually have marks entered
+        sheets_with_marks = [s for s in ca_sheets if s.get("marks") and len(s["marks"]) > 0]
+        if not sheets_with_marks:
+            return [], []  # No marks entered yet — don't classify everyone as slow
         totals = {s["prn"]: 0.0 for s in students}
         maxes  = {s["prn"]: 0.0 for s in students}
-        for sheet in ca_sheets:
+        students_with_marks = set()
+        for sheet in sheets_with_marks:
             qp = sheet.get("qp") or []
             marks_data = sheet.get("marks") or {}
             total_marks = sum(float(q.get("marks", 0)) for q in qp)
@@ -636,11 +662,16 @@ class CourseFileService:
                                for q in qp)
                 totals[s["prn"]] += obtained
                 maxes[s["prn"]]  += total_marks
+                if s["prn"] in marks_data:
+                    students_with_marks.add(s["prn"])
+        # Only score students who actually appear in the marks data
         scored = []
         for s in students:
             mx  = maxes.get(s["prn"], 0)
             tot = totals.get(s["prn"], 0)
-            pct = (tot / mx * 100) if mx else 0
+            if mx == 0:
+                continue  # skip students with no max marks at all
+            pct = (tot / mx * 100)
             scored.append({"prn": s["prn"], "name": s["name"],
                            "marks": f"{tot:.1f}/{mx:.0f}", "pct": pct})
         scored.sort(key=lambda x: x["pct"])
