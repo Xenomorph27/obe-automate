@@ -6,6 +6,7 @@ using python-docx only — no Node.js dependency.
 """
 
 import io
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +34,7 @@ _LIGHT  = (214, 220, 228)
 _GREEN  = (226, 239, 218)
 _ORANGE = (252, 228, 214)
 _WHITE  = (255, 255, 255)
+_LGRAY  = (245, 245, 245)
 
 
 # ── Low-level XML helpers ─────────────────────────────────────────────────────
@@ -96,7 +98,6 @@ def _section_title(doc, num, title):
     p.paragraph_format.space_before = Pt(14)
     p.paragraph_format.space_after  = Pt(6)
     if num > 1:
-        p.runs  # ensure para exists before page break
         run = p.add_run()
         run.add_break(__import__("docx.enum.text", fromlist=["WD_BREAK"]).WD_BREAK.PAGE)
     _run(p, f"{num}. {title}", bold=True, size=14, color=_NAVY)
@@ -114,16 +115,10 @@ def _heading2(doc, text):
 # ── Table builder ─────────────────────────────────────────────────────────────
 
 def _make_table(doc, headers, rows, col_widths_cm):
-    """
-    col_widths_cm: list of column widths in cm.
-    headers: list of header strings.
-    rows: list of lists (str values).
-    """
     num_cols = len(headers)
     tbl = doc.add_table(rows=1 + len(rows), cols=num_cols)
     tbl.style = "Table Grid"
 
-    # Header row
     hdr_row = tbl.rows[0]
     for i, hdr in enumerate(headers):
         cell = hdr_row.cells[i]
@@ -134,7 +129,6 @@ def _make_table(doc, headers, rows, col_widths_cm):
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _run(p, hdr, bold=True, size=9, color=_WHITE)
 
-    # Data rows
     for ri, row in enumerate(rows):
         bg = _WHITE if ri % 2 == 0 else _LIGHT
         tr = tbl.rows[ri + 1]
@@ -149,22 +143,177 @@ def _make_table(doc, headers, rows, col_widths_cm):
     return tbl
 
 
+def _make_header_table(doc, institution_name, institution_address, title, subtitle=""):
+    """Creates the header block used in the reference docx (SIT-style merged header)."""
+    tbl = doc.add_table(rows=1, cols=1)
+    tbl.style = "Table Grid"
+    cell = tbl.rows[0].cells[0]
+    _set_cell_bg(cell, _NAVY)
+    _set_cell_margins(cell, top=100, bottom=100, left=160, right=160)
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p, institution_name or "Symbiosis Institute of Technology", bold=True, size=11, color=_WHITE)
+    if institution_address:
+        p2 = cell.add_paragraph()
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p2, institution_address, size=9, color=_WHITE)
+    if title:
+        p3 = cell.add_paragraph()
+        p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p3, title, bold=True, size=10, color=_WHITE)
+    if subtitle:
+        p4 = cell.add_paragraph()
+        p4.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p4, subtitle, size=9, color=_WHITE)
+    return tbl
+
+
+# ── Key-safe getter (handles camelCase / snake_case) ─────────────────────────
+
+def _g(row, *keys, default=""):
+    """Try multiple key variants; return first non-empty value."""
+    for k in keys:
+        v = row.get(k)
+        if v is not None and str(v).strip():
+            return v
+    return default
+
+
+# ── Timetable grid renderer ───────────────────────────────────────────────────
+
+def _render_timetable(doc, timetable: dict):
+    """Render the timetable as a proper day × time-slot grid."""
+    if not timetable:
+        _add_para(doc, "[Timetable not yet uploaded. Upload via the dashboard timetable upload.]",
+                  color=(136, 136, 136))
+        return
+
+    faculty = timetable.get("faculty_name", "")
+    dept    = timetable.get("department", "")
+    ay      = timetable.get("academic_year", "")
+    slots   = timetable.get("time_slots", [])
+    schedule= timetable.get("schedule", {})  # {day: {slot: entry}}
+
+    if not slots and not schedule:
+        _add_para(doc, "[Timetable data is incomplete. Re-upload the timetable docx.]",
+                  color=(136, 136, 136))
+        return
+
+    DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+    num_cols = 1 + len(slots)
+    tbl = doc.add_table(rows=1, cols=num_cols)
+    tbl.style = "Table Grid"
+
+    # Merged header rows
+    for label in [dept or "Department of AIML",
+                  f"Individual Timetable {ay}",
+                  faculty]:
+        row = tbl.add_row()
+        # Merge all cells in row
+        merged = row.cells[0]
+        for ci in range(1, num_cols):
+            merged = merged.merge(row.cells[ci])
+        _set_cell_bg(merged, _NAVY)
+        _set_cell_margins(merged, top=60, bottom=60)
+        p = merged.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p, label, bold=True, size=9, color=_WHITE)
+
+    # Delete the auto-created first row (it was a placeholder)
+    tbl._tbl.remove(tbl.rows[0]._tr)
+
+    # Header row: Day/Time | slot1 | slot2 ...
+    hdr_row = tbl.add_row()
+    hdr_row.cells[0].width = Cm(2.0)
+    _set_cell_bg(hdr_row.cells[0], _NAVY)
+    _set_cell_margins(hdr_row.cells[0])
+    p = hdr_row.cells[0].paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p, "Day / Time", bold=True, size=8, color=_WHITE)
+
+    slot_w = round(14.0 / max(len(slots), 1), 2)
+    for si, slot in enumerate(slots):
+        c = hdr_row.cells[si + 1]
+        c.width = Cm(slot_w)
+        _set_cell_bg(c, _NAVY)
+        _set_cell_margins(c, left=60, right=60)
+        p = c.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p, slot, bold=True, size=8, color=_WHITE)
+
+    # Build a normalised slot → entry dict for each day
+    # The parser stores schedule[day] as either:
+    #   - list of {time, course, section, room}
+    #   - dict of {time_slot_str: entry_str}
+    def _normalise_day(day_data, slots):
+        if isinstance(day_data, dict):
+            return day_data  # already {slot: entry}
+        if isinstance(day_data, list):
+            mapping = {}
+            for item in day_data:
+                t = item.get("time", "")
+                course  = item.get("course","")
+                section = item.get("section","")
+                room    = item.get("room","")
+                parts = [p for p in [course, section, room] if p]
+                mapping[t] = "\n".join(parts)
+            return mapping
+        return {}
+
+    # Data rows
+    for di, day in enumerate(DAYS):
+        raw_day = schedule.get(day, {})
+        day_map = _normalise_day(raw_day, slots)
+        row = tbl.add_row()
+        bg = _WHITE if di % 2 == 0 else _LIGHT
+        row.cells[0].width = Cm(2.0)
+        _set_cell_bg(row.cells[0], (220, 225, 235))
+        _set_cell_margins(row.cells[0])
+        p = row.cells[0].paragraphs[0]
+        _run(p, day, bold=True, size=9)
+
+        for si, slot in enumerate(slots):
+            entry = day_map.get(slot, "")
+            c = row.cells[si + 1]
+            c.width = Cm(slot_w)
+            _set_cell_bg(c, bg)
+            _set_cell_margins(c, left=60, right=60)
+            p = c.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _run(p, str(entry or ""), size=8)
+
+
 # ── Main document builder ─────────────────────────────────────────────────────
 
 def _build_docx(data: dict) -> bytes:
     doc = Document()
 
-    # Page margins
     for section in doc.sections:
         section.page_width  = Cm(21)
         section.page_height = Cm(29.7)
         section.left_margin   = section.right_margin  = Cm(2.5)
         section.top_margin    = section.bottom_margin = Cm(2)
 
+    inst_name = data.get("institution_name") or "Symbiosis Institute of Technology"
+    inst_addr = data.get("institution_address") or "SIU Pune 412115, Maharashtra, India"
+
     # ── Cover ──────────────────────────────────────────────────────────────────
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p, inst_name, bold=True, size=14)
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p, inst_addr, size=10, color=(80, 80, 80))
+
+    doc.add_paragraph()
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _run(p, f"Department of {data.get('department','')}", bold=True, size=13)
+
+    doc.add_paragraph()
 
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -179,6 +328,11 @@ def _build_docx(data: dict) -> bytes:
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _run(p, f"Batch {data['batch']}", size=12)
+
+    if data.get("faculty_name"):
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p, f"Faculty: {data['faculty_name']}", size=12)
 
     doc.add_paragraph()
 
@@ -225,8 +379,6 @@ def _build_docx(data: dict) -> bytes:
     _section_title(doc, 2, "Program Outcomes (POs), Program Educational Objectives (PEOs) and Program Specific Outcomes (PSOs)")
     _heading2(doc, "Program Outcomes (POs)")
     pos = data.get("pos") or []
-    # Use DB POs if they have real statement text; otherwise fall back to the
-    # standard NBA 12 POs for engineering programmes.
     _STANDARD_POS = [
         ("PO 1",  "Engineering Knowledge: Apply the knowledge of mathematics, science, engineering fundamentals, and an engineering specialization to the solution of complex engineering problems."),
         ("PO 2",  "Problem analysis: Identify, formulate, review research literature, and analyze complex engineering problems reaching substantiated conclusions using first principles of mathematics, natural sciences, and engineering sciences."),
@@ -241,11 +393,7 @@ def _build_docx(data: dict) -> bytes:
         ("PO 11", "Project management and finance: Demonstrate knowledge and understanding of the engineering and management principles and apply these to one's own work, as a member and leader in a team, to manage projects and in multidisciplinary environments."),
         ("PO 12", "Life-long learning: Recognize the need for, and have the preparation and ability to engage in independent and life-long learning in the broadest context of technological change."),
     ]
-    # Check if DB POs have actual statement text (not just IDs)
-    db_pos_have_text = any(
-        p.get("statement", p.get("description", "")).strip()
-        for p in pos
-    )
+    db_pos_have_text = any(p.get("statement", p.get("description", "")).strip() for p in pos)
     po_rows = (
         [[p.get("po_id",""), p.get("statement", p.get("description",""))] for p in pos]
         if db_pos_have_text
@@ -274,10 +422,7 @@ def _build_docx(data: dict) -> bytes:
         ("PSO1", "To apply the concepts of Artificial Intelligence and Machine Learning with practical knowledge in analysis, design and development of intelligent systems and applications to multi-disciplinary problems."),
         ("PSO2", "To provide a concrete foundation to the students in the cutting-edge areas Artificial Intelligence and Machine Learning and excelling in the specialized areas like Natural Language Processing, Computer Vision, Reinforcement Learning, Internet of Things, Cloud computing, Data Security and privacy etc."),
     ]
-    _make_table(doc,
-                ["", "Program Specific Outcomes"],
-                [[pid, ptext] for pid, ptext in psos],
-                [1.5, 14.5])
+    _make_table(doc, ["", "Program Specific Outcomes"], [[pid, ptext] for pid, ptext in psos], [1.5, 14.5])
 
     # ── 3. Syllabus & Timetable ───────────────────────────────────────────────
     _section_title(doc, 3, "Syllabus, Personal Timetable")
@@ -291,18 +436,18 @@ def _build_docx(data: dict) -> bytes:
                 _add_para(doc, f"  • {t}", space_before=1, space_after=1)
     else:
         _add_para(doc, "[Syllabus will be extracted from session plan. Generate session plan first.]",
-                  color=(136,136,136))
-    _heading2(doc, "Personal Timetable")
-    timetable_attachments = [
-        a for a in (data.get("attachments") or [])
-        if a.get("section_no") == 3
-    ]
-    if timetable_attachments:
-        for a in timetable_attachments:
-            _add_para(doc, f"Attached: {a['label']}  ({a['filename']})", size=10)
-    else:
-        _add_para(doc, "[Faculty timetable — upload via Dept. Uploads tab, tagged to Section 3.]",
-                  color=(136,136,136))
+                  color=(136, 136, 136))
+
+    _heading2(doc, "Individual Timetable:")
+    timetable = data.get("timetable") or {}
+    _render_timetable(doc, timetable)
+
+    # Additional timetables from attachments (other faculty)
+    extra_tt_atts = [a for a in (data.get("attachments") or []) if a.get("section_no") == 3]
+    if extra_tt_atts:
+        _heading2(doc, "Additional Timetable Uploads")
+        for a in extra_tt_atts:
+            _add_para(doc, f"📎 {a['label']}  ({a['filename']})", size=10)
 
     # ── List of Students ──────────────────────────────────────────────────────
     _heading2(doc, "List of Students")
@@ -316,8 +461,7 @@ def _build_docx(data: dict) -> bytes:
         for sec_label in sorted(by_section.keys()):
             sec_students = by_section[sec_label]
             if len(by_section) > 1:
-                _add_para(doc, f"Section {sec_label}", bold=True, size=11,
-                          space_before=6, space_after=2)
+                _add_para(doc, f"Section {sec_label}", bold=True, size=11, space_before=6, space_after=2)
             _make_table(
                 doc,
                 ["Sr. No", "PRN", "Name"],
@@ -326,7 +470,7 @@ def _build_docx(data: dict) -> bytes:
             )
     else:
         _add_para(doc, "[Student list not available. Add students via the Students page.]",
-                  color=(136,136,136))
+                  color=(136, 136, 136))
 
     # ── 4. CO Statements + CO-PO Mapping ─────────────────────────────────────
     _section_title(doc, 4, "CO Statements, CO-PO-PSO Mapping with justification")
@@ -339,56 +483,123 @@ def _build_docx(data: dict) -> bytes:
 
     _heading2(doc, "CO-PO Mapping")
     co_po_matrix = data.get("co_po_matrix") or {}
-    if co_po_matrix and pos:
-        po_ids = [p.get("po_id","") for p in pos]
+    # Use standard 12 POs + 2 PSOs for the matrix header
+    po_ids_matrix = [f"PO{i}" for i in range(1, 13)] + ["PSO1", "PSO2"]
+    if co_po_matrix and cos:
         matrix_rows = []
         for co in cos:
-            mapping = co_po_matrix.get(co.get("co_id","")) or {}
-            matrix_rows.append([co.get("co_id","")] + [mapping.get(pid, "-") for pid in po_ids])
-        n = len(po_ids)
+            mapping = co_po_matrix.get(co.get("co_id", "")) or {}
+            # Try both "PO1" and "PO 1" styles
+            def _get_mapping(pid):
+                return mapping.get(pid) or mapping.get(pid.replace("PO", "PO ")) or mapping.get(pid.replace("PO ", "PO")) or "-"
+            matrix_rows.append([co.get("co_id","")] + [_get_mapping(pid) for pid in po_ids_matrix])
+        n = len(po_ids_matrix)
         col_w = [1.5] + [round(14.5/max(n,1), 2)] * n
-        _make_table(doc, ["CO"] + po_ids, matrix_rows, col_w)
-    else:
-        _add_para(doc, "[CO-PO mapping not yet configured.]", color=(136,136,136))
+        _make_table(doc, ["CO"] + po_ids_matrix, matrix_rows, col_w)
+    elif cos:
+        _add_para(doc, "[CO-PO mapping not yet configured. Set it up in Course Setup.]", color=(136, 136, 136))
+
+    # CO-PO Justification
+    co_po_justification = data.get("co_po_justification") or ""
+    if co_po_justification:
+        _heading2(doc, "CO-PO Mapping Justification")
+        for line in co_po_justification.split("\n"):
+            if line.strip():
+                _add_para(doc, line)
 
     # ── 5. Previous CO Attainment ─────────────────────────────────────────────
     _section_title(doc, 5, "CO Attainment from previous academic year and the action plan")
     if data.get("prev_co_attainment"):
         _add_para(doc, data["prev_co_attainment"])
     else:
-        _add_para(doc, "[Previous year CO attainment data not yet entered.]", color=(136,136,136))
+        _add_para(doc, "[Previous year CO attainment data not yet entered.]", color=(136, 136, 136))
     _heading2(doc, "Action Plan")
     if data.get("action_plan"):
         _add_para(doc, data["action_plan"])
     else:
-        _add_para(doc, "[Action plan not yet entered.]", color=(136,136,136))
+        _add_para(doc, "[Action plan not yet entered.]", color=(136, 136, 136))
 
     # ── 6. Session Plan ───────────────────────────────────────────────────────
     _section_title(doc, 6, "Session Plan with CO mapping to each lecture")
+
+    # Header block like real doc
+    _make_header_table(doc, inst_name, None,
+                       f"Session Plan — {data.get('department','')}",
+                       f"Course: {data.get('course_name','')} ({data.get('course_code','')})  |  Faculty: {data.get('faculty_name','')}")
+
+    doc.add_paragraph()
+
     session_rows = data.get("session_rows") or []
     if session_rows:
-        def _sp_lect(r):
-            return str(r.get("lect") or r.get("lect_no") or r.get("lectNo") or r.get("session_number") or "")
-        def _sp_unit(r):
-            return str(r.get("unit") or r.get("unit_no") or r.get("unitNo") or r.get("unit_number") or "")
-        def _sp_topic(r):
-            return r.get("topic") or r.get("points_to_cover") or r.get("pointsToCover") or ""
-        def _sp_method(r):
-            return r.get("method") or r.get("methodology") or r.get("teaching_method") or "Classroom Teaching"
-        def _sp_type(r):
-            return r.get("type") or r.get("lecture_exp_eval") or "Lecture"
-        def _sp_co(r):
-            v = r.get("co") or r.get("co_mapped") or r.get("coMapped") or ""
-            return ", ".join(v) if isinstance(v, list) else str(v)
+        table_data = []
+        for i, r in enumerate(session_rows):
+            lect   = _g(r, "lect", "lect_no", "lectNo", "lecture_no")
+            unit   = _g(r, "unit", "unit_no", "unitNo", "unit_number")
+            topic  = _g(r, "topic", "points_to_cover", "pointsToCover", "content", "description")
+            method = _g(r, "method", "methodology", "lecture_method")
+            ltype  = _g(r, "type", "lecture_exp_eval", "lectureType", default="Lecture")
+            co     = _g(r, "co", "co_mapped", "co_id")
+            if isinstance(co, list):
+                co = ", ".join(str(x) for x in co)
+            table_data.append([str(lect or i+1), str(unit or ""), topic, method, ltype, co])
         _make_table(doc,
                     ["Lect. No", "Unit No", "Points to Cover", "Methodology", "Type", "CO Mapped"],
-                    [[_sp_lect(r), _sp_unit(r), _sp_topic(r), _sp_method(r), _sp_type(r), _sp_co(r)]
-                     for r in session_rows],
+                    table_data,
                     [1.5, 1.5, 8.0, 2.5, 2.0, 2.0])
     else:
         _add_para(doc, "[Session plan not yet generated. Use the Session Plan page first.]",
-                  color=(136,136,136))
+                  color=(136, 136, 136))
 
+    # Textbooks & References
+    materials = data.get("study_materials") or {}
+    textbooks = materials.get("textbooks") or []
+    ref_books  = materials.get("reference_books") or materials.get("references") or []
+    web_links  = materials.get("web_links") or materials.get("web") or []
+    journals   = materials.get("journals") or []
+    moocs      = materials.get("moocs") or []
+
+    if textbooks:
+        _heading2(doc, "Textbooks")
+        _make_table(doc, ["Book", "Author", "Publisher"],
+                    [[b.get("title",b.get("book","") if isinstance(b,dict) else str(b)),
+                      b.get("author","") if isinstance(b,dict) else "",
+                      b.get("publisher","") if isinstance(b,dict) else ""] for b in textbooks],
+                    [7.0, 4.0, 5.0])
+
+    if ref_books:
+        _heading2(doc, "Reference Books")
+        _make_table(doc, ["Book", "Author", "Publisher"],
+                    [[b.get("title",b.get("book","") if isinstance(b,dict) else str(b)),
+                      b.get("author","") if isinstance(b,dict) else "",
+                      b.get("publisher","") if isinstance(b,dict) else ""] for b in ref_books],
+                    [7.0, 4.0, 5.0])
+
+    if web_links:
+        _heading2(doc, "Web Links / NPTEL")
+        _make_table(doc, ["Sr. No.", "Web Link", "Module"],
+                    [[str(i+1),
+                      w.get("title",w.get("url","") if isinstance(w,dict) else str(w)),
+                      w.get("unit",w.get("module","")) if isinstance(w,dict) else ""] for i,w in enumerate(web_links)],
+                    [1.0, 10.0, 5.0])
+
+    if journals:
+        _heading2(doc, "Journals / Research Articles")
+        _make_table(doc, ["Sr. No.", "Journal"],
+                    [[str(i+1),
+                      j.get("title","") if isinstance(j,dict) else str(j)] for i,j in enumerate(journals)],
+                    [1.0, 15.0])
+
+    if moocs:
+        _heading2(doc, "MOOC Courses")
+        _make_table(doc, ["S.No.", "MOOC Course Link", "Course conducted by", "Course Duration", "Certificate (Y/N)"],
+                    [[str(i+1),
+                      m.get("title",m.get("url","") if isinstance(m,dict) else str(m)),
+                      m.get("platform",m.get("conducted_by","")) if isinstance(m,dict) else "",
+                      m.get("duration","") if isinstance(m,dict) else "",
+                      m.get("certificate","Y") if isinstance(m,dict) else "Y"] for i,m in enumerate(moocs)],
+                    [1.0, 6.0, 3.0, 2.5, 2.0])
+
+    # Tutorial questions
     if data.get("tutorial_questions"):
         _heading2(doc, "Tutorial Questions with CO Mapping")
         _make_table(doc,
@@ -400,20 +611,27 @@ def _build_docx(data: dict) -> bytes:
     _section_title(doc, 7, "Evaluation plan with CO Mapping")
     eval_rows = data.get("eval_rows") or []
     if eval_rows:
+        table_data = []
+        for i, r in enumerate(eval_rows):
+            sr   = str(i + 1)   # always auto-number
+            comp = _g(r, "comp", "component", "name")
+            units= _g(r, "unit_syllabus", "units", "syllabus", "unit")
+            co   = _g(r, "co", "co_mapped")
+            if isinstance(co, list):
+                co = ", ".join(str(x) for x in co)
+            marks= _g(r, "marks", "total_marks", "max_marks")
+            wt   = _g(r, "weightage", "weight")
+            date = _g(r, "date", "tentative_date")
+            table_data.append([sr, comp, units, co, marks, wt, date])
         _make_table(doc,
                     ["Sr.No", "Component", "Units/Syllabus", "CO Mapped", "Marks", "Weightage", "Tentative Date"],
-                    [[str(i+1),
-                      r.get("comp") or r.get("component") or r.get("name") or "",
-                      r.get("unit_syllabus") or r.get("units") or r.get("remarks") or "",
-                      r.get("co") or r.get("co_mapped") or "",
-                      r.get("marks") or r.get("total_marks") or "",
-                      str(r.get("weightage") or ""),
-                      r.get("date") or r.get("tentative_date") or ""]
-                     for i, r in enumerate(eval_rows)],
+                    table_data,
                     [1.0, 3.0, 4.5, 2.0, 1.2, 1.8, 3.0])
     else:
         _add_para(doc, "[Evaluation plan not yet generated. Use the Evaluation Plan page first.]",
-                  color=(136,136,136))
+                  color=(136, 136, 136))
+
+    _heading2(doc, "Evaluation Components Details")
 
     for ca in (data.get("ca_sheets") or []):
         qp = ca.get("qp") or []
@@ -427,50 +645,61 @@ def _build_docx(data: dict) -> bytes:
                     [1.0, 10.0, 1.2, 1.8, 1.5])
 
         marks_data = ca.get("marks") or {}
-        if marks_data:
+        has_real_marks = any(
+            any(float(v or 0) > 0 for v in mks.values())
+            for mks in marks_data.values()
+            if isinstance(mks, dict)
+        )
+        if marks_data and has_real_marks:
             _heading2(doc, f"{ca.get('ca_label','')} — Marks")
             q_nos = [q.get("q_no","") for q in qp]
             student_map = data.get("student_map") or {}
             mk_rows = []
             for prn, mks in marks_data.items():
-                name = student_map.get(str(prn), student_map.get(prn, "—"))
-                row = [str(prn), name]
-                tot = 0.0
+                name = student_map.get(prn) or student_map.get(str(prn)) or "—"
+                row  = [prn, name]
+                tot  = 0.0
                 for q in qp:
                     v = float((mks or {}).get(q.get("q_no"), 0) or 0)
                     row.append(str(v) if v else "")
                     tot += v
-                row.append(str(round(tot, 1)) if tot else "")
+                row.append(str(tot) if tot else "")
                 mk_rows.append(row)
-            # Sort by name for readability
-            mk_rows.sort(key=lambda r: r[1])
             n = len(q_nos)
-            col_w = [2.0, 3.5] + [round(8.0/max(n,1),2)]*n + [1.5]
+            col_w = [2.5, 4.5] + [round(7.0/max(n,1), 2)]*n + [1.5]
             _make_table(doc, ["PRN", "Name"] + q_nos + ["Total"], mk_rows, col_w)
+        elif marks_data and not has_real_marks:
+            _add_para(doc, "[Marks not yet entered for this component.]", color=(136, 136, 136))
 
     # ── 8. Slow & Advanced Learners ───────────────────────────────────────────
     _section_title(doc, 8, "List of Slow and Advanced learners and the action plans")
-    _heading2(doc, "Slow Learners")
-    slow = data.get("slow_learners_parsed") or []
-    if slow:
+
+    _heading2(doc, "Advance Learners")
+    advanced_list = data.get("advanced_learners_parsed") or []
+    if advanced_list:
         _make_table(doc,
                     ["Sr.No", "PRN", "Name", "Marks Obtained"],
-                    [[str(i+1), s.get("prn",""), s.get("name",""), s.get("marks","")] for i, s in enumerate(slow)],
+                    [[str(i+1), s.get("prn",""), s.get("name",""), s.get("marks","")] for i, s in enumerate(advanced_list)],
+                    [1.0, 2.5, 9.0, 4.0])
+    elif data.get("advanced_learners"):
+        _add_para(doc, data["advanced_learners"])
+    else:
+        _add_para(doc, "[Advanced learner list will appear once CA marks are entered.]", color=(136, 136, 136))
+
+    _heading2(doc, "Slow Learners")
+    slow_list = data.get("slow_learners_parsed") or []
+    if slow_list:
+        _make_table(doc,
+                    ["Sr.No", "PRN", "Name", "Marks Obtained"],
+                    [[str(i+1), s.get("prn",""), s.get("name",""), s.get("marks","")] for i, s in enumerate(slow_list)],
                     [1.0, 2.5, 9.0, 4.0])
     elif data.get("slow_learners"):
         _add_para(doc, data["slow_learners"])
     else:
-        _add_para(doc, "[Slow learner list not yet entered. Complete CA marks to auto-generate.]",
-                  color=(136,136,136))
-
-    _heading2(doc, "Advanced Learners")
-    if data.get("advanced_learners"):
-        _add_para(doc, data["advanced_learners"])
-    else:
-        _add_para(doc, "[Advanced learner list not yet entered.]", color=(136,136,136))
+        _add_para(doc, "[Slow learner list will appear once CA marks are entered.]", color=(136, 136, 136))
 
     # ── 9. CO Attainment (internal) ───────────────────────────────────────────
-    _section_title(doc, 9, "CO Attainment of internal evaluation")
+    _section_title(doc, 9, "CO Attainment of Internal Evaluation")
     co_attainment = data.get("co_attainment") or {}
     if co_attainment:
         ca_rows = []
@@ -481,21 +710,47 @@ def _build_docx(data: dict) -> bytes:
         _make_table(doc, ["CO", "Attainment (%)", "Level"], ca_rows, [2.0, 5.0, 9.5])
     else:
         _add_para(doc, "[CO attainment will appear here once marks are entered in the Master Attainment File.]",
-                  color=(136,136,136))
+                  color=(136, 136, 136))
 
     # ── 10. Activity Reports ──────────────────────────────────────────────────
     _section_title(doc, 10, "Reports of activities planned and conducted")
-    if data.get("activity_reports"):
-        for line in data["activity_reports"].split("\n"):
-            if line.strip():
-                _add_para(doc, line)
+    activity_reports = data.get("activity_reports") or ""
+    if activity_reports.strip():
+        # Try to parse as JSON structured reports
+        try:
+            reports = json.loads(activity_reports)
+            if isinstance(reports, list):
+                _heading2(doc, "Best Practice and Innovative Activities-")
+                for i, rpt in enumerate(reports):
+                    if isinstance(rpt, dict):
+                        _add_para(doc, f"{i+1}. {rpt.get('title','')}", bold=True, size=11)
+                        for k, v in rpt.items():
+                            if k != "title" and v:
+                                p = doc.add_paragraph()
+                                p.paragraph_format.space_before = Pt(2)
+                                p.paragraph_format.space_after  = Pt(2)
+                                r1 = p.add_run(f"{k.replace('_',' ').title()}: ")
+                                r1.bold = True
+                                r1.font.size = Pt(10)
+                                p.add_run(str(v)).font.size = Pt(10)
+                    else:
+                        _add_para(doc, f"{i+1}. {rpt}")
+            else:
+                raise ValueError("not a list")
+        except (json.JSONDecodeError, ValueError):
+            # Fall back to free text — numbered lines
+            lines = [l.strip() for l in activity_reports.split("\n") if l.strip()]
+            _heading2(doc, "Best Practice and Innovative Activities-")
+            for i, line in enumerate(lines):
+                _add_para(doc, f"{i+1}.\t{line}", space_before=2, space_after=2)
     else:
         _add_para(doc, "[Activity reports not yet entered. Add them in the Course File section.]",
-                  color=(136,136,136))
+                  color=(136, 136, 136))
 
     # ── 11. Learning Material ─────────────────────────────────────────────────
     _section_title(doc, 11, "Learning Material")
     if data.get("learning_material_links"):
+        _heading2(doc, "LMS / Online Resources")
         for link in data["learning_material_links"].split("\n"):
             link = link.strip()
             if link:
@@ -506,29 +761,74 @@ def _build_docx(data: dict) -> bytes:
                 run.font.color.rgb = _rgb((5, 99, 193))
                 run.underline = True
                 run.font.size = Pt(10)
-    else:
+
+    # Also render study materials tables if available
+    materials = data.get("study_materials") or {}
+    tb2 = materials.get("textbooks") or []
+    rb2 = materials.get("reference_books") or materials.get("references") or []
+    wl2 = materials.get("web_links") or materials.get("web") or []
+    j2  = materials.get("journals") or []
+    m2  = materials.get("moocs") or []
+
+    if tb2:
+        _heading2(doc, "Textbooks")
+        _make_table(doc, ["Book", "Author", "Publisher"],
+                    [[b.get("title","") if isinstance(b,dict) else str(b),
+                      b.get("author","") if isinstance(b,dict) else "",
+                      b.get("publisher","") if isinstance(b,dict) else ""] for b in tb2],
+                    [7.0, 4.0, 5.0])
+    if rb2:
+        _heading2(doc, "Reference Books")
+        _make_table(doc, ["Book", "Author", "Publisher"],
+                    [[b.get("title","") if isinstance(b,dict) else str(b),
+                      b.get("author","") if isinstance(b,dict) else "",
+                      b.get("publisher","") if isinstance(b,dict) else ""] for b in rb2],
+                    [7.0, 4.0, 5.0])
+    if wl2:
+        _heading2(doc, "Web Links / NPTEL / SWAYAM")
+        _make_table(doc, ["Sr. No.", "Web Link", "Module"],
+                    [[str(i+1),
+                      w.get("title",w.get("url","") if isinstance(w,dict) else str(w)),
+                      w.get("unit",w.get("module","")) if isinstance(w,dict) else ""] for i,w in enumerate(wl2)],
+                    [1.0, 10.0, 5.0])
+    if j2:
+        _heading2(doc, "Journals")
+        _make_table(doc, ["Sr. No.", "Journal"],
+                    [[str(i+1), j.get("title","") if isinstance(j,dict) else str(j)] for i,j in enumerate(j2)],
+                    [1.0, 15.0])
+    if m2:
+        _heading2(doc, "MOOC Courses")
+        _make_table(doc, ["S.No.", "MOOC Course Link", "Course conducted by", "Course Duration", "Certificate (Y/N)"],
+                    [[str(i+1),
+                      m.get("title",m.get("url","") if isinstance(m,dict) else str(m)),
+                      m.get("platform",m.get("conducted_by","")) if isinstance(m,dict) else "",
+                      m.get("duration","") if isinstance(m,dict) else "",
+                      m.get("certificate","Y") if isinstance(m,dict) else "Y"] for i,m in enumerate(m2)],
+                    [1.0, 6.0, 3.0, 2.5, 2.0])
+
+    if not data.get("learning_material_links") and not any([tb2, rb2, wl2, j2, m2]):
         _add_para(doc, "[Learning material links not yet entered. Add them in the Course File section.]",
-                  color=(136,136,136))
+                  color=(136, 136, 136))
 
     # ── 12. Question Bank ─────────────────────────────────────────────────────
     _section_title(doc, 12, "Question Bank")
     questions = data.get("questions") or []
     if questions:
-        for co in cos:
-            co_qs = [q for q in questions if q.get("co_id") == co.get("co_id")]
-            if not co_qs:
-                continue
-            _heading2(doc, co.get("co_id",""))
-            for i, q in enumerate(co_qs):
-                _add_para(doc, f"{i+1}. {q.get('question_text','')}", space_before=2, space_after=1)
-        unmapped = [q for q in questions if not q.get("co_id")]
-        if unmapped:
-            _heading2(doc, "General")
-            for i, q in enumerate(unmapped):
-                _add_para(doc, f"{i+1}. {q.get('question_text','')}", space_before=2, space_after=1)
+        from collections import defaultdict as _dd2
+        by_unit = _dd2(list)
+        for q in questions:
+            unit_key = q.get("unit_no", q.get("unit", "General"))
+            by_unit[str(unit_key or "General")].append(q)
+
+        for unit_label in sorted(by_unit.keys()):
+            unit_qs = by_unit[unit_label]
+            _heading2(doc, f"Unit - {unit_label}")
+            for i, q in enumerate(unit_qs):
+                co_tag = f"  [{q.get('co_id','')}]" if q.get("co_id") else ""
+                _add_para(doc, f"{i+1}. {q.get('question_text','')}{co_tag}", space_before=2, space_after=1)
     else:
         _add_para(doc, "[Question bank is empty. Use the Question Bank page to generate questions.]",
-                  color=(136,136,136))
+                  color=(136, 136, 136))
 
     # ── 13. Attendance ────────────────────────────────────────────────────────
     _section_title(doc, 13, "Compiled Attendance")
@@ -545,9 +845,8 @@ def _build_docx(data: dict) -> bytes:
                 run.font.size = Pt(10)
     else:
         _add_para(doc, "[Attendance links not yet entered. Add them in the Course File section.]",
-                  color=(136,136,136))
+                  color=(136, 136, 136))
 
-    # ── Serialise ─────────────────────────────────────────────────────────────
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
@@ -610,48 +909,114 @@ class CourseFileService:
         )
         qs = result.scalars().all()
         return [{"question_text": q.question_text, "co_id": q.co_id,
-                 "bloom_level": q.bloom_level, "marks": q.marks} for q in qs]
+                 "bloom_level": q.bloom_level, "marks": q.marks,
+                 "unit_no": getattr(q, "unit_no", None)} for q in qs]
+
+    async def _get_timetable(self) -> dict:
+        """Pull the uploaded timetable from storage."""
+        try:
+            storage = get_storage()
+            path = storage.get_path("timetables", "current_timetable.json")
+            if path and Path(path).exists():
+                return json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"Could not read timetable: {e}")
+        return {}
+
+    async def _get_study_materials(self, course_id: int) -> dict:
+        """Try to pull study materials from the session plan materials endpoint data."""
+        try:
+            from backend.database.models import SessionPlanRow
+            result = await self.db.execute(
+                select(SessionPlanRow).where(SessionPlanRow.course_id == course_id)
+            )
+            sp_row = result.scalar_one_or_none()
+            if not sp_row or not sp_row.rows:
+                return {}
+
+            rows = sp_row.rows
+            cols = sp_row.cols or []
+
+            textbooks, ref_books, web_links, journals, moocs = [], [], [], [], []
+
+            for col in cols:
+                label = col.get("label", "").lower()
+                key   = col.get("key", "")
+                if not key:
+                    continue
+                if any(k in label for k in ["textbook", "text book"]):
+                    for r in rows:
+                        v = r.get(key, "")
+                        if v and v not in [t.get("title","") for t in textbooks]:
+                            textbooks.append({"title": v, "author": "", "publisher": ""})
+                elif any(k in label for k in ["reference", "ref book"]):
+                    for r in rows:
+                        v = r.get(key, "")
+                        if v and v not in [t.get("title","") for t in ref_books]:
+                            ref_books.append({"title": v, "author": "", "publisher": ""})
+                elif any(k in label for k in ["web", "link", "nptel", "url", "online", "swayam"]):
+                    for r in rows:
+                        v = r.get(key, "")
+                        if v and v not in [w.get("title","") for w in web_links]:
+                            web_links.append({"title": v, "unit": r.get("unit", ""), "url": ""})
+                elif any(k in label for k in ["journal", "paper", "research", "article"]):
+                    for r in rows:
+                        v = r.get(key, "")
+                        if v and v not in [j.get("title","") for j in journals]:
+                            journals.append({"title": v, "url": ""})
+                elif any(k in label for k in ["mooc", "course", "coursera", "swayam", "edx"]):
+                    for r in rows:
+                        v = r.get(key, "")
+                        if v and v not in [m.get("title","") for m in moocs]:
+                            moocs.append({"title": v, "platform": "", "duration": "", "certificate": "Y"})
+
+            return {
+                "textbooks": textbooks,
+                "reference_books": ref_books,
+                "web_links": web_links,
+                "journals": journals,
+                "moocs": moocs,
+            }
+        except Exception as e:
+            logger.warning(f"Could not read study materials: {e}")
+            return {}
 
     async def _get_co_attainment(self, course_id, students, ca_sheets, cos):
-        # Only compute when marks are actually entered
-        sheets_with_marks = [s for s in ca_sheets if s.get("marks") and len(s["marks"]) > 0]
-        if not sheets_with_marks or not students:
-            return {}  # Return empty — will show placeholder text in docx
         attainment = {}
         for co in cos:
             cid = co["co_id"]
             total_pct, count = 0, 0
-            for sheet in sheets_with_marks:
+            for sheet in ca_sheets:
                 qp = [q for q in (sheet.get("qp") or []) if q.get("co_id") == cid]
                 max_marks = sum(float(q.get("marks", 0)) for q in qp)
-                if not max_marks:
+                if not max_marks or not students:
                     continue
                 marks_data = sheet.get("marks") or {}
-                # Only count students who actually have marks entered for this sheet
-                students_in_sheet = [s for s in students if s["prn"] in marks_data]
-                if not students_in_sheet:
+                # Skip if no actual marks entered
+                has_real = any(
+                    any(float(v or 0) > 0 for v in (mks or {}).values())
+                    for mks in marks_data.values() if isinstance(mks, dict)
+                )
+                if not has_real:
                     continue
                 passed = sum(
-                    1 for s in students_in_sheet
+                    1 for s in students
                     if sum(float((marks_data.get(s["prn"]) or {}).get(q.get("q_no"), 0))
                            for q in qp) / max_marks * 100 >= 60
                 )
-                total_pct += (passed / len(students_in_sheet)) * 100
+                total_pct += (passed / len(students)) * 100
                 count += 1
-            attainment[cid] = round(total_pct / count, 1) if count else 0.0
-        return attainment
+            attainment[cid] = round(total_pct / count, 1) if count else None  # None = no data
+        # Return only COs with real data
+        return {k: v for k, v in attainment.items() if v is not None}
 
     async def _get_slow_advanced(self, course_id, students, ca_sheets, cos):
         if not students or not ca_sheets:
             return [], []
-        # Only process sheets that actually have marks entered
-        sheets_with_marks = [s for s in ca_sheets if s.get("marks") and len(s["marks"]) > 0]
-        if not sheets_with_marks:
-            return [], []  # No marks entered yet — don't classify everyone as slow
         totals = {s["prn"]: 0.0 for s in students}
         maxes  = {s["prn"]: 0.0 for s in students}
-        students_with_marks = set()
-        for sheet in sheets_with_marks:
+        has_any_marks = False
+        for sheet in ca_sheets:
             qp = sheet.get("qp") or []
             marks_data = sheet.get("marks") or {}
             total_marks = sum(float(q.get("marks", 0)) for q in qp)
@@ -660,18 +1025,19 @@ class CourseFileService:
             for s in students:
                 obtained = sum(float((marks_data.get(s["prn"]) or {}).get(q.get("q_no"), 0))
                                for q in qp)
+                if obtained > 0:
+                    has_any_marks = True
                 totals[s["prn"]] += obtained
                 maxes[s["prn"]]  += total_marks
-                if s["prn"] in marks_data:
-                    students_with_marks.add(s["prn"])
-        # Only score students who actually appear in the marks data
+
+        if not has_any_marks:
+            return [], []  # No marks entered — don't classify anyone
+
         scored = []
         for s in students:
             mx  = maxes.get(s["prn"], 0)
             tot = totals.get(s["prn"], 0)
-            if mx == 0:
-                continue  # skip students with no max marks at all
-            pct = (tot / mx * 100)
+            pct = (tot / mx * 100) if mx else 0
             scored.append({"prn": s["prn"], "name": s["name"],
                            "marks": f"{tot:.1f}/{mx:.0f}", "pct": pct})
         scored.sort(key=lambda x: x["pct"])
@@ -697,8 +1063,8 @@ class CourseFileService:
     def _extract_syllabus_from_session(self, session_rows):
         units = {}
         for row in session_rows:
-            unit_no = row.get("unit_no", row.get("unitNo", ""))
-            topic   = row.get("points_to_cover", row.get("pointsToCover", row.get("topic", "")))
+            unit_no = _g(row, "unit", "unit_no", "unitNo", "unit_number")
+            topic   = _g(row, "topic", "points_to_cover", "pointsToCover", "content")
             if not unit_no:
                 continue
             key = str(unit_no)
@@ -731,14 +1097,18 @@ class CourseFileService:
         ca_sheets    = await self._get_ca_sheets(course_id)
         questions    = await self._get_questions(course_id)
         extra        = await self._get_extra(course_id)
+        timetable    = await self._get_timetable()
+        study_mats   = await self._get_study_materials(course_id)
         cos          = course.cos
 
-        co_attainment          = await self._get_co_attainment(course_id, students, ca_sheets, cos)
-        slow_list, advanced_list = await self._get_slow_advanced(course_id, students, ca_sheets, cos)
-        syllabus_units         = self._extract_syllabus_from_session(session_rows)
-        tutorial_qs            = self._extract_tutorial_questions(questions)
+        co_attainment              = await self._get_co_attainment(course_id, students, ca_sheets, cos)
+        slow_list, advanced_list   = await self._get_slow_advanced(course_id, students, ca_sheets, cos)
+        syllabus_units             = self._extract_syllabus_from_session(session_rows)
+        tutorial_qs                = self._extract_tutorial_questions(questions)
 
         data = {
+            "institution_name":    extra.get("institution_name", "Symbiosis Institute of Technology"),
+            "institution_address": extra.get("institution_address", "SIU Pune 412115, Maharashtra, India"),
             "course_name":    course.course_name,
             "course_code":    course.course_code,
             "department":     course.department,
@@ -750,6 +1120,7 @@ class CourseFileService:
             "cos":            cos,
             "pos":            course.pos,
             "co_po_matrix":   course.co_po_matrix,
+            "co_po_justification": extra.get("co_po_justification", ""),
             "vision_text":    extra.get("vision_text", ""),
             "mission_text":   extra.get("mission_text", ""),
             "syllabus_units": syllabus_units,
@@ -760,12 +1131,13 @@ class CourseFileService:
             "eval_rows":      eval_rows,
             "ca_sheets":      ca_sheets,
             "student_map":    {s["prn"]: s["name"] for s in students},
-            "slow_learners":  extra.get("slow_learners", "") or
-                              "\n".join(f"{s['prn']} — {s['name']} ({s['marks']})" for s in slow_list),
-            "advanced_learners": extra.get("advanced_learners", "") or
-                                 "\n".join(f"{s['prn']} — {s['name']} ({s['marks']})" for s in advanced_list),
-            "slow_learners_parsed": slow_list,
+            "slow_learners":  extra.get("slow_learners", ""),
+            "advanced_learners": extra.get("advanced_learners", ""),
+            "slow_learners_parsed":     slow_list,
+            "advanced_learners_parsed": advanced_list,
             "students":       students,
+            "timetable":      timetable,
+            "study_materials": study_mats,
             "attachments":    await self._get_attachments(course_id),
             "co_attainment":  co_attainment,
             "activity_reports": extra.get("activity_reports", ""),
@@ -794,5 +1166,7 @@ class CourseFileService:
                 "ca_marks":         len(ca_sheets) > 0,
                 "question_bank":    len(questions) > 0,
                 "vision_mission":   bool(extra.get("vision_text")),
+                "timetable":        bool(timetable),
+                "study_materials":  bool(any(study_mats.values())),
             },
         }

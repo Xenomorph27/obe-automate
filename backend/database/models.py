@@ -187,12 +187,19 @@ class CourseFileExtra(Base):
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
 
+    # Cover — institution details
+    institution_name    = Column(String(200), nullable=True, default="Symbiosis Institute of Technology")
+    institution_address = Column(String(300), nullable=True, default="SIU Pune 412115, Maharashtra, India")
+
     # Section 1 — Vision & Mission (changes per department)
     vision_text = Column(Text, nullable=True, default="")
     mission_text = Column(Text, nullable=True, default="")   # M1, M2, M3 as newline-separated
 
     # Section 2 — Batch info (e.g. "2024-28")
     batch = Column(String(20), nullable=True, default="")
+
+    # Section 4 — CO-PO justification text
+    co_po_justification = Column(Text, nullable=True, default="")
 
     # Section 5 — Previous year CO attainment + action plan
     prev_co_attainment = Column(Text, nullable=True, default="")   # free-text / JSON summary
@@ -216,9 +223,12 @@ class CourseFileExtra(Base):
 
     def to_dict(self):
         return {
+            "institution_name": self.institution_name or "Symbiosis Institute of Technology",
+            "institution_address": self.institution_address or "SIU Pune 412115, Maharashtra, India",
             "vision_text": self.vision_text or "",
             "mission_text": self.mission_text or "",
             "batch": self.batch or "",
+            "co_po_justification": self.co_po_justification or "",
             "prev_co_attainment": self.prev_co_attainment or "",
             "action_plan": self.action_plan or "",
             "slow_learners": self.slow_learners or "",

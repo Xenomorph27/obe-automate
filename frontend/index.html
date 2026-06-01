@@ -4449,6 +4449,7 @@ function CourseFilePage({course}){
     vision_text:'',mission_text:'',batch:'',
     prev_co_attainment:'',action_plan:'',
     slow_learners:'',advanced_learners:'',
+    institution_name:'',institution_address:'',co_po_justification:'',
     activity_reports:'',learning_material_links:'',attendance_links:'',
   });
 
@@ -4972,7 +4973,9 @@ Respond helpfully. If the user wants to update a field, provide the updated text
 
     const setupTabContent={
       info:<div>
-        <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>Add the batch year — everything else is auto-populated from course setup.</p>
+        <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>Fill institution details and batch year. Everything else is auto-populated.</p>
+        {field('Institution Name','institution_name',false,1,'e.g. Symbiosis Institute of Technology')}
+        {field('Institution Address','institution_address',false,1,'e.g. SIU Pune 412115, Maharashtra, India')}
         {field('Batch (e.g. 2024-28)','batch',false,1,'e.g. 2024-28')}
         <div style={{background:'var(--card-bg)',padding:'1rem',borderRadius:8,fontSize:'.82rem',marginTop:'1rem',border:'1px solid var(--border)'}}>
           <b>Auto-populated:</b> <span style={{color:'var(--muted)'}}>Dept: {course?.department||'—'} | Course: {course?.course_name} ({course?.course_code}) | Semester: {course?.semester} | Faculty: {course?.faculty_name}</span>
@@ -4981,6 +4984,7 @@ Respond helpfully. If the user wants to update a field, provide the updated text
       vision:<div>
         {field('Vision of the Department','vision_text',true,4,'To impart quality education with research insights...')}
         {field('Mission (one point per line, e.g. M1: ..., M2: ...)','mission_text',true,6,'M1: To educate students on cutting-edge AIML...\nM2: To produce quality research...\nM3: To inculcate professional values...')}
+        {field('CO-PO Mapping Justification (Section 4, optional)','co_po_justification',true,4,'PO1 (Engineering Knowledge): Strongly linked to CO1...\nPO2 (Problem Analysis): Essential for CO2...')}
       </div>,
       previous:<div>
         {field('Previous Year CO Attainment Summary','prev_co_attainment',true,5,'AY 2024-25: CO1 attainment = 2.8, CO2 = 2.6...')}
@@ -5144,30 +5148,42 @@ Respond helpfully. If the user wants to update a field, provide the updated text
           )}
         </div>
 
-        {/* Right — AI Chat */}
-        <div style={{width:260,background:'#fff',borderLeft:'1px solid #e2e8f0',display:'flex',flexDirection:'column',flexShrink:0}}>
-          <div style={{padding:'12px 14px',borderBottom:'1px solid #e2e8f0',fontWeight:700,fontSize:'13px',color:'#1e3a5f',display:'flex',alignItems:'center',gap:6}}>
-            <span>✨</span> AI Assistant
+        {/* Right — AI Chat (dark navy, matches reference design) */}
+        <div style={{width:300,background:'#0f172a',borderLeft:'1px solid #1e293b',display:'flex',flexDirection:'column',flexShrink:0}}>
+          {/* Header */}
+          <div style={{padding:'14px 16px',borderBottom:'1px solid #1e293b',display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontSize:'16px'}}>✨</span>
+            <div style={{fontWeight:700,fontSize:'13px',color:'#f1f5f9',letterSpacing:'.3px'}}>AI Table Assistant</div>
           </div>
-          <div style={{flex:1,overflow:'auto',padding:'10px 12px',display:'flex',flexDirection:'column',gap:8}}>
+          {/* Messages */}
+          <div style={{flex:1,overflow:'auto',padding:'12px 14px',display:'flex',flexDirection:'column',gap:10}}>
             {chatHistory.map((m,i)=>(
               <div key={i} style={{
-                background:m.role==='ai'?'#eff6ff':'#f0fdf4',
-                border:`1px solid ${m.role==='ai'?'#bfdbfe':'#bbf7d0'}`,
-                borderRadius:8,padding:'8px 10px',fontSize:'11.5px',lineHeight:1.55,
-                color:'#1e293b',whiteSpace:'pre-wrap',
+                background:m.role==='ai'?'#1e293b':'#1e3a5f',
+                border:`1px solid ${m.role==='ai'?'#334155':'#2d4f7c'}`,
+                borderRadius:10,padding:'10px 13px',fontSize:'12px',lineHeight:1.6,
+                color:'#e2e8f0',whiteSpace:'pre-wrap',
                 alignSelf:m.role==='ai'?'flex-start':'flex-end',
-                maxWidth:'90%',
-              }}>{m.text}</div>
+                maxWidth:'92%',boxShadow:'0 1px 4px rgba(0,0,0,.3)',
+              }}>
+                {m.role==='ai'&&<div style={{fontSize:'10px',color:'#64748b',marginBottom:4,fontWeight:600}}>AI Assistant</div>}
+                {m.text}
+              </div>
             ))}
-            {chatLoading&&<div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'8px 10px',fontSize:'11.5px',color:'#6b7280'}}>Thinking…</div>}
+            {chatLoading&&(
+              <div style={{background:'#1e293b',border:'1px solid #334155',borderRadius:10,padding:'10px 13px',fontSize:'12px',color:'#64748b',display:'flex',alignItems:'center',gap:6}}>
+                <span style={{animation:'spin 1s linear infinite',display:'inline-block'}}>⏳</span> Thinking…
+              </div>
+            )}
           </div>
-          <div style={{padding:'10px 12px',borderTop:'1px solid #e2e8f0',display:'flex',gap:6}}>
+          {/* Input */}
+          <div style={{padding:'10px 14px',borderTop:'1px solid #1e293b',display:'flex',gap:8,alignItems:'flex-end'}}>
             <textarea value={chatMsg} onChange={e=>setChatMsg(e.target.value)}
               onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}}}
               placeholder="Ask me to edit anything..." rows={2}
-              style={{flex:1,padding:'6px 8px',border:'1px solid #e2e8f0',borderRadius:6,fontSize:'11.5px',resize:'none',fontFamily:'inherit',outline:'none'}}/>
-            <button onClick={sendChat} disabled={chatLoading||!chatMsg.trim()} style={{padding:'6px 10px',background:'#1e3a5f',color:'#fff',border:'none',borderRadius:6,cursor:'pointer',fontSize:'12px',fontWeight:700,alignSelf:'flex-end'}}>→</button>
+              style={{flex:1,padding:'8px 10px',background:'#1e293b',border:'1px solid #334155',borderRadius:8,fontSize:'12px',resize:'none',fontFamily:'inherit',outline:'none',color:'#e2e8f0','::placeholder':{color:'#64748b'}}}/>
+            <button onClick={sendChat} disabled={chatLoading||!chatMsg.trim()}
+              style={{padding:'8px 12px',background:chatLoading||!chatMsg.trim()?'#1e293b':'#3b82f6',color:chatLoading||!chatMsg.trim()?'#475569':'#fff',border:'1px solid #334155',borderRadius:8,cursor:'pointer',fontSize:'13px',fontWeight:700,transition:'all .15s',flexShrink:0}}>→</button>
           </div>
         </div>
       </div>
