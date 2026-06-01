@@ -4426,26 +4426,25 @@ function CourseFilePage({course}){
   const hdr=()=>({Authorization:'Bearer '+tok(),'Content-Type':'application/json'});
   const hdrForm=()=>({Authorization:'Bearer '+tok()});
 
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [mode,setMode]=React.useState('setup');   // 'setup' | 'editor'
   const [loading,setLoading]=React.useState(false);
   const [saving,setSaving]=React.useState(false);
   const [generating,setGenerating]=React.useState(false);
   const [err,setErr]=React.useState('');
   const [ok,setOk]=React.useState('');
-  const [generated,setGenerated]=React.useState(false);
-  const [activeSection,setActiveSection]=React.useState('info');
+  const [activeSetupTab,setActiveSetupTab]=React.useState('info');
+  const [activePage,setActivePage]=React.useState(0);
+  const [docPages,setDocPages]=React.useState([]);
+  const [chatMsg,setChatMsg]=React.useState('');
+  const [chatHistory,setChatHistory]=React.useState([]);
+  const [chatLoading,setChatLoading]=React.useState(false);
   const [attachments,setAttachments]=React.useState([]);
   const [uploading,setUploading]=React.useState(false);
   const [uploadLabel,setUploadLabel]=React.useState('');
   const [uploadSection,setUploadSection]=React.useState('');
   const [uploadFile,setUploadFile]=React.useState(null);
   const [uploadErr,setUploadErr]=React.useState('');
-
-  const loadAttachments=React.useCallback(()=>{
-    if(!course) return;
-    fetch(API+'/course-file/attachments/'+course.id,{headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}})
-      .then(r=>r.json()).then(d=>{if(d.data) setAttachments(d.data);}).catch(()=>{});
-  },[course?.id]);
-
   const [extra,setExtra]=React.useState({
     vision_text:'',mission_text:'',batch:'',
     prev_co_attainment:'',action_plan:'',
@@ -4453,318 +4452,708 @@ function CourseFilePage({course}){
     activity_reports:'',learning_material_links:'',attendance_links:'',
   });
 
+  const pageAreaRef=React.useRef(null);
+  const thumbnailsRef=React.useRef(null);
+
+  // ── Load saved extra + attachments ────────────────────────────────────────
+  const loadAttachments=React.useCallback(()=>{
+    if(!course)return;
+    fetch(API+'/course-file/attachments/'+course.id,{headers:hdrForm()})
+      .then(r=>r.json()).then(d=>{if(d.data)setAttachments(d.data);}).catch(()=>{});
+  },[course?.id]);
+
   React.useEffect(()=>{
-    if(!course) return;
+    if(!course)return;
     setLoading(true);
     fetch(API+'/course-file/extra/'+course.id,{headers:hdrForm()})
-      .then(r=>r.json()).then(d=>{
-        if(d.data&&Object.keys(d.data).length>0) setExtra(e=>({...e,...d.data}));
-      }).catch(()=>{}).finally(()=>setLoading(false));
+      .then(r=>r.json()).then(d=>{if(d.data&&Object.keys(d.data).length>0)setExtra(e=>({...e,...d.data}));})
+      .catch(()=>{}).finally(()=>setLoading(false));
     loadAttachments();
   },[course?.id,loadAttachments]);
 
+  // ── Build doc pages from course data ──────────────────────────────────────
+  const buildPages=React.useCallback((courseData,extraData,atts)=>{
+    const c=courseData||course||{};
+    const e=extraData||extra;
+    const a=atts||attachments;
+    const pages=[];
+
+    // Cover page
+    pages.push({id:'cover',title:'Cover Page',type:'cover',editable:false,content:{
+      course_name:c.course_name||'',course_code:c.course_code||'',
+      department:c.department||'',faculty_name:c.faculty_name||'',
+      semester:c.semester||'',academic_year:c.academic_year||'',batch:e.batch||'',
+    }});
+
+    // S1 Vision & Mission
+    pages.push({id:'s1',title:'1. Vision & Mission',type:'text_section',sectionNo:1,
+      fields:[
+        {key:'vision_title',label:'Vision',value:'VISION OF THE DEPARTMENT',bold:true},
+        {key:'vision_text',label:'Vision Text',value:e.vision_text||'',editable:true,multiline:true,
+         placeholder:'To impart quality education with research insights...'},
+        {key:'mission_title',label:'Mission',value:'MISSION OF THE DEPARTMENT',bold:true},
+        {key:'mission_text',label:'Mission (one point per line)',value:e.mission_text||'',editable:true,multiline:true,rows:5,
+         placeholder:'M1: To educate students...\nM2: To produce quality research...\nM3: To inculcate professional values...'},
+      ]
+    });
+
+    // S2 POs/PEOs/PSOs
+    const pos=c.pos||[];
+    const STANDARD_POS=[
+      ['PO 1','Engineering Knowledge: Apply the knowledge of mathematics, science, engineering fundamentals...'],
+      ['PO 2','Problem analysis: Identify, formulate, review research literature, and analyze complex engineering problems...'],
+      ['PO 3','Design/development of solutions: Design solutions for complex engineering problems...'],
+      ['PO 4','Conduct investigations of complex problems: Use research-based knowledge and research methods...'],
+      ['PO 5','Modern tool usage: Create, select, and apply appropriate techniques, resources, and modern engineering and IT tools...'],
+      ['PO 6','The engineer and society: Apply reasoning informed by the contextual knowledge...'],
+      ['PO 7','Environment and sustainability: Understand the impact of the professional engineering solutions...'],
+      ['PO 8','Ethics: Apply ethical principles and commit to professional ethics and responsibilities...'],
+      ['PO 9','Individual and team work: Function effectively as an individual, and as a member or leader in diverse teams...'],
+      ['PO 10','Communication: Communicate effectively on complex engineering activities with the engineering community...'],
+      ['PO 11','Project management and finance: Demonstrate knowledge and understanding of the engineering and management principles...'],
+      ['PO 12','Life-long learning: Recognize the need for, and have the preparation and ability to engage in independent and life-long learning...'],
+    ];
+    const poRows=pos.length&&pos.some(p=>p.statement||p.description)
+      ?pos.map(p=>[p.po_id||'',p.statement||p.description||''])
+      :STANDARD_POS;
+    pages.push({id:'s2',title:'2. POs / PEOs / PSOs',type:'po_section',sectionNo:2,
+      poRows,
+      peos:[
+        ['PEO1','Apply the knowledge of the latest trends of AIML and will be engaged in technology development and deployment.'],
+        ['PEO2','To be competent AIML engineers with innovative thinking and research attitude to solve the real-world problems.'],
+        ['PEO3','To have enhanced interpersonal and managerial skills to function effectively in their profession.'],
+      ],
+      psos:[
+        ['PSO1','To apply the concepts of Artificial Intelligence and Machine Learning with practical knowledge in analysis, design and development of intelligent systems.'],
+        ['PSO2','To provide a concrete foundation to the students in the cutting-edge areas like NLP, Computer Vision, Reinforcement Learning, IoT, Cloud computing, Data Security and privacy etc.'],
+      ],
+    });
+
+    // S3 Syllabus & Timetable — just mention uploads
+    const ttAtts=a.filter(x=>x.section_no===3);
+    pages.push({id:'s3',title:'3. Syllabus & Timetable',type:'syllabus_section',sectionNo:3,
+      timetableAttachments:ttAtts,
+    });
+
+    // S4 CO Statements
+    const cos=c.cos||[];
+    const coPoMatrix=c.co_po_matrix||{};
+    pages.push({id:'s4',title:'4. CO Statements & CO-PO Mapping',type:'co_section',sectionNo:4,
+      cos,coPoMatrix,pos:poRows.map(r=>r[0]),
+    });
+
+    // S5 Prev Attainment
+    pages.push({id:'s5',title:'5. Previous CO Attainment',type:'text_section',sectionNo:5,
+      fields:[
+        {key:'prev_co_attainment',label:'Previous Year CO Attainment',value:e.prev_co_attainment||'',editable:true,multiline:true,rows:4,
+         placeholder:'AY 2024-25: CO1 attainment = 2.8, CO2 = 2.6...'},
+        {key:'action_plan',label:'Action Plan',value:e.action_plan||'',editable:true,multiline:true,rows:4,
+         placeholder:'Since overall CO attainment exceeded targets, the course delivery strategy will...'},
+      ]
+    });
+
+    // S6 Session Plan — auto-populated notice
+    pages.push({id:'s6',title:'6. Session Plan',type:'auto_section',sectionNo:6,
+      message:'Session plan is auto-populated from the Session Plan page. Go to Session Plan to generate or edit it.',
+      link:'session_plan',
+    });
+
+    // S7 Evaluation Plan
+    pages.push({id:'s7',title:'7. Evaluation Plan',type:'auto_section',sectionNo:7,
+      message:'Evaluation plan and CA marksheets are auto-populated from the Evaluation Plan page.',
+      link:'evaluation_plan',
+    });
+
+    // S8 Slow/Advanced Learners
+    pages.push({id:'s8',title:'8. Slow & Advanced Learners',type:'text_section',sectionNo:8,
+      fields:[
+        {key:'slow_learners',label:'Slow Learners (auto-detected when marks are entered, or override here)',
+         value:e.slow_learners||'',editable:true,multiline:true,rows:4,
+         placeholder:'Leave blank to auto-detect from CA marks below 40%...'},
+        {key:'advanced_learners',label:'Advanced Learners (auto-detected above 75%, or override)',
+         value:e.advanced_learners||'',editable:true,multiline:true,rows:4,
+         placeholder:'Leave blank to auto-detect from CA marks above 75%...'},
+      ]
+    });
+
+    // S9 CO Attainment — auto
+    pages.push({id:'s9',title:'9. CO Attainment',type:'auto_section',sectionNo:9,
+      message:'CO attainment is auto-calculated from CA marks entered in the Master Attainment File.',
+      link:'master_attainment',
+    });
+
+    // S10 Activity Reports
+    pages.push({id:'s10',title:'10. Activity Reports',type:'text_section',sectionNo:10,
+      fields:[
+        {key:'activity_reports',label:'Activity Reports (one per line)',value:e.activity_reports||'',editable:true,multiline:true,rows:6,
+         placeholder:'Guest Lecture by Dr. X on Topic Y — 12 Feb 2025\nIndustry Expert Talk on ML — 20 Mar 2025\nKaggle Competition — 15 May 2025'},
+      ]
+    });
+
+    // S11 Learning Material
+    pages.push({id:'s11',title:'11. Learning Material',type:'text_section',sectionNo:11,
+      fields:[
+        {key:'learning_material_links',label:'Learning Material Links (one URL per line)',value:e.learning_material_links||'',editable:true,multiline:true,rows:5,
+         placeholder:'https://nptel.ac.in/courses/...\nhttps://swayam.gov.in\nhttps://ocw.mit.edu'},
+      ]
+    });
+
+    // S12 Question Bank — auto
+    pages.push({id:'s12',title:'12. Question Bank',type:'auto_section',sectionNo:12,
+      message:'Question bank is auto-populated from the Question Bank page.',
+      link:'questions',
+    });
+
+    // S13 Attendance
+    pages.push({id:'s13',title:'13. Compiled Attendance',type:'text_section',sectionNo:13,
+      fields:[
+        {key:'attendance_links',label:'Attendance Links (one per line)',value:e.attendance_links||'',editable:true,multiline:true,rows:3,
+         placeholder:'Division A: https://erp.college.edu/attendance/divA\nDivision B: https://erp.college.edu/attendance/divB'},
+      ]
+    });
+
+    // Any custom pages
+    const customAtts=a.filter(x=>!x.section_no);
+    if(customAtts.length){
+      pages.push({id:'custom',title:'Dept. Uploads',type:'uploads_section',
+        attachments:customAtts,
+      });
+    }
+
+    return pages;
+  },[course,extra,attachments]);
+
+  // ── Save + Generate ────────────────────────────────────────────────────────
   const saveExtra=async()=>{
     if(!course){setErr('Select a course first.');return;}
-    setSaving(true);setErr('');setOk('');
+    setSaving(true);setErr('');
     try{
-      const r=await fetch(API+'/course-file/extra/'+course.id,{
-        method:'POST',headers:hdr(),body:JSON.stringify(extra)
-      });
+      const r=await fetch(API+'/course-file/extra/'+course.id,{method:'POST',headers:hdr(),body:JSON.stringify(extra)});
       if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
-      setOk('Saved successfully!');setTimeout(()=>setOk(''),3000);
     }catch(e){setErr(e.message);}
     setSaving(false);
   };
 
   const generate=async()=>{
     if(!course){setErr('Select a course first.');return;}
-    // Auto-save extra fields first
     await saveExtra();
     setGenerating(true);setErr('');setOk('');
     try{
       const r=await fetch(API+'/course-file/generate/'+course.id,{method:'POST',headers:hdr()});
       if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
-      const data=await r.json();
-      setGenerated(true);
-      const s=data.data?.sections_with_data||{};
-      const missing=[];
-      if(!s.session_plan) missing.push('Session Plan (go to Session Plan page)');
-      if(!s.evaluation_plan) missing.push('Evaluation Plan (go to Evaluation Plan page)');
-      if(!s.vision_mission) missing.push('Vision & Mission (fill in the Info tab below)');
-      setOk('Course file generated!'+(missing.length?'\n\nNote: These sections have placeholder text — fill them in:\n• '+missing.join('\n• '):''));
+      const pages=buildPages(course,extra,attachments);
+      setDocPages(pages);
+      setActivePage(0);
+      setMode('editor');
+      setChatHistory([{role:'ai',text:`✅ Course file generated for **${course.course_name}**!\n\nYou can now browse all 13 sections using the page thumbnails below, edit any field directly, and I'm here to help. Try:\n• "Update the vision text to..."\n• "Add an activity report for March 15"\n• "What's missing in section 6?"`}]);
     }catch(e){setErr(e.message);}
     setGenerating(false);
   };
 
-  const field=(label,key,multiline,rows=3,placeholder='')=>(
-    <div style={{marginBottom:'1rem'}}>
-      <label style={{display:'block',fontWeight:600,fontSize:'.82rem',marginBottom:4,color:'var(--text)'}}>{label}</label>
-      {multiline
-        ?<textarea value={extra[key]||''} onChange={e=>setExtra(x=>({...x,[key]:e.target.value}))}
-            rows={rows} placeholder={placeholder}
-            style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--border)',
-              fontFamily:'inherit',fontSize:'.85rem',resize:'vertical',boxSizing:'border-box'}}/>
-        :<input type="text" value={extra[key]||''} onChange={e=>setExtra(x=>({...x,[key]:e.target.value}))}
-            placeholder={placeholder}
-            style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--border)',
-              fontSize:'.85rem',boxSizing:'border-box'}}/>
-      }
-    </div>
-  );
+  // Update a field value in docPages and extra simultaneously
+  const updateField=React.useCallback((pageId,fieldKey,value)=>{
+    setDocPages(pages=>pages.map(p=>{
+      if(p.id!==pageId)return p;
+      return {...p,fields:p.fields?.map(f=>f.key===fieldKey?{...f,value}:f)};
+    }));
+    setExtra(e=>({...e,[fieldKey]:value}));
+  },[]);
 
-  const SECTION_NAMES={1:'Vision & Mission',2:'POs/PEOs/PSOs',3:'Syllabus & Timetable',4:'CO Statements',5:'Prev. CO Attainment',6:'Session Plan',7:'Evaluation Plan',8:'Slow/Advanced Learners',9:'CO Attainment',10:'Activity Reports',11:'Learning Material',12:'Question Bank',13:'Attendance'};
+  const addPage=()=>{
+    const newPage={
+      id:'custom_'+Date.now(),
+      title:'Custom Section',
+      type:'custom_editable',
+      editable:true,
+      fields:[{key:'custom_text_'+Date.now(),label:'Content',value:'',editable:true,multiline:true,rows:8,placeholder:'Enter your custom section content here...'}],
+    };
+    setDocPages(p=>[...p,newPage]);
+    setActivePage(docPages.length);
+  };
 
+  const downloadDocx=async()=>{
+    await saveExtra();
+    const r=await fetch(API+'/course-file/download/'+course.id,{headers:{Authorization:'Bearer '+tok()}});
+    if(!r.ok){const d=await r.json().catch(()=>({}));setErr(d.detail||'Download failed');return;}
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download='course_file_'+course.id+'.docx';
+    document.body.appendChild(a);a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  };
+
+  const regenerateDocx=async()=>{
+    setGenerating(true);setErr('');
+    try{
+      await saveExtra();
+      const r=await fetch(API+'/course-file/generate/'+course.id,{method:'POST',headers:hdr()});
+      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
+      setOk('Regenerated!');setTimeout(()=>setOk(''),2000);
+    }catch(e){setErr(e.message);}
+    setGenerating(false);
+  };
+
+  // ── AI Chat ────────────────────────────────────────────────────────────────
+  const sendChat=async()=>{
+    const msg=chatMsg.trim();if(!msg||chatLoading)return;
+    setChatHistory(h=>[...h,{role:'user',text:msg}]);
+    setChatMsg('');setChatLoading(true);
+    const currentPage=docPages[activePage];
+    const context=`You are helping a faculty member edit their OBE Course File for course "${course?.course_name}" (${course?.course_code}).
+Current page: ${currentPage?.title||'Unknown'}.
+The course file has these sections: Vision & Mission, POs/PEOs/PSOs, Syllabus, CO Statements, Prev. Attainment, Session Plan, Eval Plan, Learners, CO Attainment, Activity Reports, Learning Material, Question Bank, Attendance.
+Current extra fields: ${JSON.stringify({...extra},null,0).slice(0,400)}
+User message: ${msg}
+
+Respond helpfully. If the user wants to update a field, provide the updated text clearly. Keep responses concise and actionable.`;
+    try{
+      const r=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:context}]})
+      });
+      const d=await r.json();
+      const reply=d.content?.[0]?.text||'Sorry, I could not respond.';
+      setChatHistory(h=>[...h,{role:'ai',text:reply}]);
+    }catch(e){
+      setChatHistory(h=>[...h,{role:'ai',text:'Network error. Please try again.'}]);
+    }
+    setChatLoading(false);
+  };
+
+  // ── Upload attachment ──────────────────────────────────────────────────────
   const uploadAttachment=async()=>{
     if(!uploadFile||!uploadLabel.trim()){setUploadErr('Please select a file and enter a label.');return;}
     setUploading(true);setUploadErr('');
     const fd=new FormData();
-    fd.append('file',uploadFile);
-    fd.append('label',uploadLabel);
-    if(uploadSection) fd.append('section_no',uploadSection);
+    fd.append('file',uploadFile);fd.append('label',uploadLabel);
+    if(uploadSection)fd.append('section_no',uploadSection);
     try{
-      const r=await fetch(API+'/course-file/upload/'+course.id,{method:'POST',headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')},body:fd});
+      const r=await fetch(API+'/course-file/upload/'+course.id,{method:'POST',headers:{Authorization:'Bearer '+tok()},body:fd});
       if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
       setUploadLabel('');setUploadSection('');setUploadFile(null);
-      document.getElementById('cfUploadInput').value='';
+      const inp=document.getElementById('cfUploadInput');if(inp)inp.value='';
       loadAttachments();
     }catch(e){setUploadErr(e.message);}
     setUploading(false);
   };
 
   const deleteAttachment=async(id)=>{
-    if(!confirm('Delete this attachment?')) return;
-    await fetch(API+'/course-file/attachment/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+    if(!confirm('Delete this attachment?'))return;
+    await fetch(API+'/course-file/attachment/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+tok()}});
     loadAttachments();
   };
 
-  const downloadAttachment=async(id,filename)=>{
-    const r=await fetch(API+'/course-file/attachment/'+id+'/download',{headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
-    if(!r.ok) return;
-    const blob=await r.blob();
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();
-    setTimeout(()=>{URL.revokeObjectURL(url);document.body.removeChild(a);},1000);
-  };
+  const SECTION_NAMES={1:'Vision & Mission',2:'POs/PEOs/PSOs',3:'Syllabus & Timetable',4:'CO Statements',5:'Prev. CO Attainment',6:'Session Plan',7:'Evaluation Plan',8:'Slow/Advanced Learners',9:'CO Attainment',10:'Activity Reports',11:'Learning Material',12:'Question Bank',13:'Attendance'};
 
-  const tabs=[
-    {k:'info',label:'📋 Course Info'},
-    {k:'vision',label:'🎯 Vision & Mission'},
-    {k:'previous',label:'📊 Prev. Attainment'},
-    {k:'learners',label:'👥 Learners'},
-    {k:'misc',label:'🔗 Links & Activities'},
-    {k:'uploads',label:'📎 Dept. Uploads'},
-  ];
+  // ── Page renderers ─────────────────────────────────────────────────────────
+  const renderPage=(page,idx)=>{
+    if(!page)return null;
+    const pageStyle={
+      background:'#fff',width:'100%',minHeight:'100%',
+      padding:'48px 56px',boxSizing:'border-box',
+      fontFamily:"'Georgia', serif",color:'#111',
+      boxShadow:'0 2px 20px rgba(0,0,0,0.08)',
+      borderRadius:4,
+    };
+    const h1Style={fontSize:'22px',fontWeight:700,color:'#1f3864',marginBottom:8,borderBottom:'2px solid #1f3864',paddingBottom:6,fontFamily:"'Georgia',serif"};
+    const h2Style={fontSize:'14px',fontWeight:700,color:'#1f3864',marginTop:16,marginBottom:6,fontFamily:"'Georgia',serif"};
+    const bodyStyle={fontSize:'11px',lineHeight:1.6,fontFamily:"'Georgia',serif"};
+    const tblStyle={width:'100%',borderCollapse:'collapse',fontSize:'10px',marginTop:8};
+    const thStyle={background:'#1f3864',color:'#fff',padding:'6px 8px',textAlign:'left',fontWeight:700,fontSize:'10px'};
+    const tdStyle={padding:'5px 8px',borderBottom:'1px solid #dde3ec',verticalAlign:'top'};
+    const tdAltStyle={...tdStyle,background:'#eef1f6'};
+    const editableStyle={
+      width:'100%',padding:'4px 6px',border:'1.5px solid #3b82f6',
+      borderRadius:3,fontSize:'11px',fontFamily:"'Georgia',serif",
+      background:'#eff6ff',resize:'vertical',outline:'none',lineHeight:1.6,
+      boxSizing:'border-box',
+    };
 
-  const tabContent={
-    info:<div>
-      <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>
-        Basic info pulled from the course setup. The batch field is the only new one — add it here.
-      </p>
-      {field('Batch (e.g. 2024-28)','batch',false,1,'e.g. 2024-28')}
-      <div style={{background:'var(--card-bg)',padding:'1rem',borderRadius:8,fontSize:'.82rem',marginTop:'1rem'}}>
-        <div><strong>Auto-populated from course data:</strong></div>
-        <div style={{marginTop:'.5rem',color:'var(--muted)'}}>
-          Department: {course?.department||'—'} &nbsp;|&nbsp;
-          Course: {course?.course_name} ({course?.course_code}) &nbsp;|&nbsp;
-          Semester: {course?.semester} &nbsp;|&nbsp;
-          Faculty: {course?.faculty_name}
+    if(page.type==='cover')return(
+      <div style={pageStyle}>
+        <div style={{textAlign:'center',paddingTop:60}}>
+          <div style={{fontSize:'13px',fontWeight:600,color:'#555',marginBottom:8,letterSpacing:1,textTransform:'uppercase'}}>Symbiosis Institute of Technology</div>
+          <div style={{fontSize:'13px',color:'#555',marginBottom:24}}>Department of {page.content.department||'—'}</div>
+          <div style={{fontSize:'26px',fontWeight:700,color:'#1f3864',lineHeight:1.3,marginBottom:12}}>{page.content.course_name||'Course Name'}</div>
+          <div style={{fontSize:'16px',color:'#444',marginBottom:6}}>({page.content.course_code||'Code'})</div>
+          <div style={{width:60,height:3,background:'#1f3864',margin:'16px auto'}}/>
+          <div style={{fontSize:'13px',color:'#555',marginBottom:4}}>Course File</div>
+          <div style={{fontSize:'13px',color:'#555',marginBottom:4}}>A.Y {page.content.academic_year||'—'}  |  {page.content.semester||'—'} Semester</div>
+          {page.content.batch&&<div style={{fontSize:'13px',color:'#555',marginBottom:4}}>Batch {page.content.batch}</div>}
+          <div style={{fontSize:'13px',color:'#555',marginTop:8}}>Faculty: {page.content.faculty_name||'—'}</div>
         </div>
       </div>
-    </div>,
-    vision:<div>
-      <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>
-        Department-specific. Changes per department — fill in your department's vision & mission here.
-      </p>
-      {field('Vision of the Department','vision_text',true,4,'To impart quality education...')}
-      {field('Mission (one mission point per line, e.g. M1: ..., M2: ...)','mission_text',true,6,'M1: To educate students on cutting-edge technologies...\nM2: To produce quality research...\nM3: To inculcate professional values...')}
-    </div>,
-    previous:<div>
-      <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>
-        Section 5 of the course file — summary of last year's CO attainment and the action plan taken.
-      </p>
-      {field('Previous Year CO Attainment Summary','prev_co_attainment',true,5,
-        'AY 2024-25: CO1 attainment = 2.8, CO2 = 2.1, ...')}
-      {field('Action Plan','action_plan',true,4,
-        'The attainment was higher than set targets. Plan: increase difficulty of CA3...')}
-    </div>,
-    learners:<div>
-      <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>
-        Slow and advanced learners are auto-detected from CA marks (below 40% = slow, above 75% = advanced).
-        You can override them here if needed.
-      </p>
-      {field('Slow Learners (auto-detected from marks, or override here)','slow_learners',true,4,
-        'Leave blank to auto-detect from CA marks...')}
-      {field('Advanced Learners','advanced_learners',true,4,
-        'Leave blank to auto-detect from CA marks...')}
-    </div>,
-    misc:<div>
-      {field('Learning Material Links (one per line)','learning_material_links',true,4,
-        'https://lms.example.edu/mod/folder/...\nhttps://nptel.ac.in/...')}
-      {field('Attendance Links (one per line)','attendance_links',true,3,
-        'Division A: https://lms.example.edu/attendance/...\nDivision B: https://lms.example.edu/attendance/...')}
-      {field('Activity Reports','activity_reports',true,5,
-        'Guest Lecture by Dr. X on Topic Y — 10 Feb 2025\nKaggle Competition conducted — 15 Apr 2025...')}
-    </div>,
-    uploads:<div>
-      <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1.2rem'}}>
-        Upload department-specific files — timetables, event photos, email announcements, activity reports, etc.
-        These are stored with your course file and referenced in the generated docx.
-      </p>
-      {/* Upload form */}
-      <div style={{background:'var(--bg)',border:'2px dashed var(--border)',borderRadius:10,padding:'1.2rem',marginBottom:'1.5rem'}}>
-        <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'0.8rem'}}>📤 Upload New File</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0.7rem',marginBottom:'0.7rem'}}>
-          <div>
-            <label style={{display:'block',fontWeight:600,fontSize:'.8rem',marginBottom:3}}>Label *</label>
-            <input value={uploadLabel} onChange={e=>setUploadLabel(e.target.value)} placeholder="e.g. Faculty Timetable, Event Photos, Doubt Session Email"
-              style={{width:'100%',padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:'.85rem',boxSizing:'border-box'}}/>
+    );
+
+    if(page.type==='text_section')return(
+      <div style={pageStyle}>
+        <div style={h1Style}>{page.title}</div>
+        {(page.fields||[]).map((f,fi)=>(
+          <div key={fi} style={{marginBottom:16}}>
+            {f.bold
+              ?<div style={{...h2Style,marginTop:fi===0?8:16}}>{f.value}</div>
+              :<>
+                <div style={{fontSize:'11px',fontWeight:700,color:'#374151',marginBottom:4}}>{f.label}</div>
+                {f.editable
+                  ?(f.multiline
+                    ?<textarea value={f.value||''} rows={f.rows||3}
+                        onChange={e=>updateField(page.id,f.key,e.target.value)}
+                        placeholder={f.placeholder||''}
+                        style={editableStyle}/>
+                    :<input value={f.value||''} onChange={e=>updateField(page.id,f.key,e.target.value)}
+                        placeholder={f.placeholder||''} style={{...editableStyle,resize:'none'}}/>
+                  ):<div style={{...bodyStyle,padding:'6px 8px',background:'#f9fafb',borderRadius:3,border:'1px solid #e5e7eb'}}>{f.value||<span style={{color:'#9ca3af'}}>{f.placeholder}</span>}</div>
+                }
+              </>
+            }
           </div>
-          <div>
-            <label style={{display:'block',fontWeight:600,fontSize:'.8rem',marginBottom:3}}>Section (optional)</label>
-            <select value={uploadSection} onChange={e=>setUploadSection(e.target.value)}
-              style={{width:'100%',padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:'.85rem',background:'var(--card-bg)',color:'var(--text)'}}>
-              <option value="">— No specific section —</option>
-              {Object.entries(SECTION_NAMES).map(([n,name])=>(<option key={n} value={n}>{n}. {name}</option>))}
-            </select>
-          </div>
-        </div>
-        <div style={{marginBottom:'0.7rem'}}>
-          <label style={{display:'block',fontWeight:600,fontSize:'.8rem',marginBottom:3}}>File * (max 50 MB)</label>
-          <input id="cfUploadInput" type="file" onChange={e=>setUploadFile(e.target.files[0])}
-            style={{fontSize:'.85rem',width:'100%'}}/>
-        </div>
-        {uploadErr&&<div style={{color:'#b91c1c',fontSize:'.82rem',marginBottom:'0.5rem'}}>{uploadErr}</div>}
-        <button onClick={uploadAttachment} disabled={uploading}
-          style={{padding:'0.5rem 1.2rem',background:'var(--blue2)',color:'#fff',border:'none',borderRadius:7,cursor:'pointer',fontWeight:700,fontSize:'.85rem'}}>
-          {uploading?'Uploading…':'⬆ Upload File'}
-        </button>
-      </div>
-      {/* Attachments list */}
-      {attachments.length===0
-        ?<div style={{textAlign:'center',padding:'2rem',color:'var(--muted)',fontSize:'.85rem'}}>No files uploaded yet. Upload department-specific content above.</div>
-        :<div>
-          <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'0.7rem'}}>📁 Uploaded Files ({attachments.length})</div>
-          {Object.entries(
-            attachments.reduce((acc,a)=>{const k=a.section_no?`${a.section_no}. ${SECTION_NAMES[a.section_no]||'Section '+a.section_no}`:'General';(acc[k]=acc[k]||[]).push(a);return acc;},{})
-          ).map(([group,files])=>(
-            <div key={group} style={{marginBottom:'1rem'}}>
-              <div style={{fontSize:'.8rem',fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'0.4rem'}}>{group}</div>
-              {files.map(a=>(
-                <div key={a.id} style={{display:'flex',alignItems:'center',gap:'0.7rem',padding:'0.6rem 0.8rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)',marginBottom:6}}>
-                  <span style={{fontSize:'1.1rem'}}>{a.mime_type?.startsWith('image/')?'🖼':a.mime_type?.includes('pdf')?'📄':a.mime_type?.includes('word')||a.mime_type?.includes('docx')?'📝':'📎'}</span>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:600,fontSize:'.84rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.label}</div>
-                    <div style={{fontSize:'.75rem',color:'var(--muted)'}}>{a.filename} · {a.file_size?(a.file_size/1024<1024?(a.file_size/1024).toFixed(1)+' KB':((a.file_size/1024/1024).toFixed(1)+' MB')):'—'}</div>
-                  </div>
-                  <button onClick={()=>downloadAttachment(a.id,a.filename)}
-                    style={{padding:'4px 10px',background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:6,cursor:'pointer',fontSize:'.78rem',fontWeight:600}}>⬇ View</button>
-                  <button onClick={()=>deleteAttachment(a.id)}
-                    style={{padding:'4px 8px',background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,cursor:'pointer',fontSize:'.78rem',color:'#b91c1c',fontWeight:600}}>✕</button>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      }
-    </div>,
-  };
-
-  if(!course) return(
-    <div className="empty-state">
-      <div className="empty-state-icon">📁</div>
-      <div className="empty-state-title">No course selected</div>
-      <div className="empty-state-desc">Select a course from the dropdown to generate its course file.</div>
-    </div>
-  );
-
-  return(
-    <div style={{maxWidth:860,margin:'0 auto',padding:'1rem'}}>
-      {/* Header + Generate button */}
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'1.5rem',gap:'1rem',flexWrap:'wrap'}}>
-        <div>
-          <div style={{fontWeight:700,fontSize:'1.1rem',marginBottom:4}}>Full Course File Generator</div>
-          <div style={{fontSize:'.83rem',color:'var(--muted)'}}>
-            Generates all 13 sections of the OBE course file as a Word document.
-            Fill in the details below, then click Generate.
-          </div>
-        </div>
-        <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap'}}>
-          <button onClick={saveExtra} disabled={saving}
-            style={{padding:'0.55rem 1.2rem',background:'var(--card-bg)',color:'var(--text)',
-              border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',fontWeight:600,fontSize:'.85rem'}}>
-            {saving?'Saving…':'💾 Save'}
-          </button>
-          <button onClick={generate} disabled={generating}
-            style={{padding:'0.55rem 1.4rem',background:'var(--blue2)',color:'#fff',
-              border:'none',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:'.9rem'}}>
-            {generating?<span>⏳ Generating…</span>:<span>⚡ Generate Course File</span>}
-          </button>
-          {generated&&<button onClick={async()=>{
-              const r=await fetch(API+'/course-file/download/'+course.id,{headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
-              if(!r.ok){const d=await r.json().catch(()=>({}));setErr(d.detail||'Download failed');return;}
-              const blob=await r.blob();
-              const url=URL.createObjectURL(blob);
-              const a=document.createElement('a');a.href=url;a.download='course_file_'+course.id+'.docx';
-              document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);document.body.removeChild(a);},1000);
-            }}
-            style={{padding:'0.55rem 1.2rem',background:'#16a34a',color:'#fff',
-              border:'none',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:'.9rem'}}>
-            ⬇ Download .docx
-          </button>}
-        </div>
-      </div>
-
-      {err&&<div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'0.75rem 1rem',marginBottom:'1rem',color:'#b91c1c',fontSize:'.85rem',whiteSpace:'pre-wrap'}}>{err}</div>}
-      {ok&&<div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'0.75rem 1rem',marginBottom:'1rem',color:'#166534',fontSize:'.85rem',whiteSpace:'pre-wrap'}}>{ok}</div>}
-
-      {/* Data completeness checklist */}
-      <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem 1.2rem',marginBottom:'1.5rem'}}>
-        <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'.6rem'}}>Auto-populated sections (no action needed)</div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'.4rem .8rem',fontSize:'.82rem'}}>
-          {[
-            {label:'Student List',ok:true,note:'from Students Roster'},
-            {label:'CO Statements & CO-PO Matrix',ok:true,note:'from Course Setup'},
-            {label:'Session Plan',ok:!!course,note:'from Session Plan page'},
-            {label:'Evaluation Plan',ok:!!course,note:'from Evaluation Plan page'},
-            {label:'CA Marks',ok:!!course,note:'from Master Attainment File'},
-            {label:'Question Bank',ok:!!course,note:'from Question Bank page'},
-            {label:'CO Attainment',ok:!!course,note:'auto-calculated from marks'},
-            {label:'Slow/Advanced Learners',ok:!!course,note:'auto-detected from marks'},
-          ].map(item=>(
-            <div key={item.label} style={{display:'flex',alignItems:'center',gap:6,color:'var(--text)'}}>
-              <span style={{color:item.ok?'#16a34a':'#dc2626',fontWeight:700}}>{item.ok?'✓':'○'}</span>
-              <span>{item.label}</span>
-              <span style={{color:'var(--muted)',fontSize:'.78rem'}}>({item.note})</span>
-            </div>
-          ))}
-        </div>
-        <div style={{marginTop:'.6rem',fontSize:'.8rem',color:'var(--muted)'}}>
-          ↓ Fill in the tabs below for the remaining sections:
-        </div>
-      </div>
-
-      {/* Tab navigation */}
-      <div style={{display:'flex',gap:4,borderBottom:'2px solid var(--border)',marginBottom:'1.2rem',overflowX:'auto'}}>
-        {tabs.map(t=>(
-          <button key={t.k} onClick={()=>setActiveSection(t.k)}
-            style={{padding:'0.5rem 0.9rem',background:'none',border:'none',cursor:'pointer',
-              fontWeight:activeSection===t.k?700:400,
-              color:activeSection===t.k?'var(--blue2)':'var(--muted)',
-              borderBottom:activeSection===t.k?'2px solid var(--blue2)':'2px solid transparent',
-              marginBottom:-2,whiteSpace:'nowrap',fontSize:'.85rem'}}>
-            {t.label}
-          </button>
         ))}
       </div>
+    );
 
-      {/* Tab content */}
-      <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1.2rem'}}>
-        {loading?<div style={{textAlign:'center',padding:'2rem',color:'var(--muted)'}}>Loading saved data…</div>
-          :tabContent[activeSection]}
+    if(page.type==='po_section')return(
+      <div style={pageStyle}>
+        <div style={h1Style}>{page.title}</div>
+        <div style={h2Style}>Program Outcomes (POs)</div>
+        <table style={tblStyle}><thead><tr><th style={{...thStyle,width:'12%'}}>PO</th><th style={thStyle}>Statement</th></tr></thead>
+          <tbody>{(page.poRows||[]).map((r,i)=><tr key={i}><td style={i%2?tdAltStyle:tdStyle}><b>{r[0]}</b></td><td style={i%2?tdAltStyle:tdStyle}>{r[1]}</td></tr>)}</tbody>
+        </table>
+        <div style={h2Style}>Program Educational Objectives (PEOs)</div>
+        {(page.peos||[]).map((r,i)=><div key={i} style={{...bodyStyle,marginBottom:4}}><b>{r[0]}:</b> {r[1]}</div>)}
+        <div style={h2Style}>Program Specific Outcomes (PSOs)</div>
+        <table style={tblStyle}><thead><tr><th style={{...thStyle,width:'12%'}}>PSO</th><th style={thStyle}>Statement</th></tr></thead>
+          <tbody>{(page.psos||[]).map((r,i)=><tr key={i}><td style={i%2?tdAltStyle:tdStyle}><b>{r[0]}</b></td><td style={i%2?tdAltStyle:tdStyle}>{r[1]}</td></tr>)}</tbody>
+        </table>
+      </div>
+    );
+
+    if(page.type==='co_section')return(
+      <div style={pageStyle}>
+        <div style={h1Style}>{page.title}</div>
+        <div style={h2Style}>CO Statements</div>
+        <table style={tblStyle}><thead><tr><th style={{...thStyle,width:'10%'}}>CO</th><th style={thStyle}>Statement</th><th style={{...thStyle,width:'14%'}}>Bloom's Level</th></tr></thead>
+          <tbody>{(page.cos||[]).map((c,i)=><tr key={i}><td style={i%2?tdAltStyle:tdStyle}><b>{c.co_id}</b></td><td style={i%2?tdAltStyle:tdStyle}>{c.statement}</td><td style={i%2?tdAltStyle:tdStyle}>{c.bloom_level}</td></tr>)}</tbody>
+        </table>
+        <div style={h2Style}>CO-PO Mapping</div>
+        {page.cos?.length&&page.pos?.length?(
+          <div style={{overflowX:'auto'}}>
+            <table style={{...tblStyle,tableLayout:'fixed'}}>
+              <thead><tr><th style={{...thStyle,width:'8%'}}>CO</th>{page.pos.map(p=><th key={p} style={{...thStyle,width:`${92/page.pos.length}%`,fontSize:'9px',textAlign:'center'}}>{p}</th>)}</tr></thead>
+              <tbody>{page.cos.map((c,i)=><tr key={i}><td style={i%2?{...tdAltStyle,fontWeight:700}:{...tdStyle,fontWeight:700}}>{c.co_id}</td>
+                {page.pos.map(p=>{const v=(page.coPoMatrix[c.co_id]||{})[p]||'-';return<td key={p} style={{...(i%2?tdAltStyle:tdStyle),textAlign:'center',color:v!=='-'?'#1f3864':'#9ca3af',fontWeight:v!=='-'?700:400}}>{v}</td>;})}
+              </tr>)}</tbody>
+            </table>
+          </div>
+        ):<div style={{...bodyStyle,color:'#9ca3af'}}>CO-PO matrix not configured yet.</div>}
+      </div>
+    );
+
+    if(page.type==='syllabus_section')return(
+      <div style={pageStyle}>
+        <div style={h1Style}>{page.title}</div>
+        <div style={h2Style}>Syllabus</div>
+        <div style={{...bodyStyle,color:'#6b7280',background:'#f0f9ff',border:'1px solid #bae6fd',padding:'10px 14px',borderRadius:4}}>
+          Syllabus is auto-extracted from the Session Plan. Go to the <b>Session Plan</b> page to generate it first.
+        </div>
+        <div style={h2Style}>Personal Timetable</div>
+        {page.timetableAttachments&&page.timetableAttachments.length>0
+          ?page.timetableAttachments.map(a=><div key={a.id} style={{...bodyStyle,padding:'6px 10px',background:'#f0fdf4',border:'1px solid #86efac',borderRadius:4,marginBottom:4}}>📎 {a.label} ({a.filename})</div>)
+          :<div style={{...bodyStyle,color:'#6b7280',background:'#fafafa',border:'1px solid #e5e7eb',padding:'10px 14px',borderRadius:4}}>No timetable uploaded yet. Use the <b>Dept. Uploads</b> tab and tag it to Section 3.</div>
+        }
+        <div style={h2Style}>List of Students</div>
+        <div style={{...bodyStyle,color:'#6b7280',background:'#f0f9ff',border:'1px solid #bae6fd',padding:'10px 14px',borderRadius:4}}>
+          Student list is auto-populated from the Students Roster.
+        </div>
+      </div>
+    );
+
+    if(page.type==='auto_section')return(
+      <div style={pageStyle}>
+        <div style={h1Style}>{page.title}</div>
+        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:6,padding:'16px 20px',marginTop:16}}>
+          <div style={{fontSize:'13px',fontWeight:600,color:'#1d4ed8',marginBottom:6}}>⚡ Auto-populated</div>
+          <div style={{...bodyStyle,color:'#374151'}}>{page.message}</div>
+        </div>
+      </div>
+    );
+
+    if(page.type==='uploads_section')return(
+      <div style={pageStyle}>
+        <div style={h1Style}>Department Uploads</div>
+        {(page.attachments||[]).map(a=>(
+          <div key={a.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:6,marginBottom:6}}>
+            <span style={{fontSize:'18px'}}>{a.mime_type?.startsWith('image/')?'🖼':a.mime_type?.includes('pdf')?'📄':'📎'}</span>
+            <div style={{flex:1}}><div style={{fontSize:'12px',fontWeight:600}}>{a.label}</div><div style={{fontSize:'10px',color:'#6b7280'}}>{a.filename}</div></div>
+            <button onClick={()=>deleteAttachment(a.id)} style={{padding:'2px 8px',fontSize:'10px',color:'#ef4444',background:'none',border:'1px solid #fca5a5',borderRadius:4,cursor:'pointer'}}>✕</button>
+          </div>
+        ))}
+        {(page.attachments||[]).length===0&&<div style={{...bodyStyle,color:'#9ca3af'}}>No general uploads yet.</div>}
+      </div>
+    );
+
+    if(page.type==='custom_editable')return(
+      <div style={pageStyle}>
+        <input value={page.title} onChange={e=>setDocPages(ps=>ps.map((p,i)=>i===idx?{...p,title:e.target.value}:p))}
+          style={{fontSize:'20px',fontWeight:700,color:'#1f3864',border:'none',borderBottom:'2px solid #1f3864',width:'100%',paddingBottom:6,marginBottom:12,outline:'none',fontFamily:"'Georgia',serif",background:'transparent'}}/>
+        {(page.fields||[]).map((f,fi)=>(
+          <div key={fi}>
+            <textarea value={f.value||''} rows={f.rows||8} placeholder={f.placeholder||'Enter content...'}
+              onChange={e=>setDocPages(ps=>ps.map((p,pi)=>pi===idx?{...p,fields:p.fields.map((ff,ffi)=>ffi===fi?{...ff,value:e.target.value}:ff)}:p))}
+              style={{width:'100%',padding:'8px',border:'1.5px solid #3b82f6',borderRadius:4,fontSize:'11px',fontFamily:"'Georgia',serif",resize:'vertical',background:'#eff6ff',lineHeight:1.6,boxSizing:'border-box'}}/>
+          </div>
+        ))}
+      </div>
+    );
+
+    return <div style={pageStyle}><div style={h1Style}>{page.title}</div></div>;
+  };
+
+  // Thumbnail renderer (mini scaled version)
+  const renderThumbnail=(page,idx)=>{
+    const isActive=idx===activePage;
+    return(
+      <div key={page.id} onClick={()=>setActivePage(idx)}
+        style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,cursor:'pointer',minWidth:72,flexShrink:0}}>
+        <div style={{
+          width:64,height:82,background:'#fff',border:`2px solid ${isActive?'#3b82f6':'#d1d5db'}`,
+          borderRadius:3,overflow:'hidden',position:'relative',
+          boxShadow:isActive?'0 0 0 2px #93c5fd':'0 1px 3px rgba(0,0,0,0.12)',
+          transition:'all .15s',
+        }}>
+          {/* Mini page preview */}
+          <div style={{position:'absolute',top:0,left:0,width:'100%',height:'100%',transform:'scale(0.18)',transformOrigin:'top left',width:'355%',height:'555%',pointerEvents:'none',overflow:'hidden'}}>
+            {renderPage(page,idx)}
+          </div>
+        </div>
+        <div style={{fontSize:'9px',color:isActive?'#2563eb':'#6b7280',fontWeight:isActive?700:400,textAlign:'center',maxWidth:72,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',lineHeight:1.2}}>
+          {page.title}
+        </div>
+      </div>
+    );
+  };
+
+  // ── SETUP MODE ─────────────────────────────────────────────────────────────
+  if(mode==='setup'){
+    const field=(label,key,multiline,rows=3,placeholder='')=>(
+      <div style={{marginBottom:'1rem'}}>
+        <label style={{display:'block',fontWeight:600,fontSize:'.82rem',marginBottom:4,color:'var(--text)'}}>{label}</label>
+        {multiline
+          ?<textarea value={extra[key]||''} onChange={e=>setExtra(x=>({...x,[key]:e.target.value}))}
+              rows={rows} placeholder={placeholder}
+              style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--border)',fontFamily:'inherit',fontSize:'.85rem',resize:'vertical',boxSizing:'border-box'}}/>
+          :<input type="text" value={extra[key]||''} onChange={e=>setExtra(x=>({...x,[key]:e.target.value}))}
+              placeholder={placeholder}
+              style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--border)',fontSize:'.85rem',boxSizing:'border-box'}}/>
+        }
+      </div>
+    );
+
+    const setupTabs=[
+      {k:'info',label:'📋 Course Info'},
+      {k:'vision',label:'🎯 Vision & Mission'},
+      {k:'previous',label:'📊 Prev. Attainment'},
+      {k:'learners',label:'👥 Learners'},
+      {k:'misc',label:'🔗 Links & Activities'},
+      {k:'uploads',label:'📎 Dept. Uploads'},
+    ];
+
+    const setupTabContent={
+      info:<div>
+        <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>Add the batch year — everything else is auto-populated from course setup.</p>
+        {field('Batch (e.g. 2024-28)','batch',false,1,'e.g. 2024-28')}
+        <div style={{background:'var(--card-bg)',padding:'1rem',borderRadius:8,fontSize:'.82rem',marginTop:'1rem',border:'1px solid var(--border)'}}>
+          <b>Auto-populated:</b> <span style={{color:'var(--muted)'}}>Dept: {course?.department||'—'} | Course: {course?.course_name} ({course?.course_code}) | Semester: {course?.semester} | Faculty: {course?.faculty_name}</span>
+        </div>
+      </div>,
+      vision:<div>
+        {field('Vision of the Department','vision_text',true,4,'To impart quality education with research insights...')}
+        {field('Mission (one point per line, e.g. M1: ..., M2: ...)','mission_text',true,6,'M1: To educate students on cutting-edge AIML...\nM2: To produce quality research...\nM3: To inculcate professional values...')}
+      </div>,
+      previous:<div>
+        {field('Previous Year CO Attainment Summary','prev_co_attainment',true,5,'AY 2024-25: CO1 attainment = 2.8, CO2 = 2.6...')}
+        {field('Action Plan','action_plan',true,4,'Since attainment exceeded targets, plan: increase difficulty of CA3...')}
+      </div>,
+      learners:<div>
+        {field('Slow Learners (leave blank to auto-detect from marks < 40%)','slow_learners',true,4,'')}
+        {field('Advanced Learners (leave blank to auto-detect from marks > 75%)','advanced_learners',true,4,'')}
+      </div>,
+      misc:<div>
+        {field('Learning Material Links (one per line)','learning_material_links',true,4,'https://nptel.ac.in/...\nhttps://swayam.gov.in')}
+        {field('Attendance Links (one per line)','attendance_links',true,3,'Division A: https://erp.college.edu/attendance/divA')}
+        {field('Activity Reports (one per line)','activity_reports',true,5,'Guest Lecture by Dr. X on Topic Y — 12 Feb 2025')}
+      </div>,
+      uploads:<div>
+        <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1.2rem'}}>Upload department-specific files — timetables, event photos, email announcements, etc.</p>
+        <div style={{background:'var(--bg)',border:'2px dashed var(--border)',borderRadius:10,padding:'1.2rem',marginBottom:'1.5rem'}}>
+          <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'0.8rem'}}>📤 Upload New File</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0.7rem',marginBottom:'0.7rem'}}>
+            <div>
+              <label style={{display:'block',fontWeight:600,fontSize:'.8rem',marginBottom:3}}>Label *</label>
+              <input value={uploadLabel} onChange={e=>setUploadLabel(e.target.value)} placeholder="e.g. Faculty Timetable"
+                style={{width:'100%',padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:'.85rem',boxSizing:'border-box'}}/>
+            </div>
+            <div>
+              <label style={{display:'block',fontWeight:600,fontSize:'.8rem',marginBottom:3}}>Section (optional)</label>
+              <select value={uploadSection} onChange={e=>setUploadSection(e.target.value)}
+                style={{width:'100%',padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:'.85rem',background:'var(--card-bg)',color:'var(--text)'}}>
+                <option value="">— No specific section —</option>
+                {Object.entries(SECTION_NAMES).map(([n,name])=>(<option key={n} value={n}>{n}. {name}</option>))}
+              </select>
+            </div>
+          </div>
+          <input id="cfUploadInput" type="file" onChange={e=>setUploadFile(e.target.files[0])} style={{fontSize:'.85rem',marginBottom:'0.7rem'}}/>
+          {uploadErr&&<div style={{color:'#b91c1c',fontSize:'.82rem',marginBottom:'0.5rem'}}>{uploadErr}</div>}
+          <button onClick={uploadAttachment} disabled={uploading}
+            style={{padding:'0.5rem 1.2rem',background:'var(--blue2)',color:'#fff',border:'none',borderRadius:7,cursor:'pointer',fontWeight:700,fontSize:'.85rem'}}>
+            {uploading?'Uploading…':'⬆ Upload File'}
+          </button>
+        </div>
+        {attachments.length>0&&<div>
+          <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'0.7rem'}}>📁 Uploaded ({attachments.length})</div>
+          {attachments.map(a=>(
+            <div key={a.id} style={{display:'flex',alignItems:'center',gap:'0.7rem',padding:'0.6rem 0.8rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)',marginBottom:6}}>
+              <span style={{fontSize:'1.1rem'}}>{a.mime_type?.startsWith('image/')?'🖼':a.mime_type?.includes('pdf')?'📄':'📎'}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:600,fontSize:'.84rem'}}>{a.label}</div>
+                <div style={{fontSize:'.75rem',color:'var(--muted)'}}>{a.filename}</div>
+              </div>
+              <button onClick={()=>deleteAttachment(a.id)} style={{padding:'4px 8px',background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,cursor:'pointer',fontSize:'.78rem',color:'#b91c1c',fontWeight:600}}>✕</button>
+            </div>
+          ))}
+        </div>}
+      </div>,
+    };
+
+    return(
+      <div style={{maxWidth:900,margin:'0 auto',padding:'0 0 3rem'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.5rem',flexWrap:'wrap',gap:'0.5rem'}}>
+          <div>
+            <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--text)'}}>📄 Full Course File Generator</div>
+            <div style={{fontSize:'.85rem',color:'var(--muted)',marginTop:2}}>Fill in the details below, then click Generate to open the live editor.</div>
+          </div>
+          <div style={{display:'flex',gap:'0.5rem'}}>
+            <button onClick={saveExtra} disabled={saving} style={{padding:'0.55rem 1.2rem',background:'var(--card-bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',fontWeight:600,fontSize:'.85rem'}}>
+              {saving?'Saving…':'💾 Save'}
+            </button>
+            <button onClick={generate} disabled={generating||!course}
+              style={{padding:'0.6rem 1.6rem',background:generating?'var(--muted)':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:generating?'not-allowed':'pointer',fontWeight:800,fontSize:'.95rem',display:'flex',alignItems:'center',gap:6}}>
+              {generating?'⏳ Generating…':'⚡ Generate & Open Editor'}
+            </button>
+          </div>
+        </div>
+
+        {err&&<div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'0.75rem 1rem',marginBottom:'1rem',color:'#b91c1c',fontSize:'.85rem'}}>{err}</div>}
+
+        {/* Checklist */}
+        <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem 1.2rem',marginBottom:'1.5rem'}}>
+          <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'.6rem'}}>Auto-populated sections (no action needed)</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'.4rem .8rem',fontSize:'.82rem'}}>
+            {[{label:'Student List',note:'from Students Roster'},{label:'CO Statements & CO-PO Matrix',note:'from Course Setup'},{label:'Session Plan',note:'from Session Plan page'},{label:'Evaluation Plan',note:'from Evaluation Plan page'},{label:'CA Marks',note:'from Master Attainment File'},{label:'Question Bank',note:'from Question Bank page'},{label:'CO Attainment',note:'auto-calculated'},{label:'Slow/Advanced Learners',note:'auto-detected'},].map(item=>(
+              <div key={item.label} style={{display:'flex',alignItems:'center',gap:6}}>
+                <span style={{color:'#16a34a',fontWeight:700}}>✓</span><span>{item.label}</span><span style={{color:'var(--muted)',fontSize:'.78rem'}}>({item.note})</span>
+              </div>
+            ))}
+          </div>
+          <div style={{marginTop:'.6rem',fontSize:'.8rem',color:'var(--muted)'}}>↓ Fill in the tabs below for the remaining sections:</div>
+        </div>
+
+        {/* Setup tabs */}
+        <div style={{display:'flex',gap:4,borderBottom:'2px solid var(--border)',marginBottom:'1.2rem',overflowX:'auto'}}>
+          {setupTabs.map(t=>(
+            <button key={t.k} onClick={()=>setActiveSetupTab(t.k)}
+              style={{padding:'0.5rem 0.9rem',background:'none',border:'none',cursor:'pointer',fontWeight:activeSetupTab===t.k?700:400,color:activeSetupTab===t.k?'var(--blue2)':'var(--muted)',borderBottom:activeSetupTab===t.k?'2px solid var(--blue2)':'2px solid transparent',marginBottom:-2,whiteSpace:'nowrap',fontSize:'.85rem'}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1.2rem'}}>
+          {loading?<div style={{textAlign:'center',padding:'2rem',color:'var(--muted)'}}>Loading saved data…</div>:setupTabContent[activeSetupTab]}
+        </div>
+      </div>
+    );
+  }
+
+  // ── EDITOR MODE ────────────────────────────────────────────────────────────
+  const currentPage=docPages[activePage];
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',height:'calc(100vh - 64px)',overflow:'hidden',background:'#f1f5f9'}}>
+
+      {/* Top toolbar — Word-style */}
+      <div style={{background:'#1e3a5f',color:'#fff',padding:'0 16px',display:'flex',alignItems:'center',gap:12,height:44,flexShrink:0,boxShadow:'0 2px 8px rgba(0,0,0,0.2)'}}>
+        <button onClick={()=>setMode('setup')} style={{background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',padding:'4px 10px',borderRadius:4,cursor:'pointer',fontSize:'12px',display:'flex',alignItems:'center',gap:4}}>
+          ← Setup
+        </button>
+        <div style={{width:1,height:24,background:'rgba(255,255,255,0.2)'}}/>
+        <div style={{fontSize:'13px',fontWeight:700,flex:1,opacity:0.9}}>{course?.course_name} — Course File</div>
+        <div style={{display:'flex',gap:6}}>
+          <button onClick={addPage} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'#fff',padding:'4px 12px',borderRadius:4,cursor:'pointer',fontSize:'12px',fontWeight:600}}>
+            + Add Page
+          </button>
+          <button onClick={regenerateDocx} disabled={generating} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'#fff',padding:'4px 12px',borderRadius:4,cursor:'pointer',fontSize:'12px',fontWeight:600}}>
+            {generating?'⏳ Regenerating…':'🔄 Regenerate .docx'}
+          </button>
+          <button onClick={downloadDocx} style={{background:'#22c55e',border:'none',color:'#fff',padding:'4px 14px',borderRadius:4,cursor:'pointer',fontSize:'12px',fontWeight:700}}>
+            ⬇ Download .docx
+          </button>
+        </div>
+        {ok&&<div style={{fontSize:'11px',color:'#86efac',marginLeft:8}}>{ok}</div>}
+        {err&&<div style={{fontSize:'11px',color:'#fca5a5',marginLeft:8,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{err}</div>}
+      </div>
+
+      {/* Main 3-column layout */}
+      <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+
+        {/* Centre — Page canvas */}
+        <div ref={pageAreaRef} style={{flex:1,overflow:'auto',padding:'24px 32px',display:'flex',flexDirection:'column',alignItems:'center',gap:0}}>
+          {currentPage&&(
+            <div style={{width:'100%',maxWidth:794,minHeight:520}}>
+              {renderPage(currentPage,activePage)}
+            </div>
+          )}
+        </div>
+
+        {/* Right — AI Chat */}
+        <div style={{width:260,background:'#fff',borderLeft:'1px solid #e2e8f0',display:'flex',flexDirection:'column',flexShrink:0}}>
+          <div style={{padding:'12px 14px',borderBottom:'1px solid #e2e8f0',fontWeight:700,fontSize:'13px',color:'#1e3a5f',display:'flex',alignItems:'center',gap:6}}>
+            <span>✨</span> AI Assistant
+          </div>
+          <div style={{flex:1,overflow:'auto',padding:'10px 12px',display:'flex',flexDirection:'column',gap:8}}>
+            {chatHistory.map((m,i)=>(
+              <div key={i} style={{
+                background:m.role==='ai'?'#eff6ff':'#f0fdf4',
+                border:`1px solid ${m.role==='ai'?'#bfdbfe':'#bbf7d0'}`,
+                borderRadius:8,padding:'8px 10px',fontSize:'11.5px',lineHeight:1.55,
+                color:'#1e293b',whiteSpace:'pre-wrap',
+                alignSelf:m.role==='ai'?'flex-start':'flex-end',
+                maxWidth:'90%',
+              }}>{m.text}</div>
+            ))}
+            {chatLoading&&<div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'8px 10px',fontSize:'11.5px',color:'#6b7280'}}>Thinking…</div>}
+          </div>
+          <div style={{padding:'10px 12px',borderTop:'1px solid #e2e8f0',display:'flex',gap:6}}>
+            <textarea value={chatMsg} onChange={e=>setChatMsg(e.target.value)}
+              onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}}}
+              placeholder="Ask me to edit anything..." rows={2}
+              style={{flex:1,padding:'6px 8px',border:'1px solid #e2e8f0',borderRadius:6,fontSize:'11.5px',resize:'none',fontFamily:'inherit',outline:'none'}}/>
+            <button onClick={sendChat} disabled={chatLoading||!chatMsg.trim()} style={{padding:'6px 10px',background:'#1e3a5f',color:'#fff',border:'none',borderRadius:6,cursor:'pointer',fontSize:'12px',fontWeight:700,alignSelf:'flex-end'}}>→</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom — Page thumbnails (Canva-style) */}
+      <div style={{background:'#1e293b',borderTop:'1px solid #0f172a',height:120,flexShrink:0,display:'flex',alignItems:'center',gap:0,overflowX:'auto',padding:'0 16px',gap:10}}>
+        {docPages.map((page,idx)=>renderThumbnail(page,idx))}
+        <div onClick={addPage} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,cursor:'pointer',minWidth:72,flexShrink:0,opacity:.7}}>
+          <div style={{width:64,height:82,background:'transparent',border:'2px dashed #475569',borderRadius:3,display:'flex',alignItems:'center',justifyContent:'center',color:'#94a3b8',fontSize:'22px',transition:'all .15s'}}>+</div>
+          <div style={{fontSize:'9px',color:'#64748b',textAlign:'center'}}>Add Page</div>
+        </div>
       </div>
     </div>
   );
 }
+
 
 // ── HOD DASHBOARD ─────────────────────────────────────────────────────────
 // ── MASTER ATTAINMENT FILE ─────────────────────────────────────────────────
