@@ -488,7 +488,7 @@ tbody tr:hover{background:var(--bg)}
 
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useRef}=React;
+const {useState,useEffect,useRef,useCallback,useMemo}=React;
 const API='https://obe-automate.onrender.com';
 
 // ── JWT token storage (session only — lost on tab close by design) ──────────
@@ -4483,10 +4483,10 @@ const SECTION_META = [
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
-const token = () => sessionStorage.getItem('obe_token') || '';
+const cfToken = () => sessionStorage.getItem('obe_token') || '';
 
 async function apiFetch(path, opts = {}) {
-  const headers = { Authorization: `Bearer ${token()}`, ...opts.headers };
+  const headers = { Authorization: `Bearer ${cfToken()}`, ...opts.headers };
   if (!(opts.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
@@ -4746,7 +4746,7 @@ function AttachmentZone({ courseId, sectionNo, attachments, onRefresh }) {
       if (sectionNo) fd.append("section_no", String(sectionNo));
       await fetch(`${API_BASE}/course-file/upload/${courseId}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token()}` },
+        headers: { Authorization: `Bearer ${cfToken()}` },
         body: fd,
       });
       setLabel("");
@@ -4786,7 +4786,7 @@ function AttachmentZone({ courseId, sectionNo, attachments, onRefresh }) {
                 {a.filename} · {fmt(a.file_size)}
               </span>
               <a
-                href={`${API_BASE}/course-file/attachment/${a.id}/download?token=${token()}`}
+                href={`${API_BASE}/course-file/attachment/${a.id}/download?token=${cfToken()}`}
                 download
                 style={{ fontSize: 11, color: T.blueLight, textDecoration: "none", padding: "2px 6px" }}
               >
@@ -5277,7 +5277,7 @@ function CourseFileEditor({ courseId }) {
     try {
       await saveNow();
       await apiFetch(`/course-file/generate/${courseId}`, { method: "POST" });
-      window.open(`${API_BASE}/course-file/download/${courseId}?token=${token()}`, "_blank");
+      window.open(`${API_BASE}/course-file/download/${courseId}?token=${cfToken()}`, "_blank");
     } catch (e) {
       alert("Generation failed: " + e.message);
     } finally {
