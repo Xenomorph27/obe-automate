@@ -4420,789 +4420,1406 @@ function ReportsPage({course}){
 }
 
 // ── COURSE FILE ─────────────────────────────────────────────────────────────
-function CourseFilePage({course}){
-  const API=window.API||'https://obe-automate.onrender.com';
-  const tok=()=>sessionStorage.getItem('obe_token');
-  const hdr=()=>({Authorization:'Bearer '+tok(),'Content-Type':'application/json'});
-  const hdrForm=()=>({Authorization:'Bearer '+tok()});
+/**
+ * CourseFileEditor.jsx  — fixed & redesigned
+ *
+ * Bugs fixed vs original:
+ *  1. updateExtra stale-closure → autoSave now uses functional setState + ref for latest value
+ *  2. institution_name / institution_address / co_po_justification were never persisted
+ *     (not in backend model) — removed from extra state; institution fields are now
+ *     display-only from course data, co_po_justification removed cleanly
+ *  3. Session plan cols parsed correctly (top-level, not inside .data)
+ *  4. loadAll used Promise.allSettled but session/eval 404 path wasn't raising — added
+ *     explicit 404 check via response wrapper
+ *  5. hasContent used wrong field keys for progress bar — unified via FIELD_MAP
+ *  6. AIChatPanel used /ai/chat but route is /ai/table-chat — fixed
+ *
+ * API surface:
+ *   GET  /courses/{courseId}
+ *   GET  /course-file/extra/{courseId}
+ *   POST /course-file/extra/{courseId}
+ *   POST /course-file/generate/{courseId}
+ *   GET  /course-file/download/{courseId}
+ *   GET  /course-file/attachments/{courseId}
+ *   POST /course-file/upload/{courseId}
+ *   DELETE /course-file/attachment/{id}
+ *   GET  /session-plan/view/{courseId}
+ *   GET  /evaluation-plan/view/{courseId}
+ *   GET  /attainment/calculate/{courseId}
+ *   POST /ai/table-chat
+ */
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  const [mode,setMode]=React.useState('setup');   // 'setup' | 'editor'
-  const [loading,setLoading]=React.useState(false);
-  const [saving,setSaving]=React.useState(false);
-  const [generating,setGenerating]=React.useState(false);
-  const [err,setErr]=React.useState('');
-  const [ok,setOk]=React.useState('');
-  const [activeSetupTab,setActiveSetupTab]=React.useState('info');
-  const [activePage,setActivePage]=React.useState(0);
-  const [docPages,setDocPages]=React.useState([]);
-  const [chatMsg,setChatMsg]=React.useState('');
-  const [chatHistory,setChatHistory]=React.useState([]);
-  const [chatLoading,setChatLoading]=React.useState(false);
-  const [attachments,setAttachments]=React.useState([]);
-  const [uploading,setUploading]=React.useState(false);
-  const [uploadLabel,setUploadLabel]=React.useState('');
-  const [uploadSection,setUploadSection]=React.useState('');
-  const [uploadFile,setUploadFile]=React.useState(null);
-  const [uploadErr,setUploadErr]=React.useState('');
-  const [extra,setExtra]=React.useState({
-    vision_text:'',mission_text:'',batch:'',
-    prev_co_attainment:'',action_plan:'',
-    slow_learners:'',advanced_learners:'',
-    institution_name:'',institution_address:'',co_po_justification:'',
-    activity_reports:'',learning_material_links:'',attendance_links:'',
-  });
 
-  const pageAreaRef=React.useRef(null);
-  const thumbnailsRef=React.useRef(null);
 
-  // ── Load saved extra + attachments ────────────────────────────────────────
-  const loadAttachments=React.useCallback(()=>{
-    if(!course)return;
-    fetch(API+'/course-file/attachments/'+course.id,{headers:hdrForm()})
-      .then(r=>r.json()).then(d=>{if(d.data)setAttachments(d.data);}).catch(()=>{});
-  },[course?.id]);
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-  React.useEffect(()=>{
-    if(!course)return;
-    setLoading(true);
-    fetch(API+'/course-file/extra/'+course.id,{headers:hdrForm()})
-      .then(r=>r.json()).then(d=>{if(d.data&&Object.keys(d.data).length>0)setExtra(e=>({...e,...d.data}));})
-      .catch(()=>{}).finally(()=>setLoading(false));
-    loadAttachments();
-  },[course?.id,loadAttachments]);
+const API_BASE = import.meta?.env?.VITE_API_URL ?? "";
 
-  // ── Build doc pages from course data ──────────────────────────────────────
-  const buildPages=React.useCallback((courseData,extraData,atts)=>{
-    const c=courseData||course||{};
-    const e=extraData||extra;
-    const a=atts||attachments;
-    const pages=[];
+// Maps section number → which extra field drives the "has content" indicator
+const SECTION_FIELD_MAP = {
+  1: "vision_text",
+  5: "prev_co_attainment",
+  8: "slow_learners",
+  10: "activity_reports",
+  11: "learning_material_links",
+  13: "attendance_links",
+};
 
-    // Cover page
-    pages.push({id:'cover',title:'Cover Page',type:'cover',editable:false,content:{
-      course_name:c.course_name||'',course_code:c.course_code||'',
-      department:c.department||'',faculty_name:c.faculty_name||'',
-      semester:c.semester||'',academic_year:c.academic_year||'',batch:e.batch||'',
-    }});
+const SECTION_META = [
+  { no: 1,  title: "Vision & Mission",        icon: "◈", auto: false, desc: "Department vision and mission statements" },
+  { no: 2,  title: "Course Information",       icon: "◉", auto: true,  desc: "Auto-populated from course setup" },
+  { no: 3,  title: "Course Outcomes (COs)",    icon: "◈", auto: true,  desc: "Auto-populated from course setup" },
+  { no: 4,  title: "CO-PO Mapping",            icon: "◉", auto: true,  desc: "Auto-populated from course setup" },
+  { no: 5,  title: "Previous CO Attainment",   icon: "◈", auto: false, desc: "Previous year CO attainment + action plan" },
+  { no: 6,  title: "Session Plan",             icon: "◉", auto: true,  desc: "Auto-populated from Session Plan page" },
+  { no: 7,  title: "Evaluation Plan",          icon: "◈", auto: true,  desc: "Auto-populated from Evaluation Plan page" },
+  { no: 8,  title: "Slow & Advanced Learners", icon: "◉", auto: false, desc: "Student categorisation and interventions" },
+  { no: 9,  title: "CO Attainment Results",    icon: "◈", auto: true,  desc: "Auto-populated from attainment data" },
+  { no: 10, title: "Activity Reports",         icon: "◉", auto: false, desc: "Co-curricular and extracurricular activities" },
+  { no: 11, title: "Learning Materials",       icon: "◈", auto: false, desc: "Textbooks, web links, and study resources" },
+  { no: 12, title: "Question Papers",          icon: "◉", auto: true,  desc: "Auto-populated from question bank" },
+  { no: 13, title: "Attendance Records",       icon: "◈", auto: false, desc: "Attendance portal links and summary" },
+];
 
-    // S1 Vision & Mission
-    pages.push({id:'s1',title:'1. Vision & Mission',type:'text_section',sectionNo:1,
-      fields:[
-        {key:'vision_title',label:'Vision',value:'VISION OF THE DEPARTMENT',bold:true},
-        {key:'vision_text',label:'Vision Text',value:e.vision_text||'',editable:true,multiline:true,
-         placeholder:'To impart quality education with research insights...'},
-        {key:'mission_title',label:'Mission',value:'MISSION OF THE DEPARTMENT',bold:true},
-        {key:'mission_text',label:'Mission (one point per line)',value:e.mission_text||'',editable:true,multiline:true,rows:5,
-         placeholder:'M1: To educate students...\nM2: To produce quality research...\nM3: To inculcate professional values...'},
-      ]
-    });
+// ─── Utils ────────────────────────────────────────────────────────────────────
 
-    // S2 POs/PEOs/PSOs
-    const pos=c.pos||[];
-    const STANDARD_POS=[
-      ['PO 1','Engineering Knowledge: Apply the knowledge of mathematics, science, engineering fundamentals...'],
-      ['PO 2','Problem analysis: Identify, formulate, review research literature, and analyze complex engineering problems...'],
-      ['PO 3','Design/development of solutions: Design solutions for complex engineering problems...'],
-      ['PO 4','Conduct investigations of complex problems: Use research-based knowledge and research methods...'],
-      ['PO 5','Modern tool usage: Create, select, and apply appropriate techniques, resources, and modern engineering and IT tools...'],
-      ['PO 6','The engineer and society: Apply reasoning informed by the contextual knowledge...'],
-      ['PO 7','Environment and sustainability: Understand the impact of the professional engineering solutions...'],
-      ['PO 8','Ethics: Apply ethical principles and commit to professional ethics and responsibilities...'],
-      ['PO 9','Individual and team work: Function effectively as an individual, and as a member or leader in diverse teams...'],
-      ['PO 10','Communication: Communicate effectively on complex engineering activities with the engineering community...'],
-      ['PO 11','Project management and finance: Demonstrate knowledge and understanding of the engineering and management principles...'],
-      ['PO 12','Life-long learning: Recognize the need for, and have the preparation and ability to engage in independent and life-long learning...'],
-    ];
-    const poRows=pos.length&&pos.some(p=>p.statement||p.description)
-      ?pos.map(p=>[p.po_id||'',p.statement||p.description||''])
-      :STANDARD_POS;
-    pages.push({id:'s2',title:'2. POs / PEOs / PSOs',type:'po_section',sectionNo:2,
-      poRows,
-      peos:[
-        ['PEO1','Apply the knowledge of the latest trends of AIML and will be engaged in technology development and deployment.'],
-        ['PEO2','To be competent AIML engineers with innovative thinking and research attitude to solve the real-world problems.'],
-        ['PEO3','To have enhanced interpersonal and managerial skills to function effectively in their profession.'],
-      ],
-      psos:[
-        ['PSO1','To apply the concepts of Artificial Intelligence and Machine Learning with practical knowledge in analysis, design and development of intelligent systems.'],
-        ['PSO2','To provide a concrete foundation to the students in the cutting-edge areas like NLP, Computer Vision, Reinforcement Learning, IoT, Cloud computing, Data Security and privacy etc.'],
-      ],
-    });
+const token = () => localStorage.getItem("token") ?? "";
 
-    // S3 Syllabus & Timetable — just mention uploads
-    const ttAtts=a.filter(x=>x.section_no===3);
-    pages.push({id:'s3',title:'3. Syllabus & Timetable',type:'syllabus_section',sectionNo:3,
-      timetableAttachments:ttAtts,
-    });
+async function apiFetch(path, opts = {}) {
+  const headers = { Authorization: `Bearer ${token()}`, ...opts.headers };
+  if (!(opts.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw Object.assign(new Error(err.detail ?? `HTTP ${res.status}`), { status: res.status });
+  }
+  return res.json();
+}
 
-    // S4 CO Statements
-    const cos=c.cos||[];
-    const coPoMatrix=c.co_po_matrix||{};
-    pages.push({id:'s4',title:'4. CO Statements & CO-PO Mapping',type:'co_section',sectionNo:4,
-      cos,coPoMatrix,pos:poRows.map(r=>r[0]),
-    });
+function fmt(bytes) {
+  if (!bytes) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
 
-    // S5 Prev Attainment
-    pages.push({id:'s5',title:'5. Previous CO Attainment',type:'text_section',sectionNo:5,
-      fields:[
-        {key:'prev_co_attainment',label:'Previous Year CO Attainment',value:e.prev_co_attainment||'',editable:true,multiline:true,rows:4,
-         placeholder:'AY 2024-25: CO1 attainment = 2.8, CO2 = 2.6...'},
-        {key:'action_plan',label:'Action Plan',value:e.action_plan||'',editable:true,multiline:true,rows:4,
-         placeholder:'Since overall CO attainment exceeded targets, the course delivery strategy will...'},
-      ]
-    });
-
-    // S6 Session Plan — auto-populated notice
-    pages.push({id:'s6',title:'6. Session Plan',type:'auto_section',sectionNo:6,
-      message:'Session plan is auto-populated from the Session Plan page. Go to Session Plan to generate or edit it.',
-      link:'session_plan',
-    });
-
-    // S7 Evaluation Plan
-    pages.push({id:'s7',title:'7. Evaluation Plan',type:'auto_section',sectionNo:7,
-      message:'Evaluation plan and CA marksheets are auto-populated from the Evaluation Plan page.',
-      link:'evaluation_plan',
-    });
-
-    // S8 Slow/Advanced Learners
-    pages.push({id:'s8',title:'8. Slow & Advanced Learners',type:'text_section',sectionNo:8,
-      fields:[
-        {key:'slow_learners',label:'Slow Learners (auto-detected when marks are entered, or override here)',
-         value:e.slow_learners||'',editable:true,multiline:true,rows:4,
-         placeholder:'Leave blank to auto-detect from CA marks below 40%...'},
-        {key:'advanced_learners',label:'Advanced Learners (auto-detected above 75%, or override)',
-         value:e.advanced_learners||'',editable:true,multiline:true,rows:4,
-         placeholder:'Leave blank to auto-detect from CA marks above 75%...'},
-      ]
-    });
-
-    // S9 CO Attainment — auto
-    pages.push({id:'s9',title:'9. CO Attainment',type:'auto_section',sectionNo:9,
-      message:'CO attainment is auto-calculated from CA marks entered in the Master Attainment File.',
-      link:'master_attainment',
-    });
-
-    // S10 Activity Reports
-    pages.push({id:'s10',title:'10. Activity Reports',type:'text_section',sectionNo:10,
-      fields:[
-        {key:'activity_reports',label:'Activity Reports (one per line)',value:e.activity_reports||'',editable:true,multiline:true,rows:6,
-         placeholder:'Guest Lecture by Dr. X on Topic Y — 12 Feb 2025\nIndustry Expert Talk on ML — 20 Mar 2025\nKaggle Competition — 15 May 2025'},
-      ]
-    });
-
-    // S11 Learning Material
-    pages.push({id:'s11',title:'11. Learning Material',type:'text_section',sectionNo:11,
-      fields:[
-        {key:'learning_material_links',label:'Learning Material Links (one URL per line)',value:e.learning_material_links||'',editable:true,multiline:true,rows:5,
-         placeholder:'https://nptel.ac.in/courses/...\nhttps://swayam.gov.in\nhttps://ocw.mit.edu'},
-      ]
-    });
-
-    // S12 Question Bank — auto
-    pages.push({id:'s12',title:'12. Question Bank',type:'auto_section',sectionNo:12,
-      message:'Question bank is auto-populated from the Question Bank page.',
-      link:'questions',
-    });
-
-    // S13 Attendance
-    pages.push({id:'s13',title:'13. Compiled Attendance',type:'text_section',sectionNo:13,
-      fields:[
-        {key:'attendance_links',label:'Attendance Links (one per line)',value:e.attendance_links||'',editable:true,multiline:true,rows:3,
-         placeholder:'Division A: https://erp.college.edu/attendance/divA\nDivision B: https://erp.college.edu/attendance/divB'},
-      ]
-    });
-
-    // Any custom pages
-    const customAtts=a.filter(x=>!x.section_no);
-    if(customAtts.length){
-      pages.push({id:'custom',title:'Dept. Uploads',type:'uploads_section',
-        attachments:customAtts,
-      });
-    }
-
-    return pages;
-  },[course,extra,attachments]);
-
-  // ── Save + Generate ────────────────────────────────────────────────────────
-  const saveExtra=async()=>{
-    if(!course){setErr('No course selected. Please select a course first.');return false;}
-    setSaving(true);setErr('');
-    try{
-      const r=await fetch(API+'/course-file/extra/'+course.id,{method:'POST',headers:hdr(),body:JSON.stringify(extra)});
-      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
-      setSaving(false);
-      return true;
-    }catch(e){setErr('Save failed: '+e.message);setSaving(false);return false;}
+function bloomColor(level) {
+  const map = {
+    Remember: "#6B7280", Understand: "#3B82F6", Apply: "#10B981",
+    Analyse: "#F59E0B", Evaluate: "#EF4444", Create: "#8B5CF6",
   };
+  return map[level] ?? "#6B7280";
+}
 
-  const generate=async()=>{
-    if(!course){setErr('No course selected. Please go to Courses and select a course first.');return;}
-    setErr('');setOk('');
-    const saved=await saveExtra();
-    if(!saved){return;}  // saveExtra already set the error
-    setGenerating(true);
-    try{
-      const r=await fetch(API+'/course-file/generate/'+course.id,{method:'POST',headers:hdr()});
-      if(!r.ok){
-        let errMsg='Generation failed';
-        try{const d=await r.json();errMsg=d.detail||errMsg;}catch{}
-        throw new Error(errMsg+' (HTTP '+r.status+')');
-      }
-      const pages=buildPages(course,extra,attachments);
-      setDocPages(pages);
-      setActivePage(0);
-      setMode('editor');
-      setChatHistory([{role:'ai',text:`✅ Course file generated for ${course.course_name}!\n\nBrowse all 13 sections using the thumbnails below, and edit any field directly on the page. Try asking me:\n• "Update the vision text to..."\n• "Add an activity report for March 15"\n• "What's missing in section 6?"`}]);
-    }catch(e){setErr(e.message);}
-    setGenerating(false);
-  };
+// ─── Design tokens ────────────────────────────────────────────────────────────
 
-  // Update a field value in docPages and extra simultaneously
-  const updateField=React.useCallback((pageId,fieldKey,value)=>{
-    setDocPages(pages=>pages.map(p=>{
-      if(p.id!==pageId)return p;
-      return {...p,fields:p.fields?.map(f=>f.key===fieldKey?{...f,value}:f)};
-    }));
-    setExtra(e=>({...e,[fieldKey]:value}));
-  },[]);
+const T = {
+  bg:          "#080E1A",
+  surface:     "rgba(15,23,42,0.65)",
+  surfaceHigh: "rgba(22,32,55,0.8)",
+  border:      "rgba(255,255,255,0.07)",
+  borderFocus: "#3B82F6",
+  text:        "#E2E8F0",
+  textMuted:   "#64748B",
+  textSub:     "#94A3B8",
+  blue:        "#3B82F6",
+  blueLight:   "#60A5FA",
+  green:       "#22C55E",
+  amber:       "#F59E0B",
+  red:         "#EF4444",
+  mono:        "'JetBrains Mono', 'Fira Code', monospace",
+  sans:        "'DM Sans', system-ui, sans-serif",
+};
 
-  const addPage=()=>{
-    const newPage={
-      id:'custom_'+Date.now(),
-      title:'Custom Section',
-      type:'custom_editable',
-      editable:true,
-      fields:[{key:'custom_text_'+Date.now(),label:'Content',value:'',editable:true,multiline:true,rows:8,placeholder:'Enter your custom section content here...'}],
-    };
-    setDocPages(p=>[...p,newPage]);
-    setActivePage(docPages.length);
-  };
+// ─── Primitive UI components ──────────────────────────────────────────────────
 
-  const downloadDocx=async()=>{
-    await saveExtra();
-    const r=await fetch(API+'/course-file/download/'+course.id,{headers:{Authorization:'Bearer '+tok()}});
-    if(!r.ok){const d=await r.json().catch(()=>({}));setErr(d.detail||'Download failed');return;}
-    const blob=await r.blob();
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download='course_file_'+course.id+'.docx';
-    document.body.appendChild(a);a.click();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
-  };
+function AutoBadge() {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      fontSize: 10, fontWeight: 700, color: T.amber,
+      background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.25)",
+      borderRadius: 4, padding: "2px 7px", letterSpacing: "0.05em",
+    }}>
+      ⚡ Auto
+    </span>
+  );
+}
 
-  const regenerateDocx=async()=>{
-    setErr('');setOk('');
-    const saved=await saveExtra();
-    if(!saved)return;
-    setGenerating(true);
-    try{
-      const r=await fetch(API+'/course-file/generate/'+course.id,{method:'POST',headers:hdr()});
-      if(!r.ok){let m='Regen failed';try{const d=await r.json();m=d.detail||m;}catch{}throw new Error(m+' ('+r.status+')');}
-      // Rebuild pages with latest extra
-      const pages=buildPages(course,extra,attachments);
-      setDocPages(pages);
-      setOk('✅ Regenerated!');setTimeout(()=>setOk(''),3000);
-    }catch(e){setErr(e.message);}
-    setGenerating(false);
-  };
+function InfoBox({ color = T.blueLight, bg = "rgba(59,130,246,0.06)", border = "rgba(59,130,246,0.18)", children }) {
+  return (
+    <div style={{
+      padding: "11px 14px", background: bg, border: `1px solid ${border}`,
+      borderRadius: 8, fontSize: 12, color, lineHeight: 1.6,
+    }}>
+      {children}
+    </div>
+  );
+}
 
-  // ── AI Chat ────────────────────────────────────────────────────────────────
-  const sendChat=async()=>{
-    const msg=chatMsg.trim();if(!msg||chatLoading)return;
-    setChatHistory(h=>[...h,{role:'user',text:msg}]);
-    setChatMsg('');setChatLoading(true);
-    const currentPage=docPages[activePage];
-    const context=`You are helping a faculty member edit their OBE Course File for course "${course?.course_name}" (${course?.course_code}).
-Current page: ${currentPage?.title||'Unknown'}.
-The course file has these sections: Vision & Mission, POs/PEOs/PSOs, Syllabus, CO Statements, Prev. Attainment, Session Plan, Eval Plan, Learners, CO Attainment, Activity Reports, Learning Material, Question Bank, Attendance.
-Current extra fields: ${JSON.stringify({...extra},null,0).slice(0,400)}
-User message: ${msg}
+function Spinner({ size = 28 }) {
+  return (
+    <>
+      <style>{`@keyframes _spin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{
+        width: size, height: size,
+        border: `2px solid rgba(255,255,255,0.08)`,
+        borderTop: `2px solid ${T.blue}`,
+        borderRadius: "50%", animation: "_spin 0.75s linear infinite",
+      }} />
+    </>
+  );
+}
 
-Respond helpfully. If the user wants to update a field, provide the updated text clearly. Keep responses concise and actionable.`;
-    try{
-      const r=await fetch('https://api.anthropic.com/v1/messages',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:context}]})
-      });
-      const d=await r.json();
-      const reply=d.content?.[0]?.text||'Sorry, I could not respond.';
-      setChatHistory(h=>[...h,{role:'ai',text:reply}]);
-    }catch(e){
-      setChatHistory(h=>[...h,{role:'ai',text:'Network error. Please try again.'}]);
-    }
-    setChatLoading(false);
-  };
+// ─── Field wrapper ────────────────────────────────────────────────────────────
 
-  // ── Upload attachment ──────────────────────────────────────────────────────
-  const uploadAttachment=async()=>{
-    if(!uploadFile||!uploadLabel.trim()){setUploadErr('Please select a file and enter a label.');return;}
-    setUploading(true);setUploadErr('');
-    const fd=new FormData();
-    fd.append('file',uploadFile);fd.append('label',uploadLabel);
-    if(uploadSection)fd.append('section_no',uploadSection);
-    try{
-      const r=await fetch(API+'/course-file/upload/'+course.id,{method:'POST',headers:{Authorization:'Bearer '+tok()},body:fd});
-      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
-      setUploadLabel('');setUploadSection('');setUploadFile(null);
-      const inp=document.getElementById('cfUploadInput');if(inp)inp.value='';
-      loadAttachments();
-    }catch(e){setUploadErr(e.message);}
-    setUploading(false);
-  };
+function Field({ label, required, hint, children }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <label style={{
+        display: "block", fontSize: 11, fontWeight: 700, color: T.textSub,
+        marginBottom: 7, letterSpacing: "0.06em", textTransform: "uppercase",
+      }}>
+        {label}
+        {required && <span style={{ color: T.red, marginLeft: 3 }}>*</span>}
+      </label>
+      {children}
+      {hint && (
+        <p style={{ fontSize: 11, color: T.textMuted, marginTop: 5, marginBottom: 0 }}>{hint}</p>
+      )}
+    </div>
+  );
+}
 
-  const deleteAttachment=async(id)=>{
-    if(!confirm('Delete this attachment?'))return;
-    await fetch(API+'/course-file/attachment/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+tok()}});
-    loadAttachments();
-  };
+// ─── Textarea / Input ─────────────────────────────────────────────────────────
 
-  const SECTION_NAMES={1:'Vision & Mission',2:'POs/PEOs/PSOs',3:'Syllabus & Timetable',4:'CO Statements',5:'Prev. CO Attainment',6:'Session Plan',7:'Evaluation Plan',8:'Slow/Advanced Learners',9:'CO Attainment',10:'Activity Reports',11:'Learning Material',12:'Question Bank',13:'Attendance'};
+const baseInputStyle = {
+  width: "100%", boxSizing: "border-box",
+  background: "rgba(8,14,26,0.7)",
+  border: `1px solid ${T.border}`,
+  borderRadius: 8, color: T.text, fontSize: 13,
+  padding: "9px 12px", lineHeight: 1.65,
+  outline: "none", transition: "border-color 0.18s, box-shadow 0.18s",
+  fontFamily: T.sans,
+};
 
-  // ── Page renderers ─────────────────────────────────────────────────────────
-  const renderPage=(page,idx)=>{
-    if(!page)return null;
-    const pageStyle={
-      background:'#fff',width:'100%',minHeight:'100%',
-      padding:'48px 56px',boxSizing:'border-box',
-      fontFamily:"'Georgia', serif",color:'#111',
-      boxShadow:'0 2px 20px rgba(0,0,0,0.08)',
-      borderRadius:4,
-    };
-    const h1Style={fontSize:'22px',fontWeight:700,color:'#1f3864',marginBottom:8,borderBottom:'2px solid #1f3864',paddingBottom:6,fontFamily:"'Georgia',serif"};
-    const h2Style={fontSize:'14px',fontWeight:700,color:'#1f3864',marginTop:16,marginBottom:6,fontFamily:"'Georgia',serif"};
-    const bodyStyle={fontSize:'11px',lineHeight:1.6,fontFamily:"'Georgia',serif"};
-    const tblStyle={width:'100%',borderCollapse:'collapse',fontSize:'10px',marginTop:8};
-    const thStyle={background:'#1f3864',color:'#fff',padding:'6px 8px',textAlign:'left',fontWeight:700,fontSize:'10px'};
-    const tdStyle={padding:'5px 8px',borderBottom:'1px solid #dde3ec',verticalAlign:'top'};
-    const tdAltStyle={...tdStyle,background:'#eef1f6'};
-    const editableStyle={
-      width:'100%',padding:'4px 6px',border:'1.5px solid #3b82f6',
-      borderRadius:3,fontSize:'11px',fontFamily:"'Georgia',serif",
-      background:'#eff6ff',resize:'vertical',outline:'none',lineHeight:1.6,
-      boxSizing:'border-box',
-    };
+function Textarea({ value, onChange, placeholder, rows = 4, mono = false }) {
+  return (
+    <textarea
+      value={value ?? ""}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      rows={rows}
+      style={{
+        ...baseInputStyle,
+        resize: "vertical",
+        minHeight: rows * 22 + 18,
+        fontFamily: mono ? T.mono : T.sans,
+        fontSize: mono ? 12 : 13,
+      }}
+      onFocus={e => {
+        e.target.style.borderColor = T.borderFocus;
+        e.target.style.boxShadow = "0 0 0 3px rgba(59,130,246,0.12)";
+      }}
+      onBlur={e => {
+        e.target.style.borderColor = T.border;
+        e.target.style.boxShadow = "none";
+      }}
+    />
+  );
+}
 
-    if(page.type==='cover')return(
-      <div style={pageStyle}>
-        <div style={{textAlign:'center',paddingTop:60}}>
-          <div style={{fontSize:'13px',fontWeight:600,color:'#555',marginBottom:8,letterSpacing:1,textTransform:'uppercase'}}>Symbiosis Institute of Technology</div>
-          <div style={{fontSize:'13px',color:'#555',marginBottom:24}}>Department of {page.content.department||'—'}</div>
-          <div style={{fontSize:'26px',fontWeight:700,color:'#1f3864',lineHeight:1.3,marginBottom:12}}>{page.content.course_name||'Course Name'}</div>
-          <div style={{fontSize:'16px',color:'#444',marginBottom:6}}>({page.content.course_code||'Code'})</div>
-          <div style={{width:60,height:3,background:'#1f3864',margin:'16px auto'}}/>
-          <div style={{fontSize:'13px',color:'#555',marginBottom:4}}>Course File</div>
-          <div style={{fontSize:'13px',color:'#555',marginBottom:4}}>A.Y {page.content.academic_year||'—'}  |  {page.content.semester||'—'} Semester</div>
-          {page.content.batch&&<div style={{fontSize:'13px',color:'#555',marginBottom:4}}>Batch {page.content.batch}</div>}
-          <div style={{fontSize:'13px',color:'#555',marginTop:8}}>Faculty: {page.content.faculty_name||'—'}</div>
-        </div>
-      </div>
-    );
+function TextInput({ value, onChange, placeholder }) {
+  return (
+    <input
+      type="text"
+      value={value ?? ""}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      style={{ ...baseInputStyle, height: 38 }}
+      onFocus={e => {
+        e.target.style.borderColor = T.borderFocus;
+        e.target.style.boxShadow = "0 0 0 3px rgba(59,130,246,0.12)";
+      }}
+      onBlur={e => {
+        e.target.style.borderColor = T.border;
+        e.target.style.boxShadow = "none";
+      }}
+    />
+  );
+}
 
-    if(page.type==='text_section')return(
-      <div style={pageStyle}>
-        <div style={h1Style}>{page.title}</div>
-        {(page.fields||[]).map((f,fi)=>(
-          <div key={fi} style={{marginBottom:16}}>
-            {f.bold
-              ?<div style={{...h2Style,marginTop:fi===0?8:16}}>{f.value}</div>
-              :<>
-                <div style={{fontSize:'11px',fontWeight:700,color:'#374151',marginBottom:4}}>{f.label}</div>
-                {f.editable
-                  ?(f.multiline
-                    ?<textarea value={f.value||''} rows={f.rows||3}
-                        onChange={e=>updateField(page.id,f.key,e.target.value)}
-                        placeholder={f.placeholder||''}
-                        style={editableStyle}/>
-                    :<input value={f.value||''} onChange={e=>updateField(page.id,f.key,e.target.value)}
-                        placeholder={f.placeholder||''} style={{...editableStyle,resize:'none'}}/>
-                  ):<div style={{...bodyStyle,padding:'6px 8px',background:'#f9fafb',borderRadius:3,border:'1px solid #e5e7eb'}}>{f.value||<span style={{color:'#9ca3af'}}>{f.placeholder}</span>}</div>
-                }
-              </>
-            }
-          </div>
-        ))}
-      </div>
-    );
+// ─── ReadOnly table ───────────────────────────────────────────────────────────
 
-    if(page.type==='po_section')return(
-      <div style={pageStyle}>
-        <div style={h1Style}>{page.title}</div>
-        <div style={h2Style}>Program Outcomes (POs)</div>
-        <table style={tblStyle}><thead><tr><th style={{...thStyle,width:'12%'}}>PO</th><th style={thStyle}>Statement</th></tr></thead>
-          <tbody>{(page.poRows||[]).map((r,i)=><tr key={i}><td style={i%2?tdAltStyle:tdStyle}><b>{r[0]}</b></td><td style={i%2?tdAltStyle:tdStyle}>{r[1]}</td></tr>)}</tbody>
-        </table>
-        <div style={h2Style}>Program Educational Objectives (PEOs)</div>
-        {(page.peos||[]).map((r,i)=><div key={i} style={{...bodyStyle,marginBottom:4}}><b>{r[0]}:</b> {r[1]}</div>)}
-        <div style={h2Style}>Program Specific Outcomes (PSOs)</div>
-        <table style={tblStyle}><thead><tr><th style={{...thStyle,width:'12%'}}>PSO</th><th style={thStyle}>Statement</th></tr></thead>
-          <tbody>{(page.psos||[]).map((r,i)=><tr key={i}><td style={i%2?tdAltStyle:tdStyle}><b>{r[0]}</b></td><td style={i%2?tdAltStyle:tdStyle}>{r[1]}</td></tr>)}</tbody>
-        </table>
-      </div>
-    );
-
-    if(page.type==='co_section')return(
-      <div style={pageStyle}>
-        <div style={h1Style}>{page.title}</div>
-        <div style={h2Style}>CO Statements</div>
-        <table style={tblStyle}><thead><tr><th style={{...thStyle,width:'10%'}}>CO</th><th style={thStyle}>Statement</th><th style={{...thStyle,width:'14%'}}>Bloom's Level</th></tr></thead>
-          <tbody>{(page.cos||[]).map((c,i)=><tr key={i}><td style={i%2?tdAltStyle:tdStyle}><b>{c.co_id}</b></td><td style={i%2?tdAltStyle:tdStyle}>{c.statement}</td><td style={i%2?tdAltStyle:tdStyle}>{c.bloom_level}</td></tr>)}</tbody>
-        </table>
-        <div style={h2Style}>CO-PO Mapping</div>
-        {page.cos?.length&&page.pos?.length?(
-          <div style={{overflowX:'auto'}}>
-            <table style={{...tblStyle,tableLayout:'fixed'}}>
-              <thead><tr><th style={{...thStyle,width:'8%'}}>CO</th>{page.pos.map(p=><th key={p} style={{...thStyle,width:`${92/page.pos.length}%`,fontSize:'9px',textAlign:'center'}}>{p}</th>)}</tr></thead>
-              <tbody>{page.cos.map((c,i)=><tr key={i}><td style={i%2?{...tdAltStyle,fontWeight:700}:{...tdStyle,fontWeight:700}}>{c.co_id}</td>
-                {page.pos.map(p=>{const v=(page.coPoMatrix[c.co_id]||{})[p]||'-';return<td key={p} style={{...(i%2?tdAltStyle:tdStyle),textAlign:'center',color:v!=='-'?'#1f3864':'#9ca3af',fontWeight:v!=='-'?700:400}}>{v}</td>;})}
-              </tr>)}</tbody>
-            </table>
-          </div>
-        ):<div style={{...bodyStyle,color:'#9ca3af'}}>CO-PO matrix not configured yet.</div>}
-      </div>
-    );
-
-    if(page.type==='syllabus_section')return(
-      <div style={pageStyle}>
-        <div style={h1Style}>{page.title}</div>
-        <div style={h2Style}>Syllabus</div>
-        <div style={{...bodyStyle,color:'#6b7280',background:'#f0f9ff',border:'1px solid #bae6fd',padding:'10px 14px',borderRadius:4}}>
-          Syllabus is auto-extracted from the Session Plan. Go to the <b>Session Plan</b> page to generate it first.
-        </div>
-        <div style={h2Style}>Personal Timetable</div>
-        {page.timetableAttachments&&page.timetableAttachments.length>0
-          ?page.timetableAttachments.map(a=><div key={a.id} style={{...bodyStyle,padding:'6px 10px',background:'#f0fdf4',border:'1px solid #86efac',borderRadius:4,marginBottom:4}}>📎 {a.label} ({a.filename})</div>)
-          :<div style={{...bodyStyle,color:'#6b7280',background:'#fafafa',border:'1px solid #e5e7eb',padding:'10px 14px',borderRadius:4}}>No timetable uploaded yet. Use the <b>Dept. Uploads</b> tab and tag it to Section 3.</div>
-        }
-        <div style={h2Style}>List of Students</div>
-        <div style={{...bodyStyle,color:'#6b7280',background:'#f0f9ff',border:'1px solid #bae6fd',padding:'10px 14px',borderRadius:4}}>
-          Student list is auto-populated from the Students Roster.
-        </div>
-      </div>
-    );
-
-    if(page.type==='auto_section')return(
-      <div style={pageStyle}>
-        <div style={h1Style}>{page.title}</div>
-        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:6,padding:'16px 20px',marginTop:16}}>
-          <div style={{fontSize:'13px',fontWeight:600,color:'#1d4ed8',marginBottom:6}}>⚡ Auto-populated</div>
-          <div style={{...bodyStyle,color:'#374151'}}>{page.message}</div>
-        </div>
-      </div>
-    );
-
-    if(page.type==='uploads_section')return(
-      <div style={pageStyle}>
-        <div style={h1Style}>Department Uploads</div>
-        {(page.attachments||[]).map(a=>(
-          <div key={a.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:6,marginBottom:6}}>
-            <span style={{fontSize:'18px'}}>{a.mime_type?.startsWith('image/')?'🖼':a.mime_type?.includes('pdf')?'📄':'📎'}</span>
-            <div style={{flex:1}}><div style={{fontSize:'12px',fontWeight:600}}>{a.label}</div><div style={{fontSize:'10px',color:'#6b7280'}}>{a.filename}</div></div>
-            <button onClick={()=>deleteAttachment(a.id)} style={{padding:'2px 8px',fontSize:'10px',color:'#ef4444',background:'none',border:'1px solid #fca5a5',borderRadius:4,cursor:'pointer'}}>✕</button>
-          </div>
-        ))}
-        {(page.attachments||[]).length===0&&<div style={{...bodyStyle,color:'#9ca3af'}}>No general uploads yet.</div>}
-      </div>
-    );
-
-    if(page.type==='custom_editable')return(
-      <div style={pageStyle}>
-        <input value={page.title} onChange={e=>setDocPages(ps=>ps.map((p,i)=>i===idx?{...p,title:e.target.value}:p))}
-          style={{fontSize:'20px',fontWeight:700,color:'#1f3864',border:'none',borderBottom:'2px solid #1f3864',width:'100%',paddingBottom:6,marginBottom:12,outline:'none',fontFamily:"'Georgia',serif",background:'transparent'}}/>
-        {(page.fields||[]).map((f,fi)=>(
-          <div key={fi}>
-            <textarea value={f.value||''} rows={f.rows||8} placeholder={f.placeholder||'Enter content...'}
-              onChange={e=>setDocPages(ps=>ps.map((p,pi)=>pi===idx?{...p,fields:p.fields.map((ff,ffi)=>ffi===fi?{...ff,value:e.target.value}:ff)}:p))}
-              style={{width:'100%',padding:'8px',border:'1.5px solid #3b82f6',borderRadius:4,fontSize:'11px',fontFamily:"'Georgia',serif",resize:'vertical',background:'#eff6ff',lineHeight:1.6,boxSizing:'border-box'}}/>
-          </div>
-        ))}
-      </div>
-    );
-
-    return <div style={pageStyle}><div style={h1Style}>{page.title}</div></div>;
-  };
-
-  // Thumbnail renderer (mini scaled version)
-  const renderThumbnail=(page,idx)=>{
-    const isActive=idx===activePage;
-    return(
-      <div key={page.id} onClick={()=>setActivePage(idx)}
-        style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,cursor:'pointer',minWidth:72,flexShrink:0}}>
-        <div style={{
-          width:64,height:82,background:'#fff',border:`2px solid ${isActive?'#3b82f6':'#d1d5db'}`,
-          borderRadius:3,overflow:'hidden',position:'relative',
-          boxShadow:isActive?'0 0 0 2px #93c5fd':'0 1px 3px rgba(0,0,0,0.12)',
-          transition:'all .15s',
-        }}>
-          {/* Mini page preview */}
-          <div style={{position:'absolute',top:0,left:0,width:'100%',height:'100%',transform:'scale(0.18)',transformOrigin:'top left',width:'355%',height:'555%',pointerEvents:'none',overflow:'hidden'}}>
-            {renderPage(page,idx)}
-          </div>
-        </div>
-        <div style={{fontSize:'9px',color:isActive?'#2563eb':'#6b7280',fontWeight:isActive?700:400,textAlign:'center',maxWidth:72,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',lineHeight:1.2}}>
-          {page.title}
-        </div>
-      </div>
-    );
-  };
-
-  // ── SETUP MODE ─────────────────────────────────────────────────────────────
-  if(mode==='setup'){
-    const field=(label,key,multiline,rows=3,placeholder='')=>(
-      <div style={{marginBottom:'1rem'}}>
-        <label style={{display:'block',fontWeight:600,fontSize:'.82rem',marginBottom:4,color:'var(--text)'}}>{label}</label>
-        {multiline
-          ?<textarea value={extra[key]||''} onChange={e=>setExtra(x=>({...x,[key]:e.target.value}))}
-              rows={rows} placeholder={placeholder}
-              style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--border)',fontFamily:'inherit',fontSize:'.85rem',resize:'vertical',boxSizing:'border-box'}}/>
-          :<input type="text" value={extra[key]||''} onChange={e=>setExtra(x=>({...x,[key]:e.target.value}))}
-              placeholder={placeholder}
-              style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--border)',fontSize:'.85rem',boxSizing:'border-box'}}/>
-        }
-      </div>
-    );
-
-    const setupTabs=[
-      {k:'info',label:'📋 Course Info'},
-      {k:'vision',label:'🎯 Vision & Mission'},
-      {k:'previous',label:'📊 Prev. Attainment'},
-      {k:'learners',label:'👥 Learners'},
-      {k:'misc',label:'🔗 Links & Activities'},
-      {k:'uploads',label:'📎 Dept. Uploads'},
-    ];
-
-    const setupTabContent={
-      info:<div>
-        <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1rem'}}>Fill institution details and batch year. Everything else is auto-populated.</p>
-        {field('Institution Name','institution_name',false,1,'e.g. Symbiosis Institute of Technology')}
-        {field('Institution Address','institution_address',false,1,'e.g. SIU Pune 412115, Maharashtra, India')}
-        {field('Batch (e.g. 2024-28)','batch',false,1,'e.g. 2024-28')}
-        <div style={{background:'var(--card-bg)',padding:'1rem',borderRadius:8,fontSize:'.82rem',marginTop:'1rem',border:'1px solid var(--border)'}}>
-          <b>Auto-populated:</b> <span style={{color:'var(--muted)'}}>Dept: {course?.department||'—'} | Course: {course?.course_name} ({course?.course_code}) | Semester: {course?.semester} | Faculty: {course?.faculty_name}</span>
-        </div>
-      </div>,
-      vision:<div>
-        {field('Vision of the Department','vision_text',true,4,'To impart quality education with research insights...')}
-        {field('Mission (one point per line, e.g. M1: ..., M2: ...)','mission_text',true,6,'M1: To educate students on cutting-edge AIML...\nM2: To produce quality research...\nM3: To inculcate professional values...')}
-        {field('CO-PO Mapping Justification (Section 4, optional)','co_po_justification',true,4,'PO1 (Engineering Knowledge): Strongly linked to CO1...\nPO2 (Problem Analysis): Essential for CO2...')}
-      </div>,
-      previous:<div>
-        {field('Previous Year CO Attainment Summary','prev_co_attainment',true,5,'AY 2024-25: CO1 attainment = 2.8, CO2 = 2.6...')}
-        {field('Action Plan','action_plan',true,4,'Since attainment exceeded targets, plan: increase difficulty of CA3...')}
-      </div>,
-      learners:<div>
-        {field('Slow Learners (leave blank to auto-detect from marks < 40%)','slow_learners',true,4,'')}
-        {field('Advanced Learners (leave blank to auto-detect from marks > 75%)','advanced_learners',true,4,'')}
-      </div>,
-      misc:<div>
-        {field('Learning Material Links (one per line)','learning_material_links',true,4,'https://nptel.ac.in/...\nhttps://swayam.gov.in')}
-        {field('Attendance Links (one per line)','attendance_links',true,3,'Division A: https://erp.college.edu/attendance/divA')}
-        {field('Activity Reports (one per line)','activity_reports',true,5,'Guest Lecture by Dr. X on Topic Y — 12 Feb 2025')}
-      </div>,
-      uploads:<div>
-        <p style={{fontSize:'.85rem',color:'var(--muted)',marginBottom:'1.2rem'}}>Upload department-specific files — timetables, event photos, email announcements, etc.</p>
-        <div style={{background:'var(--bg)',border:'2px dashed var(--border)',borderRadius:10,padding:'1.2rem',marginBottom:'1.5rem'}}>
-          <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'0.8rem'}}>📤 Upload New File</div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0.7rem',marginBottom:'0.7rem'}}>
-            <div>
-              <label style={{display:'block',fontWeight:600,fontSize:'.8rem',marginBottom:3}}>Label *</label>
-              <input value={uploadLabel} onChange={e=>setUploadLabel(e.target.value)} placeholder="e.g. Faculty Timetable"
-                style={{width:'100%',padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:'.85rem',boxSizing:'border-box'}}/>
-            </div>
-            <div>
-              <label style={{display:'block',fontWeight:600,fontSize:'.8rem',marginBottom:3}}>Section (optional)</label>
-              <select value={uploadSection} onChange={e=>setUploadSection(e.target.value)}
-                style={{width:'100%',padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:'.85rem',background:'var(--card-bg)',color:'var(--text)'}}>
-                <option value="">— No specific section —</option>
-                {Object.entries(SECTION_NAMES).map(([n,name])=>(<option key={n} value={n}>{n}. {name}</option>))}
-              </select>
-            </div>
-          </div>
-          <input id="cfUploadInput" type="file" onChange={e=>setUploadFile(e.target.files[0])} style={{fontSize:'.85rem',marginBottom:'0.7rem'}}/>
-          {uploadErr&&<div style={{color:'#b91c1c',fontSize:'.82rem',marginBottom:'0.5rem'}}>{uploadErr}</div>}
-          <button onClick={uploadAttachment} disabled={uploading}
-            style={{padding:'0.5rem 1.2rem',background:'var(--blue2)',color:'#fff',border:'none',borderRadius:7,cursor:'pointer',fontWeight:700,fontSize:'.85rem'}}>
-            {uploading?'Uploading…':'⬆ Upload File'}
-          </button>
-        </div>
-        {attachments.length>0&&<div>
-          <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'0.7rem'}}>📁 Uploaded ({attachments.length})</div>
-          {attachments.map(a=>(
-            <div key={a.id} style={{display:'flex',alignItems:'center',gap:'0.7rem',padding:'0.6rem 0.8rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)',marginBottom:6}}>
-              <span style={{fontSize:'1.1rem'}}>{a.mime_type?.startsWith('image/')?'🖼':a.mime_type?.includes('pdf')?'📄':'📎'}</span>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontWeight:600,fontSize:'.84rem'}}>{a.label}</div>
-                <div style={{fontSize:'.75rem',color:'var(--muted)'}}>{a.filename}</div>
-              </div>
-              <button onClick={()=>deleteAttachment(a.id)} style={{padding:'4px 8px',background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,cursor:'pointer',fontSize:'.78rem',color:'#b91c1c',fontWeight:600}}>✕</button>
-            </div>
-          ))}
-        </div>}
-      </div>,
-    };
-
-    return(
-      <div style={{maxWidth:900,margin:'0 auto',padding:'0 0 3rem'}}>
-        {/* No course selected warning */}
-        {!course&&(
-          <div style={{background:'#fff7ed',border:'2px solid #fb923c',borderRadius:10,padding:'1rem 1.4rem',marginBottom:'1.2rem',display:'flex',alignItems:'center',gap:'0.8rem'}}>
-            <span style={{fontSize:'1.4rem'}}>⚠️</span>
-            <div>
-              <div style={{fontWeight:700,fontSize:'.92rem',color:'#c2410c'}}>No course selected</div>
-              <div style={{fontSize:'.83rem',color:'#92400e',marginTop:2}}>Please go to <b>Courses</b> in the sidebar and select a course before generating the course file.</div>
-            </div>
-          </div>
-        )}
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.5rem',flexWrap:'wrap',gap:'0.5rem'}}>
-          <div>
-            <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--text)'}}>📄 Full Course File Generator</div>
-            <div style={{fontSize:'.85rem',color:'var(--muted)',marginTop:2}}>
-              {course
-                ?<>Active course: <b style={{color:'var(--text)'}}>{course.course_name} ({course.course_code})</b></>
-                :<span style={{color:'#f97316'}}>No course selected — select a course from the sidebar first</span>
-              }
-            </div>
-          </div>
-          <div style={{display:'flex',gap:'0.5rem'}}>
-            <button onClick={saveExtra} disabled={saving} style={{padding:'0.55rem 1.2rem',background:'var(--card-bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',fontWeight:600,fontSize:'.85rem'}}>
-              {saving?'Saving…':'💾 Save'}
-            </button>
-            <button onClick={generate} disabled={generating||!course}
-              style={{padding:'0.6rem 1.6rem',background:!course?'#9ca3af':generating?'#6b7280':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:generating||!course?'not-allowed':'pointer',fontWeight:800,fontSize:'.95rem',display:'flex',alignItems:'center',gap:6,transition:'background .2s'}}>
-              {generating?'⏳ Generating… (this may take 10–30s)':!course?'⚡ Generate (select a course first)':'⚡ Generate & Open Editor'}
-            </button>
-          </div>
-        </div>
-
-        {err&&<div style={{background:'#fef2f2',border:'2px solid #f87171',borderRadius:8,padding:'0.85rem 1rem',marginBottom:'1rem',color:'#b91c1c',fontSize:'.87rem',fontWeight:600,display:'flex',alignItems:'center',gap:8}}>
-          <span style={{fontSize:'1.1rem'}}>❌</span> {err}
-          <button onClick={()=>setErr('')} style={{marginLeft:'auto',background:'none',border:'none',cursor:'pointer',color:'#b91c1c',fontSize:'1rem'}}>✕</button>
-        </div>}
-
-        {/* Checklist */}
-        <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem 1.2rem',marginBottom:'1.5rem'}}>
-          <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'.6rem'}}>Auto-populated sections (no action needed)</div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'.4rem .8rem',fontSize:'.82rem'}}>
-            {[{label:'Student List',note:'from Students Roster'},{label:'CO Statements & CO-PO Matrix',note:'from Course Setup'},{label:'Session Plan',note:'from Session Plan page'},{label:'Evaluation Plan',note:'from Evaluation Plan page'},{label:'CA Marks',note:'from Master Attainment File'},{label:'Question Bank',note:'from Question Bank page'},{label:'CO Attainment',note:'auto-calculated'},{label:'Slow/Advanced Learners',note:'auto-detected'},].map(item=>(
-              <div key={item.label} style={{display:'flex',alignItems:'center',gap:6}}>
-                <span style={{color:'#16a34a',fontWeight:700}}>✓</span><span>{item.label}</span><span style={{color:'var(--muted)',fontSize:'.78rem'}}>({item.note})</span>
-              </div>
-            ))}
-          </div>
-          <div style={{marginTop:'.6rem',fontSize:'.8rem',color:'var(--muted)'}}>↓ Fill in the tabs below for the remaining sections:</div>
-        </div>
-
-        {/* Setup tabs */}
-        <div style={{display:'flex',gap:4,borderBottom:'2px solid var(--border)',marginBottom:'1.2rem',overflowX:'auto'}}>
-          {setupTabs.map(t=>(
-            <button key={t.k} onClick={()=>setActiveSetupTab(t.k)}
-              style={{padding:'0.5rem 0.9rem',background:'none',border:'none',cursor:'pointer',fontWeight:activeSetupTab===t.k?700:400,color:activeSetupTab===t.k?'var(--blue2)':'var(--muted)',borderBottom:activeSetupTab===t.k?'2px solid var(--blue2)':'2px solid transparent',marginBottom:-2,whiteSpace:'nowrap',fontSize:'.85rem'}}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1.2rem'}}>
-          {loading?<div style={{textAlign:'center',padding:'2rem',color:'var(--muted)'}}>Loading saved data…</div>:setupTabContent[activeSetupTab]}
-        </div>
+function ReadOnlyTable({ columns, rows, emptyMsg }) {
+  if (!rows?.length) {
+    return (
+      <div style={{
+        padding: "22px", textAlign: "center", color: T.textMuted, fontSize: 13,
+        background: T.surface, borderRadius: 8, border: `1px dashed rgba(255,255,255,0.07)`,
+      }}>
+        {emptyMsg ?? "No data available"}
       </div>
     );
   }
-
-  // ── EDITOR MODE ────────────────────────────────────────────────────────────
-  const currentPage=docPages[activePage];
-
-  return(
-    <div style={{display:'flex',flexDirection:'column',height:'calc(100vh - 64px)',overflow:'hidden',background:'#f1f5f9'}}>
-
-      {/* Top toolbar — Word-style */}
-      <div style={{background:'#1e3a5f',color:'#fff',padding:'0 16px',display:'flex',alignItems:'center',gap:12,height:44,flexShrink:0,boxShadow:'0 2px 8px rgba(0,0,0,0.2)'}}>
-        <button onClick={()=>setMode('setup')} style={{background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',padding:'4px 10px',borderRadius:4,cursor:'pointer',fontSize:'12px',display:'flex',alignItems:'center',gap:4}}>
-          ← Setup
-        </button>
-        <div style={{width:1,height:24,background:'rgba(255,255,255,0.2)'}}/>
-        <div style={{fontSize:'13px',fontWeight:700,flex:1,opacity:0.9}}>{course?.course_name} — Course File</div>
-        <div style={{display:'flex',gap:6}}>
-          <button onClick={addPage} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'#fff',padding:'4px 12px',borderRadius:4,cursor:'pointer',fontSize:'12px',fontWeight:600}}>
-            + Add Page
-          </button>
-          <button onClick={regenerateDocx} disabled={generating} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'#fff',padding:'4px 12px',borderRadius:4,cursor:'pointer',fontSize:'12px',fontWeight:600}}>
-            {generating?'⏳ Regenerating…':'🔄 Regenerate .docx'}
-          </button>
-          <button onClick={downloadDocx} style={{background:'#22c55e',border:'none',color:'#fff',padding:'4px 14px',borderRadius:4,cursor:'pointer',fontSize:'12px',fontWeight:700}}>
-            ⬇ Download .docx
-          </button>
-        </div>
-        {ok&&<div style={{fontSize:'12px',color:'#86efac',marginLeft:8,fontWeight:600}}>{ok}</div>}
-        {err&&<div style={{fontSize:'12px',color:'#fca5a5',marginLeft:8,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:600,cursor:'pointer'}} title={err} onClick={()=>setErr('')}>❌ {err}</div>}
-      </div>
-
-      {/* Main 3-column layout */}
-      <div style={{display:'flex',flex:1,overflow:'hidden'}}>
-
-        {/* Centre — Page canvas */}
-        <div ref={pageAreaRef} style={{flex:1,overflow:'auto',padding:'24px 32px',display:'flex',flexDirection:'column',alignItems:'center',gap:0}}>
-          {currentPage&&(
-            <div style={{width:'100%',maxWidth:794,minHeight:520}}>
-              {renderPage(currentPage,activePage)}
-            </div>
-          )}
-        </div>
-
-        {/* Right — AI Chat (dark navy, matches reference design) */}
-        <div style={{width:300,background:'#0f172a',borderLeft:'1px solid #1e293b',display:'flex',flexDirection:'column',flexShrink:0}}>
-          {/* Header */}
-          <div style={{padding:'14px 16px',borderBottom:'1px solid #1e293b',display:'flex',alignItems:'center',gap:8}}>
-            <span style={{fontSize:'16px'}}>✨</span>
-            <div style={{fontWeight:700,fontSize:'13px',color:'#f1f5f9',letterSpacing:'.3px'}}>AI Table Assistant</div>
-          </div>
-          {/* Messages */}
-          <div style={{flex:1,overflow:'auto',padding:'12px 14px',display:'flex',flexDirection:'column',gap:10}}>
-            {chatHistory.map((m,i)=>(
-              <div key={i} style={{
-                background:m.role==='ai'?'#1e293b':'#1e3a5f',
-                border:`1px solid ${m.role==='ai'?'#334155':'#2d4f7c'}`,
-                borderRadius:10,padding:'10px 13px',fontSize:'12px',lineHeight:1.6,
-                color:'#e2e8f0',whiteSpace:'pre-wrap',
-                alignSelf:m.role==='ai'?'flex-start':'flex-end',
-                maxWidth:'92%',boxShadow:'0 1px 4px rgba(0,0,0,.3)',
+  return (
+    <div style={{ overflowX: "auto", borderRadius: 8, border: `1px solid ${T.border}` }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: T.surfaceHigh }}>
+            {columns.map(c => (
+              <th key={c.key} style={{
+                padding: "9px 13px", textAlign: "left", color: T.textSub,
+                fontWeight: 700, fontSize: 11, letterSpacing: "0.05em",
+                textTransform: "uppercase", borderBottom: `1px solid ${T.border}`,
+                whiteSpace: "nowrap",
               }}>
-                {m.role==='ai'&&<div style={{fontSize:'10px',color:'#64748b',marginBottom:4,fontWeight:600}}>AI Assistant</div>}
-                {m.text}
-              </div>
+                {c.label}
+              </th>
             ))}
-            {chatLoading&&(
-              <div style={{background:'#1e293b',border:'1px solid #334155',borderRadius:10,padding:'10px 13px',fontSize:'12px',color:'#64748b',display:'flex',alignItems:'center',gap:6}}>
-                <span style={{animation:'spin 1s linear infinite',display:'inline-block'}}>⏳</span> Thinking…
-              </div>
-            )}
-          </div>
-          {/* Input */}
-          <div style={{padding:'10px 14px',borderTop:'1px solid #1e293b',display:'flex',gap:8,alignItems:'flex-end'}}>
-            <textarea value={chatMsg} onChange={e=>setChatMsg(e.target.value)}
-              onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}}}
-              placeholder="Ask me to edit anything..." rows={2}
-              style={{flex:1,padding:'8px 10px',background:'#1e293b',border:'1px solid #334155',borderRadius:8,fontSize:'12px',resize:'none',fontFamily:'inherit',outline:'none',color:'#e2e8f0','::placeholder':{color:'#64748b'}}}/>
-            <button onClick={sendChat} disabled={chatLoading||!chatMsg.trim()}
-              style={{padding:'8px 12px',background:chatLoading||!chatMsg.trim()?'#1e293b':'#3b82f6',color:chatLoading||!chatMsg.trim()?'#475569':'#fff',border:'1px solid #334155',borderRadius:8,cursor:'pointer',fontSize:'13px',fontWeight:700,transition:'all .15s',flexShrink:0}}>→</button>
-          </div>
-        </div>
-      </div>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr
+              key={i}
+              style={{ borderBottom: `1px solid rgba(255,255,255,0.04)` }}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.018)"}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            >
+              {columns.map(c => (
+                <td key={c.key} style={{ padding: "8px 13px", color: "#CBD5E1", verticalAlign: "top" }}>
+                  {c.render ? c.render(row[c.key], row) : (row[c.key] ?? "—")}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
-      {/* Bottom — Page thumbnails (Canva-style) */}
-      <div style={{background:'#1e293b',borderTop:'1px solid #0f172a',height:120,flexShrink:0,display:'flex',alignItems:'center',gap:0,overflowX:'auto',padding:'0 16px',gap:10}}>
-        {docPages.map((page,idx)=>renderThumbnail(page,idx))}
-        <div onClick={addPage} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,cursor:'pointer',minWidth:72,flexShrink:0,opacity:.7}}>
-          <div style={{width:64,height:82,background:'transparent',border:'2px dashed #475569',borderRadius:3,display:'flex',alignItems:'center',justifyContent:'center',color:'#94a3b8',fontSize:'22px',transition:'all .15s'}}>+</div>
-          <div style={{fontSize:'9px',color:'#64748b',textAlign:'center'}}>Add Page</div>
-        </div>
+// ─── Info card (for auto sections) ───────────────────────────────────────────
+
+function InfoCard({ label, value }) {
+  return (
+    <div style={{
+      background: T.surface, borderRadius: 8, padding: "10px 14px",
+      border: `1px solid ${T.border}`,
+    }}>
+      <div style={{
+        fontSize: 10, color: T.textMuted, fontWeight: 700,
+        textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4,
+      }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 13, color: T.text, fontWeight: 500 }}>
+        {value ?? "—"}
       </div>
     </div>
   );
 }
 
+// ─── Attachment zone ──────────────────────────────────────────────────────────
 
-// ── HOD DASHBOARD ─────────────────────────────────────────────────────────
-// ── MASTER ATTAINMENT FILE ─────────────────────────────────────────────────
+function AttachmentZone({ courseId, sectionNo, attachments, onRefresh }) {
+  const [uploading, setUploading] = useState(false);
+  const [label, setLabel]         = useState("");
+  const [err, setErr]             = useState("");
+  const fileRef = useRef();
+
+  const mine = attachments.filter(a =>
+    sectionNo ? a.section_no === sectionNo : !a.section_no
+  );
+
+  async function handleUpload(file) {
+    if (!file) return;
+    if (!label.trim()) { setErr("Enter a label first."); return; }
+    setErr(""); setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("label", label.trim());
+      if (sectionNo) fd.append("section_no", String(sectionNo));
+      await fetch(`${API_BASE}/course-file/upload/${courseId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}` },
+        body: fd,
+      });
+      setLabel("");
+      if (fileRef.current) fileRef.current.value = "";
+      onRefresh();
+    } catch (e) {
+      setErr("Upload failed: " + e.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm("Delete this attachment?")) return;
+    try {
+      await apiFetch(`/course-file/attachment/${id}`, { method: "DELETE" });
+      onRefresh();
+    } catch (e) {
+      alert("Delete failed: " + e.message);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      {/* Existing */}
+      {mine.length > 0 && (
+        <div style={{ marginBottom: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+          {mine.map(a => (
+            <div key={a.id} style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 11px", background: T.surface, borderRadius: 7,
+              border: `1px solid ${T.border}`,
+            }}>
+              <span style={{ fontSize: 15 }}>📎</span>
+              <span style={{ flex: 1, fontSize: 12, color: "#CBD5E1", fontWeight: 500 }}>{a.label}</span>
+              <span style={{ fontSize: 11, color: T.textMuted }}>
+                {a.filename} · {fmt(a.file_size)}
+              </span>
+              <a
+                href={`${API_BASE}/course-file/attachment/${a.id}/download?token=${token()}`}
+                download
+                style={{ fontSize: 11, color: T.blueLight, textDecoration: "none", padding: "2px 6px" }}
+              >
+                ↓
+              </a>
+              <button
+                onClick={() => handleDelete(a.id)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: T.red, fontSize: 14, padding: 2, lineHeight: 1 }}
+                title="Remove"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Upload row */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          type="text"
+          placeholder="Label (e.g. Faculty Timetable)"
+          value={label}
+          onChange={e => { setLabel(e.target.value); setErr(""); }}
+          style={{ ...baseInputStyle, flex: 1, height: 36, fontSize: 12 }}
+          onFocus={e => { e.target.style.borderColor = T.borderFocus; }}
+          onBlur={e => { e.target.style.borderColor = T.border; }}
+        />
+        <input ref={fileRef} type="file" style={{ display: "none" }} onChange={e => handleUpload(e.target.files?.[0])} />
+        <button
+          onClick={() => {
+            if (!label.trim()) { setErr("Enter a label first."); return; }
+            fileRef.current?.click();
+          }}
+          disabled={uploading}
+          style={{
+            padding: "0 14px", height: 36, background: "rgba(59,130,246,0.12)",
+            border: "1px solid rgba(59,130,246,0.28)", borderRadius: 7,
+            color: T.blueLight, fontSize: 12, cursor: uploading ? "not-allowed" : "pointer",
+            whiteSpace: "nowrap", fontWeight: 600,
+          }}
+        >
+          {uploading ? "Uploading…" : "+ Attach File"}
+        </button>
+      </div>
+      {err && <p style={{ fontSize: 11, color: T.red, marginTop: 5 }}>{err}</p>}
+    </div>
+  );
+}
+
+// ─── CO / PO Attainment bars ──────────────────────────────────────────────────
+
+function AttainmentDisplay({ data }) {
+  if (!data) return (
+    <InfoBox color={T.textMuted} bg="transparent" border={T.border}>
+      No attainment data. Upload marks via the Attainment page first.
+    </InfoBox>
+  );
+
+  const coAtt = data.co_attainment ?? data.coAttainment ?? [];
+  const poAtt = data.po_attainment ?? data.poAttainment ?? [];
+
+  const barColor = v => {
+    const n = parseFloat(v);
+    if (n >= 75) return T.green;
+    if (n >= 60) return T.amber;
+    return T.red;
+  };
+
+  const BarRow = ({ id, val }) => {
+    const pct = Math.min(parseFloat(val) || 0, 100);
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
+        <span style={{ minWidth: 38, fontSize: 12, fontWeight: 700, color: "#CBD5E1" }}>{id}</span>
+        <div style={{ flex: 1, height: 8, background: "rgba(255,255,255,0.06)", borderRadius: 4, overflow: "hidden" }}>
+          <div style={{
+            width: `${pct}%`, height: "100%",
+            background: barColor(pct), borderRadius: 4,
+            transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
+          }} />
+        </div>
+        <span style={{ minWidth: 46, fontSize: 12, fontWeight: 600, color: barColor(pct), textAlign: "right" }}>
+          {pct.toFixed(1)}%
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {coAtt.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
+            CO Attainment
+          </p>
+          {coAtt.map((co, i) => (
+            <BarRow key={i} id={co.co_id ?? `CO${i+1}`} val={co.attainment ?? co.percentage ?? 0} />
+          ))}
+        </div>
+      )}
+      {poAtt.length > 0 && (
+        <div>
+          <p style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
+            PO Attainment
+          </p>
+          {poAtt.map((po, i) => (
+            <BarRow key={i} id={po.po_id ?? `PO${i+1}`} val={po.attainment ?? po.percentage ?? 0} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Section wrapper (collapsible) ───────────────────────────────────────────
+
+function SectionWrapper({ no, title, icon, auto, desc, children, hasContent }) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <section style={{ borderBottom: `1px solid rgba(255,255,255,0.05)` }}>
+      {/* Header button */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 12,
+          padding: "13px 28px", background: "transparent", border: "none",
+          cursor: "pointer", textAlign: "left",
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.022)"}
+        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, color: T.textMuted, minWidth: 22, fontFamily: T.mono }}>
+          {String(no).padStart(2, "0")}
+        </span>
+        <span style={{ fontSize: 17, color: hasContent ? T.blueLight : "#475569" }}>{icon}</span>
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: T.text, letterSpacing: "0.01em" }}>
+          {title}
+        </span>
+        {auto && <AutoBadge />}
+        {hasContent && !auto && (
+          <span
+            style={{ width: 7, height: 7, borderRadius: "50%", background: T.green, flexShrink: 0 }}
+            title="Has content"
+          />
+        )}
+        <span style={{
+          fontSize: 11, color: T.textMuted, marginLeft: 2, display: "inline-block",
+          transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.2s",
+        }}>
+          ▾
+        </span>
+      </button>
+
+      {/* Body */}
+      {open && (
+        <div style={{ padding: "2px 28px 22px 62px" }}>
+          <p style={{ fontSize: 12, color: T.textMuted, marginTop: 0, marginBottom: 14 }}>{desc}</p>
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─── AI Chat panel ────────────────────────────────────────────────────────────
+
+function AIChatPanel({ courseId, course, extra }) {
+  const [messages, setMessages] = useState(() => [{
+    role: "assistant",
+    text: `Course file loaded for ${course?.course_name ?? "this course"}.\n\nI can help you:\n• Write a department vision or mission\n• Suggest action plans for low-attainment COs\n• List which manual fields still need filling\n• Draft activity report entries`,
+  }]);
+  const [input, setInput]   = useState("");
+  const [busy, setBusy]     = useState(false);
+  const scrollRef           = useRef();
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // Update welcome message when course loads
+  useEffect(() => {
+    if (course?.course_name) {
+      setMessages(m => {
+        const updated = [...m];
+        if (updated[0]?.role === "assistant") {
+          updated[0] = {
+            ...updated[0],
+            text: `Course file loaded for ${course.course_name}.\n\nI can help you:\n• Write a department vision or mission\n• Suggest action plans for low-attainment COs\n• List which manual fields still need filling\n• Draft activity report entries`,
+          };
+        }
+        return updated;
+      });
+    }
+  }, [course?.course_name]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput("");
+    setMessages(m => [...m, { role: "user", text }]);
+    setBusy(true);
+
+    const systemCtx = [
+      `You are an AI assistant for an OBE (Outcome-Based Education) Course File editor in an Indian engineering college.`,
+      `Course: ${course?.course_name} (${course?.course_code}), Faculty: ${course?.faculty_name}, Dept: ${course?.department}.`,
+      `Current saved extra fields: ${JSON.stringify(extra)}`,
+      `Help the faculty fill in required fields. Be concise and specific. When suggesting text to paste, provide it directly.`,
+    ].join(" ");
+
+    try {
+      const res = await apiFetch("/ai/table-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: text, context: systemCtx, course_id: courseId }),
+      });
+      const reply = res.data?.reply ?? res.reply ?? res.message ?? "Done.";
+      setMessages(m => [...m, { role: "assistant", text: reply }]);
+    } catch {
+      // Local fallback
+      setMessages(m => [...m, { role: "assistant", text: localFallback(text, course, extra) }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", height: "100%",
+      background: "rgba(8,14,26,0.97)", borderLeft: `1px solid ${T.border}`,
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: "13px 16px", borderBottom: `1px solid ${T.border}`,
+        display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 15 }}>✦</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: T.text, letterSpacing: "0.02em" }}>
+          AI Assistant
+        </span>
+      </div>
+
+      {/* Messages */}
+      <div ref={scrollRef} style={{
+        flex: 1, overflowY: "auto", padding: "14px 14px",
+        display: "flex", flexDirection: "column", gap: 10,
+      }}>
+        {messages.map((m, i) => (
+          <div key={i}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: T.textMuted,
+              letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4,
+            }}>
+              {m.role === "user" ? "You" : "Assistant"}
+            </div>
+            <div style={{
+              fontSize: 12, lineHeight: 1.65,
+              color: m.role === "user" ? "#CBD5E1" : T.textSub,
+              background: m.role === "user"
+                ? "rgba(59,130,246,0.09)"
+                : "rgba(255,255,255,0.03)",
+              border: `1px solid ${m.role === "user" ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.05)"}`,
+              borderRadius: 8, padding: "9px 12px", whiteSpace: "pre-wrap",
+            }}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {busy && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+            <Spinner size={14} />
+            <span style={{ fontSize: 11, color: T.textMuted }}>Thinking…</span>
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: "10px 12px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
+        <textarea
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Ask about any section… (Enter to send)"
+          rows={2}
+          style={{
+            flex: 1, background: "rgba(15,23,42,0.7)", border: `1px solid ${T.border}`,
+            borderRadius: 7, color: "#CBD5E1", fontSize: 12,
+            padding: "8px 10px", resize: "none", outline: "none", fontFamily: T.sans,
+          }}
+        />
+        <button
+          onClick={send}
+          disabled={busy || !input.trim()}
+          style={{
+            padding: "8px 12px", background: (busy || !input.trim()) ? "rgba(59,130,246,0.15)" : T.blue,
+            border: "none", borderRadius: 7, color: "#fff",
+            cursor: (busy || !input.trim()) ? "not-allowed" : "pointer",
+            fontSize: 14, alignSelf: "flex-end", transition: "background 0.15s",
+          }}
+        >
+          ↑
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function localFallback(text, course, extra) {
+  const t = text.toLowerCase();
+  const dept = course?.department ?? "Engineering";
+  if (t.includes("vision"))
+    return `Suggested vision:\n\n"To be a globally recognized centre of excellence in ${dept}, nurturing innovative, ethical, and socially responsible professionals."\n\nPaste this in Section 1 → Department Vision.`;
+  if (t.includes("mission"))
+    return `Suggested missions (enter one per line):\n\nM1: To provide quality education through outcome-based learning.\nM2: To foster research culture and industry collaboration.\nM3: To develop professionals with strong ethical values.`;
+  if (t.includes("action plan") || t.includes("attainment"))
+    return `Typical action plan:\n\n• Remedial classes for students below 40%\n• Additional tutorials for weak CO topics\n• Peer learning groups\n• Reassessment after 2 weeks of intervention`;
+  if (t.includes("missing") || t.includes("incomplete"))
+    return `Fields requiring manual input:\n• Section 1 — Vision & Mission text\n• Section 5 — Previous CO attainment + action plan\n• Section 8 — Slow/Advanced learner names\n• Section 10 — Activity reports\n• Section 11 — Resource links\n• Section 13 — Attendance portal URL`;
+  return `Try asking:\n• "Write a vision for ${dept} department"\n• "Suggest action plan for low attainment"\n• "What fields are missing?"`;
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+function CourseFileEditor({ courseId }) {
+  // The backend only persists these exact 10 fields in CourseFileExtraPayload.
+  // Do NOT add extra keys here — they'll silently disappear after save/reload.
+  const EXTRA_DEFAULTS = {
+    vision_text:            "",
+    mission_text:           "",
+    batch:                  "",
+    prev_co_attainment:     "",
+    action_plan:            "",
+    slow_learners:          "",
+    advanced_learners:      "",
+    activity_reports:       "",
+    learning_material_links:"",
+    attendance_links:       "",
+  };
+
+  const [course,      setCourse]      = useState(null);
+  const [extra,       setExtra]       = useState(EXTRA_DEFAULTS);
+  const [sessionPlan, setSessionPlan] = useState({ rows: [], cols: [] });
+  const [evalPlan,    setEvalPlan]    = useState({ rows: [], cols: [] });
+  const [attainment,  setAttainment]  = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const [generating,  setGenerating]  = useState(false);
+  const [saveStatus,  setSaveStatus]  = useState(null); // "saved" | "error" | null
+  const [loadErrors,  setLoadErrors]  = useState({});
+
+  // Ref always holds latest extra — fixes stale-closure autosave bug
+  const extraRef   = useRef(extra);
+  const saveTimer  = useRef(null);
+
+  useEffect(() => { extraRef.current = extra; }, [extra]);
+
+  // ── Load ──────────────────────────────────────────────────────────────────
+
+  useEffect(() => { if (courseId) loadAll(); }, [courseId]);
+
+  async function loadAll() {
+    setLoading(true);
+    const errors = {};
+
+    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes] =
+      await Promise.allSettled([
+        apiFetch(`/courses/${courseId}`),
+        apiFetch(`/course-file/extra/${courseId}`),
+        apiFetch(`/session-plan/view/${courseId}`),
+        apiFetch(`/evaluation-plan/view/${courseId}`),
+        apiFetch(`/attainment/calculate/${courseId}`),
+        apiFetch(`/course-file/attachments/${courseId}`),
+      ]);
+
+    if (courseRes.status === "fulfilled") {
+      setCourse(courseRes.value.data ?? courseRes.value);
+    } else {
+      errors.course = courseRes.reason?.message;
+    }
+
+    if (extraRes.status === "fulfilled") {
+      const d = extraRes.value.data ?? extraRes.value ?? {};
+      if (Object.keys(d).length > 0) {
+        setExtra(prev => ({ ...prev, ...d }));
+      }
+    } else {
+      errors.extra = extraRes.reason?.message;
+    }
+
+    // Session plan: { data: [...], cols: [...] } — both at top level, not nested
+    if (sessionRes.status === "fulfilled") {
+      const v = sessionRes.value;
+      setSessionPlan({
+        rows: v.data ?? [],
+        cols: v.cols ?? [],
+      });
+    } else {
+      errors.session = sessionRes.reason?.message;
+    }
+
+    // Eval plan: same shape
+    if (evalRes.status === "fulfilled") {
+      const v = evalRes.value;
+      setEvalPlan({
+        rows: v.data ?? [],
+        cols: v.cols ?? [],
+      });
+    } else {
+      errors.eval = evalRes.reason?.message;
+    }
+
+    if (attainRes.status === "fulfilled") {
+      setAttainment(attainRes.value.data ?? attainRes.value);
+    } else {
+      errors.attainment = attainRes.reason?.message;
+    }
+
+    if (attachRes.status === "fulfilled") {
+      setAttachments(attachRes.value.data ?? []);
+    } else {
+      errors.attachments = attachRes.reason?.message;
+    }
+
+    setLoadErrors(errors);
+    setLoading(false);
+  }
+
+  async function refreshAttachments() {
+    try {
+      const res = await apiFetch(`/course-file/attachments/${courseId}`);
+      setAttachments(res.data ?? []);
+    } catch { /* silent */ }
+  }
+
+  // ── Auto-save (debounced, no stale closure) ───────────────────────────────
+
+  // FIX: don't pass extra as argument — read from ref at flush time
+  const updateExtra = useCallback((key, value) => {
+    setExtra(prev => {
+      const next = { ...prev, [key]: value };
+      extraRef.current = next;
+      return next;
+    });
+    setSaveStatus(null);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      // extraRef.current is always fresh here
+      autoSave(extraRef.current);
+    }, 1500);
+  }, []);  // no deps — reads ref at call time
+
+  async function autoSave(data) {
+    try {
+      await apiFetch(`/course-file/extra/${courseId}`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch {
+      setSaveStatus("error");
+    }
+  }
+
+  async function saveNow() {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaving(true);
+    try {
+      await apiFetch(`/course-file/extra/${courseId}`, {
+        method: "POST",
+        body: JSON.stringify(extraRef.current),
+      });
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (e) {
+      setSaveStatus("error");
+      alert("Save failed: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleGenerate() {
+    setGenerating(true);
+    try {
+      await saveNow();
+      await apiFetch(`/course-file/generate/${courseId}`, { method: "POST" });
+      window.open(`${API_BASE}/course-file/download/${courseId}?token=${token()}`, "_blank");
+    } catch (e) {
+      alert("Generation failed: " + e.message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+
+  const sessionCols = useMemo(() => {
+    if (sessionPlan.cols?.length) return sessionPlan.cols;
+    if (!sessionPlan.rows?.length) return [];
+    return Object.keys(sessionPlan.rows[0]).map(k => ({
+      key: k,
+      label: k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+    }));
+  }, [sessionPlan]);
+
+  const evalCols = useMemo(() => {
+    if (evalPlan.cols?.length) return evalPlan.cols;
+    if (!evalPlan.rows?.length) return [];
+    return Object.keys(evalPlan.rows[0]).map(k => ({
+      key: k,
+      label: k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+    }));
+  }, [evalPlan]);
+
+  const hasContent = useCallback((field) => {
+    return !!(field && extra[field]?.trim().length > 0);
+  }, [extra]);
+
+  // Progress: count filled sections
+  const readySections = useMemo(() => {
+    return SECTION_META.filter(s => {
+      if (s.auto) return true;
+      const field = SECTION_FIELD_MAP[s.no];
+      return field ? hasContent(field) : false;
+    }).length;
+  }, [hasContent]);
+
+  // ── Guard ─────────────────────────────────────────────────────────────────
+
+  if (!courseId) {
+    return (
+      <div style={{
+        height: "100%", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        color: T.textMuted, fontSize: 14, gap: 8,
+        fontFamily: T.sans, background: T.bg,
+      }}>
+        <span style={{ fontSize: 32 }}>📄</span>
+        <span>Select a course to view its file</span>
+      </div>
+    );
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div style={{
+      display: "flex", height: "100%",
+      fontFamily: T.sans, background: T.bg, color: T.text, overflow: "hidden",
+    }}>
+
+      {/* ── LEFT: Document editor ─────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
+
+        {/* Top bar */}
+        <div style={{
+          display: "flex", alignItems: "center", padding: "0 20px", height: 52, flexShrink: 0,
+          borderBottom: `1px solid ${T.border}`, background: "rgba(8,14,26,0.97)", gap: 12,
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: T.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {loading ? "Loading…" : `${course?.course_name ?? "Untitled"} — Course File`}
+          </span>
+
+          {saveStatus === "saved" && (
+            <span style={{ fontSize: 12, color: T.green, display: "flex", alignItems: "center", gap: 4 }}>
+              ✓ Saved
+            </span>
+          )}
+          {saveStatus === "error" && (
+            <span style={{ fontSize: 12, color: T.red }}>⚠ Save failed</span>
+          )}
+
+          <button
+            onClick={saveNow}
+            disabled={saving || loading}
+            style={{
+              padding: "0 16px", height: 34,
+              background: "rgba(255,255,255,0.06)", border: `1px solid rgba(255,255,255,0.1)`,
+              borderRadius: 7, color: "#CBD5E1", fontSize: 12, cursor: "pointer", fontWeight: 600,
+            }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+
+          <button
+            onClick={handleGenerate}
+            disabled={generating || loading}
+            style={{
+              padding: "0 16px", height: 34,
+              background: generating ? "rgba(16,185,129,0.15)" : "#10B981",
+              border: "none", borderRadius: 7, color: "#fff",
+              fontSize: 12, cursor: generating ? "not-allowed" : "pointer", fontWeight: 700,
+              display: "flex", alignItems: "center", gap: 6,
+            }}
+          >
+            {generating ? <><Spinner size={13} /> Generating…</> : "↓ Download .docx"}
+          </button>
+        </div>
+
+        {/* Loading state */}
+        {loading ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
+            <Spinner />
+            <span style={{ fontSize: 13, color: T.textMuted }}>Loading course file…</span>
+          </div>
+        ) : (
+          <div style={{ flex: 1, overflowY: "auto" }}>
+
+            {/* ── Cover sheet ─────────────────────────────────────────────── */}
+            <div style={{
+              margin: "22px 28px 0", padding: "20px 24px",
+              background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10,
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
+                Cover Sheet Preview
+              </div>
+              <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+                {/* Left info */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 3 }}>
+                    {course?.institution_name ?? "Institution"}
+                  </div>
+                  <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 16 }}>
+                    OBE Course File — Academic Year {course?.academic_year ?? "—"}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                    {[
+                      ["Course", `${course?.course_name ?? "—"} (${course?.course_code ?? "—"})`],
+                      ["Faculty", course?.faculty_name ?? "—"],
+                      ["Department", course?.department ?? "—"],
+                      ["Semester", course?.semester ?? "—"],
+                      ["Credits", course?.credits ?? "—"],
+                      ["Total Hours", course?.total_hours ?? "—"],
+                    ].map(([k, v]) => (
+                      <div key={k}>
+                        <div style={{ fontSize: 10, color: T.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{k}</div>
+                        <div style={{ fontSize: 12, color: "#CBD5E1", marginTop: 3 }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Batch input */}
+                <div style={{ minWidth: 150 }}>
+                  <Field label="Batch Year">
+                    <TextInput
+                      value={extra.batch}
+                      onChange={v => updateExtra("batch", v)}
+                      placeholder="e.g. 2022-26"
+                    />
+                  </Field>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Progress bar ────────────────────────────────────────────── */}
+            <div style={{ margin: "14px 28px 0", display: "flex", alignItems: "center", gap: 3 }}>
+              {SECTION_META.map(s => {
+                const field = SECTION_FIELD_MAP[s.no];
+                const filled = s.auto || hasContent(field);
+                return (
+                  <div
+                    key={s.no}
+                    title={`${s.no}. ${s.title}`}
+                    style={{
+                      flex: 1, height: 4, borderRadius: 2,
+                      background: filled ? T.green : "rgba(255,255,255,0.06)",
+                      transition: "background 0.3s",
+                    }}
+                  />
+                );
+              })}
+              <span style={{ fontSize: 11, color: T.textMuted, marginLeft: 10, whiteSpace: "nowrap" }}>
+                {readySections} / 13 ready
+              </span>
+            </div>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 1 — Vision & Mission
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={1} {...SECTION_META[0]} hasContent={hasContent("vision_text")}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Field label="Department Vision" required hint="Single sentence capturing the long-term aspiration">
+                  <Textarea
+                    value={extra.vision_text}
+                    onChange={v => updateExtra("vision_text", v)}
+                    placeholder={"To be a globally recognized centre of excellence in Computer Science, nurturing innovative, ethical, and socially responsible professionals."}
+                    rows={4}
+                  />
+                </Field>
+                <Field label="Department Mission" hint="Enter M1, M2, M3… on separate lines">
+                  <Textarea
+                    value={extra.mission_text}
+                    onChange={v => updateExtra("mission_text", v)}
+                    placeholder={"M1: Provide quality outcome-based education through modern pedagogy.\nM2: Foster research culture and industry collaboration.\nM3: Develop professionals with strong ethical and social values."}
+                    rows={4}
+                  />
+                </Field>
+              </div>
+              <AttachmentZone courseId={courseId} sectionNo={1} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 2 — Course Information (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={2} {...SECTION_META[1]} hasContent={!!course}>
+              {course ? (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                  {[
+                    ["Course Name",    course.course_name],
+                    ["Course Code",    course.course_code],
+                    ["Credits",        course.credits],
+                    ["Total Hours",    course.total_hours],
+                    ["Faculty Name",   course.faculty_name],
+                    ["Department",     course.department],
+                    ["Semester",       course.semester],
+                    ["Academic Year",  course.academic_year],
+                    ["Batch",          extra.batch || <span style={{ color: T.textMuted, fontStyle: "italic" }}>Set in cover sheet ↑</span>],
+                  ].map(([k, v]) => (
+                    <InfoCard key={k} label={k} value={v} />
+                  ))}
+                </div>
+              ) : (
+                <InfoBox color={T.red} bg="rgba(239,68,68,0.06)" border="rgba(239,68,68,0.2)">
+                  ⚠ {loadErrors.course ?? "Could not load course data"}
+                </InfoBox>
+              )}
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 3 — Course Outcomes (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={3} {...SECTION_META[2]} hasContent={!!course?.cos?.length}>
+              <ReadOnlyTable
+                columns={[
+                  { key: "co_id",      label: "CO ID" },
+                  { key: "statement",  label: "Statement" },
+                  {
+                    key: "bloom_level", label: "Bloom's Level",
+                    render: v => (
+                      <span style={{
+                        padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700,
+                        background: `${bloomColor(v)}22`, color: bloomColor(v),
+                      }}>
+                        {v}
+                      </span>
+                    ),
+                  },
+                ]}
+                rows={course?.cos ?? []}
+                emptyMsg={
+                  loadErrors.course
+                    ? `⚠ ${loadErrors.course}`
+                    : "No COs defined. Complete course setup first."
+                }
+              />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 4 — CO-PO Mapping (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper
+              no={4}
+              {...SECTION_META[3]}
+              hasContent={!!course?.co_po_matrix && Object.keys(course.co_po_matrix ?? {}).length > 0}
+            >
+              {course?.co_po_matrix && course?.cos?.length && course?.pos?.length ? (
+                <div style={{ overflowX: "auto", borderRadius: 8, border: `1px solid ${T.border}` }}>
+                  <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: "100%" }}>
+                    <thead>
+                      <tr style={{ background: T.surfaceHigh }}>
+                        <th style={{ padding: "9px 14px", color: T.textSub, fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", minWidth: 56 }}>
+                          CO \ PO
+                        </th>
+                        {course.pos.map(po => (
+                          <th key={po.po_id} style={{
+                            padding: "9px 10px", color: T.textSub, fontWeight: 600,
+                            borderBottom: `1px solid ${T.border}`, textAlign: "center", minWidth: 44,
+                          }}>
+                            {po.po_id}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {course.cos.map((co, i) => (
+                        <tr key={co.co_id} style={{
+                          borderBottom: `1px solid rgba(255,255,255,0.04)`,
+                          background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.012)",
+                        }}>
+                          <td style={{ padding: "8px 14px", color: T.text, fontWeight: 700 }}>{co.co_id}</td>
+                          {course.pos.map(po => {
+                            const val = course.co_po_matrix?.[co.co_id]?.[po.po_id] ?? 0;
+                            const bg  = ["transparent","rgba(59,130,246,0.12)","rgba(59,130,246,0.3)","rgba(59,130,246,0.55)"];
+                            return (
+                              <td key={po.po_id} style={{
+                                padding: "8px 10px", textAlign: "center",
+                                color: val ? T.blueLight : "#475569",
+                                fontWeight: val ? 700 : 400,
+                                background: bg[val] ?? "transparent",
+                              }}>
+                                {val || "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <InfoBox color={T.textMuted} bg="transparent" border={T.border}>
+                  CO-PO matrix not available. Complete course setup to populate.
+                </InfoBox>
+              )}
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 5 — Previous CO Attainment (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={5} {...SECTION_META[4]} hasContent={hasContent("prev_co_attainment")}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Field label="Previous Year CO Attainment" required hint="Summarise attainment % or paste table data">
+                  <Textarea
+                    value={extra.prev_co_attainment}
+                    onChange={v => updateExtra("prev_co_attainment", v)}
+                    placeholder={"CO1: 72.4%\nCO2: 68.1%\nCO3: 75.8%\nCO4: 61.2%\nCO5: 70.0%"}
+                    rows={6}
+                    mono
+                  />
+                </Field>
+                <Field label="Action Plan" required hint="Remedial actions taken to address attainment gaps">
+                  <Textarea
+                    value={extra.action_plan}
+                    onChange={v => updateExtra("action_plan", v)}
+                    placeholder={"• Remedial sessions for students below 60%\n• Additional tutorials for CO2 topics\n• Peer learning groups formed\n• Reassessment conducted in Week 12"}
+                    rows={6}
+                  />
+                </Field>
+              </div>
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 6 — Session Plan (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={6} {...SECTION_META[5]} hasContent={sessionPlan.rows.length > 0}>
+              {loadErrors.session ? (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ {loadErrors.session.includes("404") || loadErrors.session.includes("No session")
+                    ? "Session plan not generated yet. Go to Session Plan page to generate."
+                    : loadErrors.session}
+                </InfoBox>
+              ) : (
+                <ReadOnlyTable
+                  columns={sessionCols}
+                  rows={sessionPlan.rows.slice(0, 100)}
+                  emptyMsg="No session plan data. Generate from Session Plan page."
+                />
+              )}
+              {sessionPlan.rows.length > 100 && (
+                <p style={{ fontSize: 11, color: T.textMuted, marginTop: 8 }}>
+                  Showing 100 of {sessionPlan.rows.length} rows. Full data included in .docx export.
+                </p>
+              )}
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 7 — Evaluation Plan (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={7} {...SECTION_META[6]} hasContent={evalPlan.rows.length > 0}>
+              {loadErrors.eval ? (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ {loadErrors.eval.includes("404") || loadErrors.eval.includes("No evaluation")
+                    ? "Evaluation plan not generated yet. Go to Evaluation Plan page to generate."
+                    : loadErrors.eval}
+                </InfoBox>
+              ) : (
+                <ReadOnlyTable
+                  columns={evalCols}
+                  rows={evalPlan.rows}
+                  emptyMsg="No evaluation plan data. Generate from Evaluation Plan page."
+                />
+              )}
+              {/* Evaluation config summary */}
+              {course?.evaluation_config && (
+                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: T.textMuted }}>
+                    CA: <strong style={{ color: "#CBD5E1" }}>{course.evaluation_config.continuous_assessment_total}</strong>
+                  </span>
+                  <span style={{ fontSize: 11, color: T.textMuted }}>
+                    ESE: <strong style={{ color: "#CBD5E1" }}>{course.evaluation_config.end_sem_total}</strong>
+                  </span>
+                  {Object.entries(course.evaluation_config.components ?? {}).map(([k, v]) => (
+                    <span key={k} style={{ fontSize: 11, color: T.textMuted }}>
+                      {k}: <strong style={{ color: "#CBD5E1" }}>{v}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 8 — Slow & Advanced Learners (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={8} {...SECTION_META[7]} hasContent={hasContent("slow_learners")}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Field label="Slow Learners" hint="Names, PRNs, or list of students needing extra support">
+                  <Textarea
+                    value={extra.slow_learners}
+                    onChange={v => updateExtra("slow_learners", v)}
+                    placeholder={"Student Name | PRN | Weak COs\n----------------------------------\nAnkita Sharma | 22010001 | CO2, CO4\nRaj Patel     | 22010023 | CO1, CO3, CO5"}
+                    rows={6}
+                    mono
+                  />
+                </Field>
+                <Field label="Advanced Learners" hint="Students with consistently high performance">
+                  <Textarea
+                    value={extra.advanced_learners}
+                    onChange={v => updateExtra("advanced_learners", v)}
+                    placeholder={"Student Name | PRN | Achievements\n----------------------------------\nPriya Mehta  | 22010012 | 95%+ in all COs\nAkash Gupta  | 22010034 | Research paper submitted"}
+                    rows={6}
+                    mono
+                  />
+                </Field>
+              </div>
+              <AttachmentZone courseId={courseId} sectionNo={8} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 9 — CO Attainment Results (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={9} {...SECTION_META[8]} hasContent={!!attainment}>
+              {loadErrors.attainment ? (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ {loadErrors.attainment.includes("404")
+                    ? "No attainment data yet. Upload student marks via the Attainment page first."
+                    : loadErrors.attainment}
+                </InfoBox>
+              ) : (
+                <AttainmentDisplay data={attainment} />
+              )}
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 10 — Activity Reports (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={10} {...SECTION_META[9]} hasContent={hasContent("activity_reports")}>
+              <Field label="Activity Reports" required hint="List co-curricular events, guest lectures, industrial visits, etc.">
+                <Textarea
+                  value={extra.activity_reports}
+                  onChange={v => updateExtra("activity_reports", v)}
+                  placeholder={"Date       | Activity                         | Organized By  | Participants\n----------------------------------------------------------------------------\n12-Sep-2024 | Guest Lecture on Cloud Computing  | CSE Dept      | 45 students\n18-Oct-2024 | Industrial Visit to Infosys        | TnP Cell      | 60 students\n25-Nov-2024 | Hackathon 2024                    | Student Council| 30 teams"}
+                  rows={7}
+                  mono
+                />
+              </Field>
+              <AttachmentZone courseId={courseId} sectionNo={10} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 11 — Learning Materials (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={11} {...SECTION_META[10]} hasContent={hasContent("learning_material_links")}>
+              <Field label="Learning Material Links" required hint="Textbooks, NPTEL, YouTube playlists — one entry per line">
+                <Textarea
+                  value={extra.learning_material_links}
+                  onChange={v => updateExtra("learning_material_links", v)}
+                  placeholder={"Textbook: Introduction to Machine Learning — Goodfellow et al.\nhttps://www.coursera.org/learn/machine-learning\nhttps://nptel.ac.in/courses/106/106/106106139/\nhttps://www.youtube.com/playlist?list=PLkDaE6sCZn6Ec-XTbcX1uRg2_u4xOEky0"}
+                  rows={6}
+                  mono
+                />
+              </Field>
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 12 — Question Papers (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={12} {...SECTION_META[11]} hasContent={false}>
+              <InfoBox>
+                ⚡ Question papers are auto-included from the Question Bank. Generate papers from
+                the Question Paper section for them to appear here.
+              </InfoBox>
+              <div style={{ marginTop: 12 }}>
+                <AttachmentZone courseId={courseId} sectionNo={12} attachments={attachments} onRefresh={refreshAttachments} />
+              </div>
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 13 — Attendance Records (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={13} {...SECTION_META[12]} hasContent={hasContent("attendance_links")}>
+              <Field label="Attendance Links / Summary" required hint="Paste portal URL and any attendance summary data">
+                <Textarea
+                  value={extra.attendance_links}
+                  onChange={v => updateExtra("attendance_links", v)}
+                  placeholder={"Portal: https://attendance.example.edu/course/77687\n\nSummary:\n≥75% attendance: 48 students\n60–74%: 8 students\nBelow 60% (detained): 2 students"}
+                  rows={6}
+                  mono
+                />
+              </Field>
+              <AttachmentZone courseId={courseId} sectionNo={13} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            <div style={{ height: 48 }} />
+          </div>
+        )}
+      </div>
+
+      {/* ── RIGHT: AI assistant ───────────────────────────────────────────── */}
+      <div style={{ width: 296, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <AIChatPanel courseId={courseId} course={course} extra={extra} />
+      </div>
+    </div>
+  );
+}
+
+function CourseFilePage({course}){
+  if(!course){
+    return(
+      <div className="page-body fade-up">
+        <Alrt t="warning" msg="Select a course first from the Courses page."/>
+      </div>
+    );
+  }
+  return(
+    <div style={{height:'calc(100vh - 52px)',overflow:'hidden'}}>
+      <CourseFileEditor courseId={course.id} />
+    </div>
+  );
+}
 function MasterAttainmentPage({course}){
   const API=window.API||'https://obe-automate.onrender.com';
   const tok=()=>sessionStorage.getItem('obe_token');
