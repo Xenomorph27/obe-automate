@@ -4955,7 +4955,7 @@ function SectionWrapper({ no, title, icon, auto, desc, children, hasContent }) {
 
 // ─── AI Chat panel ────────────────────────────────────────────────────────────
 
-function AIChatPanel({ courseId, course, extra }) {
+function CourseFileAIPanel({ courseId, course, extra }) {
   const [messages, setMessages] = useState(() => [{
     role: "assistant",
     text: `Course file loaded for ${course?.course_name ?? "this course"}.\n\nI can help you:\n• Write a department vision or mission\n• Suggest action plans for low-attainment COs\n• List which manual fields still need filling\n• Draft activity report entries`,
@@ -5800,7 +5800,7 @@ function CourseFileEditor({ courseId }) {
 
       {/* ── RIGHT: AI assistant ───────────────────────────────────────────── */}
       <div style={{ width: 296, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <AIChatPanel courseId={courseId} course={course} extra={extra} />
+        <CourseFileAIPanel courseId={courseId} course={course} extra={extra} />
       </div>
     </div>
   );
