@@ -4457,28 +4457,32 @@ const API_BASE = window.API || 'https://obe-automate.onrender.com';
 
 // Maps section number → which extra field drives the "has content" indicator
 const SECTION_FIELD_MAP = {
-  1: "vision_text",
-  5: "prev_co_attainment",
-  8: "slow_learners",
+  1:  "vision_text",
+  2:  "po_peo_pso_text",
+  3:  "syllabus_timetable",
+  5:  "prev_co_attainment",
+  8:  "slow_learners",
   10: "activity_reports",
   11: "learning_material_links",
   13: "attendance_links",
+  14: "student_list",
 };
 
 const SECTION_META = [
-  { no: 1,  title: "Vision & Mission",        icon: "◈", auto: false, desc: "Department vision and mission statements" },
-  { no: 2,  title: "Course Information",       icon: "◉", auto: true,  desc: "Auto-populated from course setup" },
-  { no: 3,  title: "Course Outcomes (COs)",    icon: "◈", auto: true,  desc: "Auto-populated from course setup" },
-  { no: 4,  title: "CO-PO Mapping",            icon: "◉", auto: true,  desc: "Auto-populated from course setup" },
-  { no: 5,  title: "Previous CO Attainment",   icon: "◈", auto: false, desc: "Previous year CO attainment + action plan" },
-  { no: 6,  title: "Session Plan",             icon: "◉", auto: true,  desc: "Auto-populated from Session Plan page" },
-  { no: 7,  title: "Evaluation Plan",          icon: "◈", auto: true,  desc: "Auto-populated from Evaluation Plan page" },
-  { no: 8,  title: "Slow & Advanced Learners", icon: "◉", auto: false, desc: "Student categorisation and interventions" },
-  { no: 9,  title: "CO Attainment Results",    icon: "◈", auto: true,  desc: "Auto-populated from attainment data" },
-  { no: 10, title: "Activity Reports",         icon: "◉", auto: false, desc: "Co-curricular and extracurricular activities" },
-  { no: 11, title: "Learning Materials",       icon: "◈", auto: false, desc: "Textbooks, web links, and study resources" },
-  { no: 12, title: "Question Papers",          icon: "◉", auto: true,  desc: "Auto-populated from question bank" },
-  { no: 13, title: "Attendance Records",       icon: "◈", auto: false, desc: "Attendance portal links and summary" },
+  { no: 1,  title: "Vision & Mission",              icon: "◈", auto: false, desc: "Department vision and mission statements" },
+  { no: 2,  title: "POs, PEOs & PSOs",              icon: "◉", auto: false, desc: "Program Outcomes, Educational Objectives, and Specific Outcomes" },
+  { no: 3,  title: "Syllabus & Timetable",          icon: "◈", auto: false, desc: "Course syllabus and faculty personal timetable" },
+  { no: 4,  title: "CO Statements & CO-PO Mapping", icon: "◉", auto: true,  desc: "Auto-populated from course setup — COs, Bloom\'s levels, CO-PO matrix" },
+  { no: 5,  title: "Previous CO Attainment",        icon: "◈", auto: false, desc: "Previous year CO attainment + action plan" },
+  { no: 6,  title: "Session Plan",                  icon: "◉", auto: true,  desc: "Auto-populated from Session Plan page" },
+  { no: 7,  title: "Evaluation Plan",               icon: "◈", auto: true,  desc: "Auto-populated from Evaluation Plan page" },
+  { no: 8,  title: "Slow & Advanced Learners",      icon: "◉", auto: false, desc: "Student categorisation and interventions" },
+  { no: 9,  title: "CO Attainment Results",         icon: "◈", auto: true,  desc: "Auto-populated from attainment data" },
+  { no: 10, title: "Activity Reports",              icon: "◉", auto: false, desc: "Co-curricular and extracurricular activities" },
+  { no: 11, title: "Learning Materials",            icon: "◈", auto: false, desc: "Textbooks, web links, and study resources" },
+  { no: 12, title: "Question Bank",                 icon: "◉", auto: true,  desc: "Auto-populated from question bank" },
+  { no: 13, title: "Attendance Records",            icon: "◈", auto: false, desc: "Attendance portal links and summary" },
+  { no: 14, title: "Student List",                  icon: "◉", auto: false, desc: "Batch-wise student roster with PRNs" },
 ];
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
@@ -4519,11 +4523,12 @@ const T = {
   bg:          "#080E1A",
   surface:     "rgba(15,23,42,0.65)",
   surfaceHigh: "rgba(22,32,55,0.8)",
-  border:      "rgba(255,255,255,0.07)",
+  border:      "rgba(255,255,255,0.13)",
   borderFocus: "#3B82F6",
-  text:        "#E2E8F0",
-  textMuted:   "#64748B",
-  textSub:     "#94A3B8",
+  borderArea:  "rgba(255,255,255,0.18)",
+  text:        "#F1F5F9",
+  textMuted:   "#94A3B8",
+  textSub:     "#CBD5E1",
   blue:        "#3B82F6",
   blueLight:   "#60A5FA",
   green:       "#22C55E",
@@ -4907,7 +4912,7 @@ function SectionWrapper({ no, title, icon, auto, desc, children, hasContent }) {
   const [open, setOpen] = useState(true);
 
   return (
-    <section style={{ borderBottom: `1px solid rgba(255,255,255,0.05)` }}>
+    <section style={{ borderBottom: `1px solid rgba(255,255,255,0.08)` }}>
       {/* Header button */}
       <button
         onClick={() => setOpen(o => !o)}
@@ -5018,11 +5023,11 @@ function CourseFileAIPanel({ courseId, course, extra }) {
   return (
     <div style={{
       display: "flex", flexDirection: "column", height: "100%",
-      background: "rgba(8,14,26,0.97)", borderLeft: `1px solid ${T.border}`,
+      background: "rgba(8,14,26,0.97)",
     }}>
       {/* Header */}
       <div style={{
-        padding: "13px 16px", borderBottom: `1px solid ${T.border}`,
+        padding: "13px 16px", borderBottom: `1px solid ${T.borderArea}`,
         display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
       }}>
         <span style={{ fontSize: 15 }}>✦</span>
@@ -5110,6 +5115,138 @@ function localFallback(text, course, extra) {
   return `Try asking:\n• "Write a vision for ${dept} department"\n• "Suggest action plan for low attainment"\n• "What fields are missing?"`;
 }
 
+// ─── Custom Tab Section ───────────────────────────────────────────────────────
+
+function CustomTabSection({ tab, idx, courseId, attachments, onRefresh, onUpdate, onDelete }) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleVal, setTitleVal]         = useState(tab.title);
+  const sectionNo = `C${idx + 1}`;
+
+  return (
+    <section style={{ borderBottom: `1px solid rgba(255,255,255,0.08)` }}>
+      <div style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 12,
+        padding: "13px 28px", background: "transparent",
+      }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: T.textMuted, minWidth: 22, fontFamily: T.mono }}>
+          {sectionNo}
+        </span>
+        <span style={{ fontSize: 17, color: T.amber }}>✦</span>
+        {editingTitle ? (
+          <input
+            autoFocus
+            value={titleVal}
+            onChange={e => setTitleVal(e.target.value)}
+            onBlur={() => { setEditingTitle(false); onUpdate("title", titleVal); }}
+            onKeyDown={e => { if (e.key === "Enter") { setEditingTitle(false); onUpdate("title", titleVal); } }}
+            style={{
+              flex: 1, background: "rgba(8,14,26,0.7)", border: `1px solid ${T.borderFocus}`,
+              borderRadius: 6, color: T.text, fontSize: 14, fontWeight: 600, padding: "4px 8px",
+              outline: "none", fontFamily: T.sans,
+            }}
+          />
+        ) : (
+          <span
+            onClick={() => setEditingTitle(true)}
+            title="Click to rename"
+            style={{ flex: 1, fontSize: 14, fontWeight: 600, color: T.text, cursor: "text", letterSpacing: "0.01em" }}
+          >
+            {tab.title || `Custom Section ${idx + 1}`}
+          </span>
+        )}
+        <span style={{ fontSize: 10, color: T.amber, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 4, padding: "2px 7px" }}>
+          Custom
+        </span>
+        <button
+          onClick={onDelete}
+          title="Delete this section"
+          style={{ background: "none", border: "none", cursor: "pointer", color: T.red, fontSize: 15, padding: "2px 6px", lineHeight: 1, opacity: 0.7 }}
+          onMouseEnter={e => e.currentTarget.style.opacity = "1"}
+          onMouseLeave={e => e.currentTarget.style.opacity = "0.7"}
+        >
+          ×
+        </button>
+      </div>
+      <div style={{ padding: "2px 28px 22px 62px" }}>
+        <p style={{ fontSize: 12, color: T.textMuted, marginTop: 0, marginBottom: 14 }}>
+          Custom section — click the title above to rename.
+        </p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          {[
+            {t:"text",    label:"📝 Paragraph"},
+            {t:"points",  label:"• Points"},
+            {t:"table",   label:"📊 Table"},
+            {t:"image",   label:"🖼 Image + Caption"},
+          ].map(({t, label}) => (
+            <button
+              key={t}
+              onClick={() => onUpdate("type", t)}
+              style={{
+                padding: "5px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                background: (tab.type||"text") === t ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.04)",
+                border: `1px solid ${(tab.type||"text") === t ? "rgba(59,130,246,0.4)" : "rgba(255,255,255,0.1)"}`,
+                color: (tab.type||"text") === t ? T.blueLight : T.textMuted,
+                transition: "all 0.15s",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {(tab.type === "text" || !tab.type) && (
+          <Field label="Content">
+            <Textarea value={tab.content ?? ""} onChange={v => onUpdate("content", v)} rows={8} placeholder="Write your section content here…" />
+          </Field>
+        )}
+        {tab.type === "points" && (
+          <Field label="Bullet Points" hint="One point per line">
+            <Textarea value={tab.content ?? ""} onChange={v => onUpdate("content", v)} rows={8} placeholder={"• First point\n• Second point\n• Third point"} mono />
+          </Field>
+        )}
+        {tab.type === "table" && (
+          <div>
+            <Field label="Table Data" hint="First row = headers. Separate columns with | character.">
+              <Textarea value={tab.content ?? ""} onChange={v => onUpdate("content", v)} rows={8} placeholder={"Sr No | Name | Details | Remarks\n1 | Item A | Description | OK\n2 | Item B | Description | OK"} mono />
+            </Field>
+            {tab.content && (() => {
+              const lines = tab.content.trim().split("\n").filter(Boolean);
+              if (lines.length < 2) return null;
+              const headers = lines[0].split("|").map(s => s.trim());
+              const dataRows = lines.slice(1).map(l => l.split("|").map(s => s.trim()));
+              return (
+                <div style={{ marginTop: 8, overflowX: "auto", borderRadius: 8, border: `1px solid ${T.border}` }}>
+                  <p style={{ fontSize: 10, color: T.textMuted, margin: "8px 12px 4px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Preview</p>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead><tr style={{ background: T.surfaceHigh }}>
+                      {headers.map((h, i) => <th key={i} style={{ padding: "7px 12px", color: T.textSub, fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", fontSize: 11 }}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {dataRows.map((row, ri) => (
+                        <tr key={ri} style={{ borderBottom: `1px solid rgba(255,255,255,0.04)` }}>
+                          {row.map((cell, ci) => <td key={ci} style={{ padding: "7px 12px", color: T.textSub }}>{cell}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+        {tab.type === "image" && (
+          <div>
+            <Field label="Caption / Description">
+              <Textarea value={tab.content ?? ""} onChange={v => onUpdate("content", v)} rows={3} placeholder="Describe the image or write a caption…" />
+            </Field>
+            <p style={{ fontSize: 11, color: T.textMuted, margin: "4px 0 10px" }}>Upload images using the attachment zone below.</p>
+          </div>
+        )}
+        <AttachmentZone courseId={courseId} sectionNo={null} attachments={attachments} onRefresh={onRefresh} />
+      </div>
+    </section>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 function CourseFileEditor({ courseId }) {
@@ -5119,6 +5256,8 @@ function CourseFileEditor({ courseId }) {
     vision_text:            "",
     mission_text:           "",
     batch:                  "",
+    po_peo_pso_text:        "",
+    syllabus_timetable:     "",
     prev_co_attainment:     "",
     action_plan:            "",
     slow_learners:          "",
@@ -5126,7 +5265,41 @@ function CourseFileEditor({ courseId }) {
     activity_reports:       "",
     learning_material_links:"",
     attendance_links:       "",
+    student_list:           "",
+    custom_tabs:            "[]",
   };
+
+  // ── Custom tabs state ─────────────────────────────────────────────────────
+  const [customTabs, setCustomTabs] = useState([]);
+
+  // Parse custom_tabs from extra when it loads
+  useEffect(() => {
+    try {
+      const parsed = JSON.parse(extra.custom_tabs || "[]");
+      if (Array.isArray(parsed)) setCustomTabs(parsed);
+    } catch { setCustomTabs([]); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // only on mount; after that we manage customTabs independently
+
+  function addCustomTab() {
+    const newTab = { id: Date.now().toString(), title: "Custom Section", type: "text", content: "" };
+    const next = [...customTabs, newTab];
+    setCustomTabs(next);
+    updateExtra("custom_tabs", JSON.stringify(next));
+  }
+
+  function updateCustomTab(id, field, val) {
+    const next = customTabs.map(t => t.id === id ? { ...t, [field]: val } : t);
+    setCustomTabs(next);
+    updateExtra("custom_tabs", JSON.stringify(next));
+  }
+
+  function deleteCustomTab(id) {
+    if (!confirm("Delete this custom section?")) return;
+    const next = customTabs.filter(t => t.id !== id);
+    setCustomTabs(next);
+    updateExtra("custom_tabs", JSON.stringify(next));
+  }
 
   const [course,      setCourse]      = useState(null);
   const [extra,       setExtra]       = useState(EXTRA_DEFAULTS);
@@ -5311,12 +5484,14 @@ function CourseFileEditor({ courseId }) {
 
   // Progress: count filled sections
   const readySections = useMemo(() => {
-    return SECTION_META.filter(s => {
+    const std = SECTION_META.filter(s => {
       if (s.auto) return true;
       const field = SECTION_FIELD_MAP[s.no];
       return field ? hasContent(field) : false;
     }).length;
-  }, [hasContent]);
+    const custom = customTabs.filter(t => t.content?.trim()).length;
+    return std + custom;
+  }, [hasContent, customTabs]);
 
   // ── Guard ─────────────────────────────────────────────────────────────────
 
@@ -5343,12 +5518,12 @@ function CourseFileEditor({ courseId }) {
     }}>
 
       {/* ── LEFT: Document editor ─────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden", borderRight: `1px solid ${T.borderArea}` }}>
 
         {/* Top bar */}
         <div style={{
           display: "flex", alignItems: "center", padding: "0 20px", height: 52, flexShrink: 0,
-          borderBottom: `1px solid ${T.border}`, background: "rgba(8,14,26,0.97)", gap: 12,
+          borderBottom: `1px solid ${T.borderArea}`, background: "rgba(8,14,26,0.97)", gap: 12,
         }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: T.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {loading ? "Loading…" : `${course?.course_name ?? "Untitled"} — Course File`}
@@ -5402,13 +5577,12 @@ function CourseFileEditor({ courseId }) {
             {/* ── Cover sheet ─────────────────────────────────────────────── */}
             <div style={{
               margin: "22px 28px 0", padding: "20px 24px",
-              background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10,
+              background: T.surface, border: `1px solid ${T.borderArea}`, borderRadius: 10,
             }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
                 Cover Sheet Preview
               </div>
               <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-                {/* Left info */}
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 3 }}>
                     {course?.institution_name ?? "Institution"}
@@ -5427,12 +5601,11 @@ function CourseFileEditor({ courseId }) {
                     ].map(([k, v]) => (
                       <div key={k}>
                         <div style={{ fontSize: 10, color: T.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{k}</div>
-                        <div style={{ fontSize: 12, color: "#CBD5E1", marginTop: 3 }}>{v}</div>
+                        <div style={{ fontSize: 12, color: T.textSub, marginTop: 3 }}>{v}</div>
                       </div>
                     ))}
                   </div>
                 </div>
-                {/* Batch input */}
                 <div style={{ minWidth: 150 }}>
                   <Field label="Batch Year">
                     <TextInput
@@ -5463,7 +5636,7 @@ function CourseFileEditor({ courseId }) {
                 );
               })}
               <span style={{ fontSize: 11, color: T.textMuted, marginLeft: 10, whiteSpace: "nowrap" }}>
-                {readySections} / 13 ready
+                {readySections} / {SECTION_META.length + customTabs.length} ready
               </span>
             </div>
 
@@ -5493,36 +5666,81 @@ function CourseFileEditor({ courseId }) {
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
-                Section 2 — Course Information (auto)
+                Section 2 — POs, PEOs, PSOs (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={2} {...SECTION_META[1]} hasContent={!!course}>
-              {course ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-                  {[
-                    ["Course Name",    course.course_name],
-                    ["Course Code",    course.course_code],
-                    ["Credits",        course.credits],
-                    ["Total Hours",    course.total_hours],
-                    ["Faculty Name",   course.faculty_name],
-                    ["Department",     course.department],
-                    ["Semester",       course.semester],
-                    ["Academic Year",  course.academic_year],
-                    ["Batch",          extra.batch || <span style={{ color: T.textMuted, fontStyle: "italic" }}>Set in cover sheet ↑</span>],
-                  ].map(([k, v]) => (
-                    <InfoCard key={k} label={k} value={v} />
-                  ))}
+            <SectionWrapper no={2} {...SECTION_META[1]} hasContent={hasContent("po_peo_pso_text")}>
+              <InfoBox color={T.blueLight} bg="rgba(59,130,246,0.06)" border="rgba(59,130,246,0.18)">
+                Enter all Program Outcomes (PO1–PO12), Program Educational Objectives (PEO1–PEO3), and Program Specific Outcomes (PSO1–PSO2) as defined by your department. These appear verbatim in the course file.
+              </InfoBox>
+              <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Field label="Program Outcomes (POs)" required hint="One per line, e.g. PO1: Engineering Knowledge — Apply...">
+                  <Textarea
+                    value={extra.po_peo_pso_text}
+                    onChange={v => updateExtra("po_peo_pso_text", v)}
+                    placeholder={"PO1: Engineering Knowledge: Apply the knowledge of mathematics, science...\nPO2: Problem Analysis: Identify, formulate, review research literature...\nPO3: Design/Development of Solutions: Design solutions for complex...\n...\nPO12: Life-long Learning: Recognize the need for independent learning..."}
+                    rows={10}
+                    mono
+                  />
+                </Field>
+                <div>
+                  <Field label="Program Educational Objectives (PEOs)" hint="One per line">
+                    <Textarea
+                      value={extra.peo_text ?? ""}
+                      onChange={v => updateExtra("peo_text", v)}
+                      placeholder={"PEO1: Apply knowledge of latest trends in AIML for technology development.\nPEO2: Be competent engineers with innovative thinking and research attitude.\nPEO3: Have enhanced interpersonal and managerial skills with social awareness."}
+                      rows={5}
+                      mono
+                    />
+                  </Field>
+                  <Field label="Program Specific Outcomes (PSOs)" hint="One per line">
+                    <Textarea
+                      value={extra.pso_text ?? ""}
+                      onChange={v => updateExtra("pso_text", v)}
+                      placeholder={"PSO1: Apply concepts of AI/ML in analysis, design and development of intelligent systems.\nPSO2: Foundation in cutting-edge AI/ML areas including NLP, Computer Vision, RL..."}
+                      rows={4}
+                      mono
+                    />
+                  </Field>
                 </div>
-              ) : (
-                <InfoBox color={T.red} bg="rgba(239,68,68,0.06)" border="rgba(239,68,68,0.2)">
-                  ⚠ {loadErrors.course ?? "Could not load course data"}
-                </InfoBox>
-              )}
+              </div>
+              <AttachmentZone courseId={courseId} sectionNo={2} attachments={attachments} onRefresh={refreshAttachments} />
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
-                Section 3 — Course Outcomes (auto)
+                Section 3 — Syllabus & Timetable (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={3} {...SECTION_META[2]} hasContent={!!course?.cos?.length}>
+            <SectionWrapper no={3} {...SECTION_META[2]} hasContent={hasContent("syllabus_timetable")}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Field label="Syllabus Summary" required hint="Paste unit-wise syllabus or key topics covered">
+                  <Textarea
+                    value={extra.syllabus_timetable}
+                    onChange={v => updateExtra("syllabus_timetable", v)}
+                    placeholder={"Unit 1: Introduction to ML — Feature selection, dimensionality reduction\nUnit 2: Unsupervised Learning — Clustering, PCA, ICA, NMF\nUnit 3: Advanced Clustering — DBSCAN, hierarchical methods\nUnit 4: Deep Learning Clustering — Autoencoders, VAEs, GANs\nUnit 5: Applications — Real-world use cases"}
+                    rows={8}
+                    mono
+                  />
+                </Field>
+                <Field label="Personal Timetable" hint="Paste or describe faculty timetable (day/time/subject)">
+                  <Textarea
+                    value={extra.personal_timetable ?? ""}
+                    onChange={v => updateExtra("personal_timetable", v)}
+                    placeholder={"Monday:    10:40–11:35 – Unsupervised Learning (SY B, Room 504)\nTuesday:   12:30–1:25  – Unsupervised Learning (SY B, Room 504)\nWednesday: 8:45–9:40   – Lab Session (MDL Lab)\nFriday:    12:30–1:25  – Unsupervised Learning (SY B, Room 504)"}
+                    rows={8}
+                    mono
+                  />
+                </Field>
+              </div>
+              <AttachmentZone courseId={courseId} sectionNo={3} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 4 — CO Statements + CO-PO Mapping (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={4} {...SECTION_META[3]} hasContent={!!course?.cos?.length}>
+              {/* CO Statements table */}
+              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 0 }}>
+                Course Outcome Statements
+              </p>
               <ReadOnlyTable
                 columns={[
                   { key: "co_id",      label: "CO ID" },
@@ -5546,23 +5764,18 @@ function CourseFileEditor({ courseId }) {
                     : "No COs defined. Complete course setup first."
                 }
               />
-            </SectionWrapper>
 
-            {/* ════════════════════════════════════════════════════════════════
-                Section 4 — CO-PO Mapping (auto)
-            ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper
-              no={4}
-              {...SECTION_META[3]}
-              hasContent={!!course?.co_po_matrix && Object.keys(course.co_po_matrix ?? {}).length > 0}
-            >
+              {/* CO-PO Matrix */}
+              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 22 }}>
+                CO-PO-PSO Mapping Matrix
+              </p>
               {course?.co_po_matrix && course?.cos?.length && course?.pos?.length ? (
                 <div style={{ overflowX: "auto", borderRadius: 8, border: `1px solid ${T.border}` }}>
                   <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: "100%" }}>
                     <thead>
                       <tr style={{ background: T.surfaceHigh }}>
                         <th style={{ padding: "9px 14px", color: T.textSub, fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", minWidth: 56 }}>
-                          CO \ PO
+                          CO \ PO/PSO
                         </th>
                         {course.pos.map(po => (
                           <th key={po.po_id} style={{
@@ -5605,6 +5818,18 @@ function CourseFileEditor({ courseId }) {
                   CO-PO matrix not available. Complete course setup to populate.
                 </InfoBox>
               )}
+
+              {/* CO-PO Justification */}
+              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 22 }}>
+                CO-PO Mapping Justification
+              </p>
+              <Textarea
+                value={extra.co_po_justification ?? ""}
+                onChange={v => updateExtra("co_po_justification", v)}
+                placeholder={"CO1 → PO1 (3): Directly requires applying engineering knowledge for ML problem formulation.\nCO1 → PO2 (3): Requires identification and analysis of feature selection problems.\nCO2 → PO3 (3): Design of unsupervised learning pipelines for given datasets.\n..."}
+                rows={6}
+                mono
+              />
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
@@ -5673,18 +5898,17 @@ function CourseFileEditor({ courseId }) {
                   emptyMsg="No evaluation plan data. Generate from Evaluation Plan page."
                 />
               )}
-              {/* Evaluation config summary */}
               {course?.evaluation_config && (
                 <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <span style={{ fontSize: 11, color: T.textMuted }}>
-                    CA: <strong style={{ color: "#CBD5E1" }}>{course.evaluation_config.continuous_assessment_total}</strong>
+                    CA: <strong style={{ color: T.textSub }}>{course.evaluation_config.continuous_assessment_total}</strong>
                   </span>
                   <span style={{ fontSize: 11, color: T.textMuted }}>
-                    ESE: <strong style={{ color: "#CBD5E1" }}>{course.evaluation_config.end_sem_total}</strong>
+                    ESE: <strong style={{ color: T.textSub }}>{course.evaluation_config.end_sem_total}</strong>
                   </span>
                   {Object.entries(course.evaluation_config.components ?? {}).map(([k, v]) => (
                     <span key={k} style={{ fontSize: 11, color: T.textMuted }}>
-                      {k}: <strong style={{ color: "#CBD5E1" }}>{v}</strong>
+                      {k}: <strong style={{ color: T.textSub }}>{v}</strong>
                     </span>
                   ))}
                 </div>
@@ -5765,7 +5989,7 @@ function CourseFileEditor({ courseId }) {
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
-                Section 12 — Question Papers (auto)
+                Section 12 — Question Bank (auto)
             ════════════════════════════════════════════════════════════════ */}
             <SectionWrapper no={12} {...SECTION_META[11]} hasContent={false}>
               <InfoBox>
@@ -5793,13 +6017,65 @@ function CourseFileEditor({ courseId }) {
               <AttachmentZone courseId={courseId} sectionNo={13} attachments={attachments} onRefresh={refreshAttachments} />
             </SectionWrapper>
 
+            {/* ════════════════════════════════════════════════════════════════
+                Section 14 — Student List (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={14} {...SECTION_META[13]} hasContent={hasContent("student_list")}>
+              <Field label="Student List" hint="SR No | PRN | Name — one per line, group by section if needed">
+                <Textarea
+                  value={extra.student_list}
+                  onChange={v => updateExtra("student_list", v)}
+                  placeholder={"Section A\n1 | 24070126001 | Aadi Kulshreshth\n2 | 24070126002 | Aadya Rastogi\n...\nSection B\n74 | 24070126073 | Ishan Sharma\n..."}
+                  rows={10}
+                  mono
+                />
+              </Field>
+              <AttachmentZone courseId={courseId} sectionNo={14} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Custom Tabs — user-added sections
+            ════════════════════════════════════════════════════════════════ */}
+            {customTabs.map((tab, idx) => (
+              <CustomTabSection
+                key={tab.id}
+                tab={tab}
+                idx={idx}
+                courseId={courseId}
+                attachments={attachments}
+                onRefresh={refreshAttachments}
+                onUpdate={(field, val) => updateCustomTab(tab.id, field, val)}
+                onDelete={() => deleteCustomTab(tab.id)}
+              />
+            ))}
+
+            {/* ── Add Tab Button ───────────────────────────────────────────── */}
+            <div style={{ margin: "16px 28px", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
+              <button
+                onClick={addCustomTab}
+                style={{
+                  display: "flex", alignItems: "center", gap: 7,
+                  padding: "8px 18px", background: "rgba(59,130,246,0.08)",
+                  border: "1px dashed rgba(59,130,246,0.3)", borderRadius: 8,
+                  color: T.blueLight, fontSize: 12, cursor: "pointer", fontWeight: 600,
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(59,130,246,0.15)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.5)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.08)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.3)"; }}
+              >
+                + Add Custom Section
+              </button>
+              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
+            </div>
+
             <div style={{ height: 48 }} />
           </div>
         )}
       </div>
 
       {/* ── RIGHT: AI assistant ───────────────────────────────────────────── */}
-      <div style={{ width: 296, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ width: 296, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden", borderLeft: `1px solid ${T.borderArea}` }}>
         <CourseFileAIPanel courseId={courseId} course={course} extra={extra} />
       </div>
     </div>
