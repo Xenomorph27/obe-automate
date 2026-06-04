@@ -5659,6 +5659,59 @@ function ActionPlanAIBtn({ course, prevCoAttainment, onGenerated, disabled }) {
 
 // ─── AI CO-PO Justification Generator ────────────────────────────────────────
 
+function PODescriptionsAIBtn({ course, onGenerated, disabled }) {
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState("");
+
+  async function generate() {
+    if (disabled || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch(`/ai/generate-po-descriptions/${course?.id ?? 0}`, {
+        method: "POST",
+        body: JSON.stringify({
+          department: course?.department ?? "",
+          pos: course?.pos ?? [],
+        }),
+      });
+      const text = res.data ?? res;
+      if (text) onGenerated(String(text));
+      else throw new Error("Empty response from AI");
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {err && <span style={{ fontSize: 11, color: T.red }}>{err}</span>}
+      <button
+        onClick={generate}
+        disabled={disabled || busy}
+        title={disabled ? "Add POs in Course Setup first" : "Use AI to expand PO labels into full NBA-standard descriptions"}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+          cursor: disabled || busy ? "not-allowed" : "pointer",
+          background: busy ? "rgba(16,185,129,0.06)" : "rgba(16,185,129,0.13)",
+          border: "1px solid rgba(16,185,129,0.3)",
+          color: disabled ? T.textMuted : "#6ee7b7",
+          opacity: disabled ? 0.5 : 1,
+          transition: "all 0.15s",
+          whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(16,185,129,0.22)"; }}
+        onMouseLeave={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(16,185,129,0.13)"; }}
+      >
+        {busy ? <Spinner size={13} /> : "✨"}
+        {busy ? " Generating…" : " Expand POs with AI"}
+      </button>
+    </div>
+  );
+}
+
 function CoPoJustificationAIBtn({ course, onGenerated, disabled }) {
   const [busy, setBusy] = useState(false);
   const [err,  setErr]  = useState("");
@@ -5776,8 +5829,6 @@ function CourseFileEditor({ courseId }) {
   const [attainment,  setAttainment]  = useState(null);
   const [attachments, setAttachments] = useState([]);
   const [timetable,   setTimetable]   = useState(null);
-  const [students,    setStudents]    = useState([]);
-  const [caSheets,    setCaFileSheets] = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [saving,      setSaving]      = useState(false);
   const [generating,  setGenerating]  = useState(false);
@@ -5798,7 +5849,7 @@ function CourseFileEditor({ courseId }) {
     setLoading(true);
     const errors = {};
 
-    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes, ttRes, studentsRes, caSheetsRes] =
+    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes, ttRes] =
       await Promise.allSettled([
         apiFetch(`/courses/${courseId}`),
         apiFetch(`/course-file/extra/${courseId}`),
@@ -5807,8 +5858,6 @@ function CourseFileEditor({ courseId }) {
         apiFetch(`/attainment/calculate/${courseId}`),
         apiFetch(`/course-file/attachments/${courseId}`),
         apiFetch(`/dashboard/timetable`),
-        apiFetch(`/students/${courseId}`),
-        apiFetch(`/co-po-template/ca-sheets/${courseId}`),
       ]);
 
     if (courseRes.status === "fulfilled") {
@@ -5872,21 +5921,6 @@ function CourseFileEditor({ courseId }) {
 
     if (ttRes?.status === "fulfilled") {
       setTimetable(ttRes.value.data ?? null);
-    }
-
-    if (studentsRes?.status === "fulfilled") {
-      setStudents(studentsRes.value.data ?? studentsRes.value ?? []);
-    }
-
-    if (caSheetsRes?.status === "fulfilled") {
-      const raw = caSheetsRes.value.data ?? caSheetsRes.value ?? {};
-      // raw may be {CA1: {qp, marks}, CA2: ...} or array
-      if (Array.isArray(raw)) {
-        setCaFileSheets(raw);
-      } else if (typeof raw === "object") {
-        const arr = Object.entries(raw).map(([ca, d]) => ({ ca_label: ca, qp: d?.qp ?? [], marks: d?.marks ?? {} }));
-        setCaFileSheets(arr);
-      }
     }
 
     setLoadErrors(errors);
@@ -6216,27 +6250,36 @@ function CourseFileEditor({ courseId }) {
               <InfoBox color={T.blueLight} bg="rgba(59,130,246,0.06)" border="rgba(59,130,246,0.18)">
                 Enter all Program Outcomes (PO1–PO12), Program Educational Objectives (PEO1–PEO3), and Program Specific Outcomes (PSO1–PSO2) as defined by your department. These appear verbatim in the course file.
               </InfoBox>
-              {/* Auto-fill button — fills POs from course.pos if they exist */}
+              {/* Auto-fill / AI-generate PO buttons */}
               {(() => {
                 const coursePOs = course?.pos ?? [];
-                if (!coursePOs.length) return null;
                 const alreadyFilled = extra.po_peo_pso_text?.trim().length > 0;
                 return (
-                  <div style={{ marginTop: 10, marginBottom: 2 }}>
-                    <button
-                      onClick={() => {
-                        if (alreadyFilled && !confirm("Overwrite existing POs text with data from Course Setup?")) return;
-                        const lines = coursePOs.map(p => `${p.po_id}: ${p.statement}`).join("\n");
-                        updateExtra("po_peo_pso_text", lines);
+                  <div style={{ marginTop: 10, marginBottom: 2, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    {coursePOs.length > 0 && (
+                      <button
+                        onClick={() => {
+                          if (alreadyFilled && !confirm("Overwrite existing POs text with data from Course Setup?")) return;
+                          const lines = coursePOs.map(p => `${p.po_id}: ${p.statement}`).join("\n");
+                          updateExtra("po_peo_pso_text", lines);
+                        }}
+                        style={{
+                          padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                          background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.3)",
+                          color: "#93c5fd", cursor: "pointer",
+                        }}
+                      >
+                        ⚡ Fill POs from Course Setup ({coursePOs.length} POs found)
+                      </button>
+                    )}
+                    <PODescriptionsAIBtn
+                      course={course}
+                      disabled={!(course?.pos?.length > 0)}
+                      onGenerated={v => {
+                        if (alreadyFilled && !confirm("Overwrite existing POs text with AI-generated descriptions?")) return;
+                        updateExtra("po_peo_pso_text", v);
                       }}
-                      style={{
-                        padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700,
-                        background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.3)",
-                        color: "#93c5fd", cursor: "pointer",
-                      }}
-                    >
-                      ⚡ Fill POs from Course Setup ({coursePOs.length} POs found)
-                    </button>
+                    />
                   </div>
                 );
               })()}
@@ -6724,71 +6767,18 @@ function CourseFileEditor({ courseId }) {
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
-                Section 14 — Student List (auto from DB + manual)
+                Section 14 — Student List (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={14} {...SECTION_META.find(s=>s.no===14)} hasContent={students.length > 0 || hasContent("student_list")}>
-              {students.length > 0 ? (() => {
-                // Group students by section
-                const bySection = {};
-                students.forEach(s => {
-                  const sec = (s.section || "").trim().toUpperCase() || "All";
-                  if (!bySection[sec]) bySection[sec] = [];
-                  bySection[sec].push(s);
-                });
-                const sectionKeys = Object.keys(bySection).sort();
-                return (
-                  <div>
-                    <div style={{ fontSize: 11, color: T.green, marginBottom: 10, fontWeight: 600 }}>
-                      ✓ {students.length} students loaded from database
-                    </div>
-                    {sectionKeys.map(sec => (
-                      <div key={sec} style={{ marginBottom: 16 }}>
-                        {sectionKeys.length > 1 && (
-                          <div style={{ fontSize: 12, fontWeight: 700, color: T.blueLight, marginBottom: 6 }}>
-                            Section {sec}
-                          </div>
-                        )}
-                        <div style={{ overflowX: "auto", borderRadius: 8, border: `1px solid ${T.border}` }}>
-                          <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
-                            <thead>
-                              <tr style={{ background: "rgba(15,23,42,0.95)" }}>
-                                <th style={{ padding: "8px 12px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "center", width: 50 }}>Sr. No</th>
-                                <th style={{ padding: "8px 12px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", width: 140 }}>PRN</th>
-                                <th style={{ padding: "8px 12px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left" }}>Name</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {bySection[sec].map((s, i) => (
-                                <tr key={s.prn || i} style={{ borderBottom: `1px solid rgba(255,255,255,0.05)`, background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.012)" }}>
-                                  <td style={{ padding: "6px 12px", textAlign: "center", color: T.textMuted, fontSize: 11 }}>{i + 1}</td>
-                                  <td style={{ padding: "6px 12px", color: T.textSub, fontFamily: "monospace", fontSize: 11 }}>{s.prn}</td>
-                                  <td style={{ padding: "6px 12px", color: T.text }}>{s.name}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ))}
-                    <p style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
-                      Student data auto-populated from Students page. Add more students there to update this list.
-                    </p>
-                  </div>
-                );
-              })() : (
-                <Field label="Student List" hint="SR No | PRN | Name — one per line, group by section if needed">
-                  <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
-                    ⚡ No students in database. Import students via the <strong>Students Roster</strong> page, or enter manually below.
-                  </InfoBox>
-                  <Textarea
-                    value={extra.student_list}
-                    onChange={v => updateExtra("student_list", v)}
-                    placeholder={"Section A\n1 | 24070126001 | Aadi Kulshreshth\n2 | 24070126002 | Aadya Rastogi\n...\nSection B\n74 | 24070126073 | Ishan Sharma\n..."}
-                    rows={10}
-                    mono
-                  />
-                </Field>
-              )}
+            <SectionWrapper no={14} {...SECTION_META.find(s=>s.no===14)} hasContent={hasContent("student_list")}>
+              <Field label="Student List" hint="SR No | PRN | Name — one per line, group by section if needed">
+                <Textarea
+                  value={extra.student_list}
+                  onChange={v => updateExtra("student_list", v)}
+                  placeholder={"Section A\n1 | 24070126001 | Aadi Kulshreshth\n2 | 24070126002 | Aadya Rastogi\n...\nSection B\n74 | 24070126073 | Ishan Sharma\n..."}
+                  rows={10}
+                  mono
+                />
+              </Field>
               <AttachmentZone courseId={courseId} sectionNo={14} attachments={attachments} onRefresh={refreshAttachments} />
             </SectionWrapper>
 

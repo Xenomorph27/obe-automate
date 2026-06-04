@@ -282,6 +282,51 @@ Example — user says "what is CO attainment?":
 
 # ── CO-PO Justification ────────────────────────────────────────────────────────
 
+class PODescriptionRequest(BaseModel):
+    department: str
+    pos: list  # list of {po_id, statement}
+
+@router.post("/generate-po-descriptions/{course_id}")
+async def generate_po_descriptions(
+    course_id: int,
+    req: PODescriptionRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Expand short PO statements into full NBA-standard descriptions using AI."""
+    po_lines = "\n".join(
+        f'{p.get("po_id", "")}: {p.get("statement", "")}'
+        for p in req.pos
+    )
+
+    prompt = f"""You are an NBA/NAAC accreditation expert for engineering colleges. Your task is to expand short Program Outcome (PO) labels into full, formal NBA-standard descriptions.
+
+Department: {req.department}
+
+The following are the PO IDs with their short labels:
+{po_lines}
+
+For each PO, write a complete, formal description in this exact format:
+PO X\t<Title>: <Full formal description as per NBA standards>
+
+Rules:
+- Follow the exact NBA PO definitions (PO1–PO12 are standard across all engineering programs)
+- Each description should be one complete sentence of 30–60 words
+- Use formal academic language appropriate for accreditation documents
+- The title after "PO X" must match the standard NBA title (e.g., Engineering Knowledge, Problem Analysis, etc.)
+- Output ONLY the PO lines, no preamble, no headers, no extra commentary
+- Preserve the exact PO numbering from the input
+
+Example output format:
+PO 1\tEngineering Knowledge: Apply the knowledge of mathematics, science, engineering fundamentals, and an engineering specialization to the solution of complex engineering problems.
+PO 2\tProblem Analysis: Identify, formulate, review research literature, and analyze complex engineering problems reaching substantiated conclusions using first principles of mathematics, natural sciences, and engineering sciences."""
+
+    try:
+        text = await get_llm_response(prompt)
+        return {"status": "success", "data": text.strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class CoPoJustificationRequest(BaseModel):
     course_name: str
     course_code: str
@@ -313,7 +358,7 @@ async def generate_co_po_justification(
     )
     mapping_text = "\n".join(mapping_lines)
 
-    prompt = f"""You are an OBE (Outcome Based Education) expert for engineering colleges. Generate concise CO-PO mapping justifications.
+    prompt = f"""You are an OBE (Outcome Based Education) expert for engineering colleges. Generate detailed CO-PO mapping justifications for accreditation documentation.
 
 Course: {req.course_name} ({req.course_code})
 Department: {req.department}
@@ -324,15 +369,20 @@ Course Outcomes:
 CO-PO Mapping:
 {mapping_text}
 
-Write one justification line per CO-PO mapping in this exact format:
-CO1 → PO1 (3): <short reason why this CO directly maps to this PO at this strength>.
+Write a detailed justification paragraph for each CO-PO mapping in this exact format:
+CO1 → PO1 (3): <paragraph with at least 5 sentences explaining why and how this CO maps to this PO at this strength level>
 
 Rules:
 - Level 3 = direct, strong alignment; Level 2 = moderate; Level 1 = slight/indirect
-- Keep each justification to one line, under 120 characters
-- Be technically specific to the course content
+- Each justification MUST contain at least 5 complete sentences
+- Sentence 1: State the direct relationship between the CO and PO
+- Sentence 2: Explain how the course content develops the skills required by the PO
+- Sentence 3: Describe specific learning activities or assessments that demonstrate this alignment
+- Sentence 4: Explain the strength level (1/2/3) and why it is appropriate
+- Sentence 5+: Provide additional context on the educational outcomes achieved and their real-world relevance
+- Be technically specific to the course content and department
 - Only list mappings that have a non-zero value
-- Do NOT include any preamble or closing remarks, just the justification lines"""
+- Do NOT include any preamble or closing remarks, just the justification entries"""
 
     try:
         text = await get_llm_response(prompt)
