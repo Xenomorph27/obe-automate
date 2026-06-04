@@ -307,16 +307,22 @@ async def generate_co_po_justification(
                     f'{co["co_id"]} → {po_id} ({val}): CO="{co.get("statement","")}" | PO="{po_stmt}"'
                 )
 
+    co_lines = "\n".join(
+        f'{c["co_id"]}: {c.get("statement", "")} [Bloom\'s: {c.get("bloom_level", "")}]'
+        for c in req.cos
+    )
+    mapping_text = "\n".join(mapping_lines)
+
     prompt = f"""You are an OBE (Outcome Based Education) expert for engineering colleges. Generate concise CO-PO mapping justifications.
 
 Course: {req.course_name} ({req.course_code})
 Department: {req.department}
 
 Course Outcomes:
-{chr(10).join(f'{c["co_id"]}: {c.get("statement","")} [Bloom\'s: {c.get("bloom_level","")}]' for c in req.cos)}
+{co_lines}
 
 CO-PO Mapping:
-{chr(10).join(mapping_lines)}
+{mapping_text}
 
 Write one justification line per CO-PO mapping in this exact format:
 CO1 → PO1 (3): <short reason why this CO directly maps to this PO at this strength>.
