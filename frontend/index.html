@@ -4469,9 +4469,10 @@ const SECTION_FIELD_MAP = {
 };
 
 const SECTION_META = [
+  { no: 0,  title: "Course File Contents",           icon: "☰", auto: true,  desc: "Table of contents — auto-generated with all 13 sections listed" },
   { no: 1,  title: "Vision & Mission",              icon: "◈", auto: false, desc: "Department vision and mission statements" },
   { no: 2,  title: "POs, PEOs & PSOs",              icon: "◉", auto: false, desc: "Program Outcomes, Educational Objectives, and Specific Outcomes" },
-  { no: 3,  title: "Syllabus & Timetable",          icon: "◈", auto: false, desc: "Course syllabus and faculty personal timetable" },
+  { no: 3,  title: "Syllabus & Timetable",          icon: "◈", auto: true,  desc: "Auto-extracted from uploaded syllabus and dashboard timetable" },
   { no: 4,  title: "CO Statements & CO-PO Mapping", icon: "◉", auto: true,  desc: "Auto-populated from course setup — COs, Bloom\'s levels, CO-PO matrix" },
   { no: 5,  title: "Previous CO Attainment",        icon: "◈", auto: false, desc: "Previous year CO attainment + action plan" },
   { no: 6,  title: "Session Plan",                  icon: "◉", auto: true,  desc: "Auto-populated from Session Plan page" },
@@ -5249,6 +5250,104 @@ function CustomTabSection({ tab, idx, courseId, attachments, onRefresh, onUpdate
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+// ─── AI CO-PO Justification Generator ────────────────────────────────────────
+
+function CoPoJustificationAIBtn({ course, onGenerated, disabled }) {
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState("");
+
+  async function generate() {
+    if (disabled || busy) return;
+    setBusy(true); setErr("");
+
+    const cos    = course?.cos    ?? [];
+    const pos    = course?.pos    ?? [];
+    const matrix = course?.co_po_matrix ?? {};
+
+    // Build a summary of the mapping for the prompt
+    const mappingLines = [];
+    cos.forEach(co => {
+      const coMap = matrix[co.co_id] ?? {};
+      Object.entries(coMap).forEach(([poId, val]) => {
+        if (val && val !== "0" && val !== 0) {
+          mappingLines.push(`${co.co_id} → ${poId} (${val}): CO="${co.statement}" | PO="${(pos.find(p => p.po_id === poId) || {}).statement || poId}"`);
+        }
+      });
+    });
+
+    const prompt = `You are an OBE (Outcome Based Education) expert for engineering colleges. Generate concise CO-PO mapping justifications for the following course.
+
+Course: ${course?.course_name} (${course?.course_code})
+Department: ${course?.department}
+
+Course Outcomes:
+${cos.map(c => `${c.co_id}: ${c.statement} [Bloom's: ${c.bloom_level}]`).join("\n")}
+
+CO-PO Mapping (CO → PO, strength level):
+${mappingLines.join("\n")}
+
+Write one justification line per CO-PO mapping in this exact format:
+CO1 → PO1 (3): <short reason why this CO directly maps to this PO at this strength>.
+
+Rules:
+- Level 3 = direct, strong alignment
+- Level 2 = moderate/partial alignment  
+- Level 1 = slight/indirect alignment
+- Keep each justification to one line, under 120 characters
+- Be technically specific to the course content
+- Only list mappings that have a non-zero value
+- Do NOT include any preamble or closing remarks, just the justification lines`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message ?? `HTTP ${res.status}`);
+      const text = (data.content ?? []).map(b => b.text ?? "").join("").trim();
+      if (text) onGenerated(text);
+      else throw new Error("Empty response from AI");
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {err && <span style={{ fontSize: 11, color: T.red }}>{err}</span>}
+      <button
+        onClick={generate}
+        disabled={disabled || busy}
+        title={disabled ? "Complete course setup with COs and CO-PO matrix first" : "Generate justification using AI"}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          padding: "5px 13px", borderRadius: 7, fontSize: 12, fontWeight: 700,
+          cursor: disabled || busy ? "not-allowed" : "pointer",
+          background: busy ? "rgba(139,92,246,0.06)" : "rgba(139,92,246,0.14)",
+          border: "1px solid rgba(139,92,246,0.3)",
+          color: disabled ? T.textMuted : "#a78bfa",
+          opacity: disabled ? 0.5 : 1,
+          transition: "all 0.15s",
+          whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(139,92,246,0.22)"; }}
+        onMouseLeave={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(139,92,246,0.14)"; }}
+      >
+        {busy ? <Spinner size={13} /> : "✨"}
+        {busy ? " Generating…" : " Generate with AI"}
+      </button>
+    </div>
+  );
+}
+
 function CourseFileEditor({ courseId }) {
   // The backend only persists these exact 10 fields in CourseFileExtraPayload.
   // Do NOT add extra keys here — they'll silently disappear after save/reload.
@@ -5307,6 +5406,7 @@ function CourseFileEditor({ courseId }) {
   const [evalPlan,    setEvalPlan]    = useState({ rows: [], cols: [] });
   const [attainment,  setAttainment]  = useState(null);
   const [attachments, setAttachments] = useState([]);
+  const [timetable,   setTimetable]   = useState(null);
   const [loading,     setLoading]     = useState(true);
   const [saving,      setSaving]      = useState(false);
   const [generating,  setGenerating]  = useState(false);
@@ -5327,7 +5427,7 @@ function CourseFileEditor({ courseId }) {
     setLoading(true);
     const errors = {};
 
-    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes] =
+    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes, ttRes] =
       await Promise.allSettled([
         apiFetch(`/courses/${courseId}`),
         apiFetch(`/course-file/extra/${courseId}`),
@@ -5335,6 +5435,7 @@ function CourseFileEditor({ courseId }) {
         apiFetch(`/evaluation-plan/view/${courseId}`),
         apiFetch(`/attainment/calculate/${courseId}`),
         apiFetch(`/course-file/attachments/${courseId}`),
+        apiFetch(`/dashboard/timetable`),
       ]);
 
     if (courseRes.status === "fulfilled") {
@@ -5384,6 +5485,10 @@ function CourseFileEditor({ courseId }) {
       setAttachments(attachRes.value.data ?? []);
     } else {
       errors.attachments = attachRes.reason?.message;
+    }
+
+    if (ttRes?.status === "fulfilled") {
+      setTimetable(ttRes.value.data ?? null);
     }
 
     setLoadErrors(errors);
@@ -5641,9 +5746,50 @@ function CourseFileEditor({ courseId }) {
             </div>
 
             {/* ════════════════════════════════════════════════════════════════
+                Section 0 — Course File Contents (auto TOC)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={0} {...SECTION_META.find(s=>s.no===0)} hasContent={true}>
+              <InfoBox color={T.green} bg="rgba(34,197,94,0.07)" border="rgba(34,197,94,0.22)">
+                ✅ This section is fully auto-generated. The table below will appear exactly as shown in the exported .docx file.
+              </InfoBox>
+              <div style={{ marginTop: 12, borderRadius: 8, border: `1px solid ${T.border}`, overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: "rgba(15,23,42,0.95)" }}>
+                      <th style={{ padding: "9px 14px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "center", width: 60, fontSize: 11 }}>Sr. No</th>
+                      <th style={{ padding: "9px 14px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", fontSize: 11 }}>Title</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      "Vision & Mission of the Department",
+                      "Program Outcomes (POs), Program Educational Objectives (PEOs) and Program Specific Outcomes (PSOs)",
+                      "Syllabus, Personal Timetable",
+                      "CO Statements, CO-PO-PSO Mapping with justification",
+                      "CO Attainment from previous academic year and the action plan",
+                      "Session Plan",
+                      "Evaluation plan with CO Mapping",
+                      "List of Slow and Advanced learners and the action plans",
+                      "CO Attainment of internal evaluation",
+                      "Reports of activities planned and conducted",
+                      "Learning Material",
+                      "Question Bank",
+                      "Compiled Attendance",
+                    ].map((title, i) => (
+                      <tr key={i} style={{ borderBottom: `1px solid rgba(255,255,255,0.05)`, background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.018)" }}>
+                        <td style={{ padding: "8px 14px", color: "#94A3B8", textAlign: "center", fontWeight: 600 }}>{i + 1}</td>
+                        <td style={{ padding: "8px 14px", color: "#CBD5E1" }}>{title}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
                 Section 1 — Vision & Mission
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={1} {...SECTION_META[0]} hasContent={hasContent("vision_text")}>
+            <SectionWrapper no={1} {...SECTION_META.find(s=>s.no===1)} hasContent={hasContent("vision_text")}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <Field label="Department Vision" required hint="Single sentence capturing the long-term aspiration">
                   <Textarea
@@ -5668,7 +5814,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 2 — POs, PEOs, PSOs (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={2} {...SECTION_META[1]} hasContent={hasContent("po_peo_pso_text")}>
+            <SectionWrapper no={2} {...SECTION_META.find(s=>s.no===2)} hasContent={hasContent("po_peo_pso_text")}>
               <InfoBox color={T.blueLight} bg="rgba(59,130,246,0.06)" border="rgba(59,130,246,0.18)">
                 Enter all Program Outcomes (PO1–PO12), Program Educational Objectives (PEO1–PEO3), and Program Specific Outcomes (PSO1–PSO2) as defined by your department. These appear verbatim in the course file.
               </InfoBox>
@@ -5707,36 +5853,103 @@ function CourseFileEditor({ courseId }) {
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
-                Section 3 — Syllabus & Timetable (manual)
+                Section 3 — Syllabus & Timetable (auto from upload + dashboard)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={3} {...SECTION_META[2]} hasContent={hasContent("syllabus_timetable")}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <Field label="Syllabus Summary" required hint="Paste unit-wise syllabus or key topics covered">
-                  <Textarea
-                    value={extra.syllabus_timetable}
-                    onChange={v => updateExtra("syllabus_timetable", v)}
-                    placeholder={"Unit 1: Introduction to ML — Feature selection, dimensionality reduction\nUnit 2: Unsupervised Learning — Clustering, PCA, ICA, NMF\nUnit 3: Advanced Clustering — DBSCAN, hierarchical methods\nUnit 4: Deep Learning Clustering — Autoencoders, VAEs, GANs\nUnit 5: Applications — Real-world use cases"}
-                    rows={8}
-                    mono
-                  />
-                </Field>
-                <Field label="Personal Timetable" hint="Paste or describe faculty timetable (day/time/subject)">
-                  <Textarea
-                    value={extra.personal_timetable ?? ""}
-                    onChange={v => updateExtra("personal_timetable", v)}
-                    placeholder={"Monday:    10:40–11:35 – Unsupervised Learning (SY B, Room 504)\nTuesday:   12:30–1:25  – Unsupervised Learning (SY B, Room 504)\nWednesday: 8:45–9:40   – Lab Session (MDL Lab)\nFriday:    12:30–1:25  – Unsupervised Learning (SY B, Room 504)"}
-                    rows={8}
-                    mono
-                  />
-                </Field>
-              </div>
+            <SectionWrapper no={3} {...SECTION_META.find(s=>s.no===3)} hasContent={sessionPlan.rows.length > 0 || !!timetable}>
+              {/* Syllabus — auto from session plan */}
+              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 0 }}>
+                Syllabus (extracted from uploaded syllabus)
+              </p>
+              {(() => {
+                // Extract units from session plan rows
+                const unitMap = {};
+                (sessionPlan.rows || []).forEach(row => {
+                  const unitNo = row.unit || row.unit_no || row.unitNo || row.unit_number;
+                  const topic  = row.topic || row.points_to_cover || row.pointsToCover || row.content || row.description;
+                  if (!unitNo) return;
+                  const key = String(unitNo);
+                  if (!unitMap[key]) unitMap[key] = { unit_number: unitNo, unit_title: row.unit_title || `Unit ${unitNo}`, topics: [] };
+                  if (topic && !unitMap[key].topics.includes(topic)) unitMap[key].topics.push(topic);
+                });
+                const units = Object.values(unitMap);
+                if (units.length === 0) {
+                  return (
+                    <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                      ⚡ Syllabus not yet extracted. Upload your syllabus PDF via <strong>Upload Syllabus</strong> page, then generate the <strong>Session Plan</strong> to auto-populate this section.
+                    </InfoBox>
+                  );
+                }
+                return (
+                  <div style={{ borderRadius: 8, border: `1px solid ${T.border}`, overflow: "hidden" }}>
+                    {units.map((u, i) => (
+                      <div key={i} style={{ padding: "10px 14px", borderBottom: i < units.length - 1 ? `1px solid rgba(255,255,255,0.06)` : "none", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.012)" }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: T.blueLight, marginBottom: 4 }}>
+                          Unit {u.unit_number}: {u.unit_title}
+                        </div>
+                        {u.topics.length > 0 && (
+                          <ul style={{ margin: "4px 0 0 16px", padding: 0, listStyle: "disc" }}>
+                            {u.topics.slice(0, 8).map((t, ti) => (
+                              <li key={ti} style={{ fontSize: 12, color: T.textSub, marginBottom: 2 }}>{t}</li>
+                            ))}
+                            {u.topics.length > 8 && (
+                              <li style={{ fontSize: 11, color: T.textMuted, listStyle: "none", marginLeft: -16 }}>…and {u.topics.length - 8} more topics</li>
+                            )}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Personal Timetable — auto from dashboard timetable upload */}
+              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 22 }}>
+                Personal Timetable (from dashboard timetable upload)
+              </p>
+              {timetable ? (
+                <div style={{ borderRadius: 8, border: `1px solid ${T.border}`, overflow: "hidden" }}>
+                  {/* Header */}
+                  <div style={{ padding: "10px 14px", background: T.surfaceHigh, display: "flex", gap: 20, flexWrap: "wrap" }}>
+                    {timetable.faculty_name && <span style={{ fontSize: 12, color: T.text, fontWeight: 700 }}>{timetable.faculty_name}</span>}
+                    {timetable.department && <span style={{ fontSize: 12, color: T.textSub }}>{timetable.department}</span>}
+                    {timetable.academic_year && <span style={{ fontSize: 12, color: T.textMuted }}>{timetable.academic_year}</span>}
+                  </div>
+                  {/* Schedule */}
+                  {(() => {
+                    const schedule = timetable.schedule || {};
+                    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+                    return days.map(day => {
+                      const slots = schedule[day] || {};
+                      const entries = Object.entries(slots).filter(([, v]) => v && String(v).trim());
+                      return (
+                        <div key={day} style={{ padding: "8px 14px", borderTop: `1px solid rgba(255,255,255,0.06)`, display: "flex", alignItems: "flex-start", gap: 12 }}>
+                          <span style={{ minWidth: 90, fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", paddingTop: 2 }}>{day}</span>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {entries.length > 0 ? entries.map(([time, val], i) => (
+                              <span key={i} style={{ fontSize: 11, background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 4, padding: "2px 8px", color: "#fb923c" }}>
+                                {time} {val}
+                              </span>
+                            )) : (
+                              <span style={{ fontSize: 11, color: T.textMuted }}>—</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              ) : (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ Timetable not uploaded yet. Go to the <strong>Dashboard</strong> and upload your individual timetable .docx to auto-populate this section.
+                </InfoBox>
+              )}
               <AttachmentZone courseId={courseId} sectionNo={3} attachments={attachments} onRefresh={refreshAttachments} />
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
                 Section 4 — CO Statements + CO-PO Mapping (auto)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={4} {...SECTION_META[3]} hasContent={!!course?.cos?.length}>
+            <SectionWrapper no={4} {...SECTION_META.find(s=>s.no===4)} hasContent={!!course?.cos?.length}>
               {/* CO Statements table */}
               <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 0 }}>
                 Course Outcome Statements
@@ -5773,14 +5986,14 @@ function CourseFileEditor({ courseId }) {
                 <div style={{ overflowX: "auto", borderRadius: 8, border: `1px solid ${T.border}` }}>
                   <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: "100%" }}>
                     <thead>
-                      <tr style={{ background: T.surfaceHigh }}>
-                        <th style={{ padding: "9px 14px", color: T.textSub, fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", minWidth: 56 }}>
+                      <tr style={{ background: "rgba(15,23,42,0.95)" }}>
+                        <th style={{ padding: "9px 14px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", minWidth: 80, fontSize: 11 }}>
                           CO \ PO/PSO
                         </th>
                         {course.pos.map(po => (
                           <th key={po.po_id} style={{
-                            padding: "9px 10px", color: T.textSub, fontWeight: 600,
-                            borderBottom: `1px solid ${T.border}`, textAlign: "center", minWidth: 44,
+                            padding: "9px 8px", color: "#F1F5F9", fontWeight: 700,
+                            borderBottom: `1px solid ${T.border}`, textAlign: "center", minWidth: 40, fontSize: 11,
                           }}>
                             {po.po_id}
                           </th>
@@ -5790,21 +6003,25 @@ function CourseFileEditor({ courseId }) {
                     <tbody>
                       {course.cos.map((co, i) => (
                         <tr key={co.co_id} style={{
-                          borderBottom: `1px solid rgba(255,255,255,0.04)`,
-                          background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.012)",
+                          borderBottom: `1px solid rgba(255,255,255,0.06)`,
+                          background: i % 2 === 0 ? "rgba(8,14,26,0.4)" : "rgba(15,23,42,0.6)",
                         }}>
-                          <td style={{ padding: "8px 14px", color: T.text, fontWeight: 700 }}>{co.co_id}</td>
+                          <td style={{ padding: "8px 14px", color: "#F1F5F9", fontWeight: 700, fontSize: 12 }}>{co.co_id}</td>
                           {course.pos.map(po => {
-                            const val = course.co_po_matrix?.[co.co_id]?.[po.po_id] ?? 0;
-                            const bg  = ["transparent","rgba(59,130,246,0.12)","rgba(59,130,246,0.3)","rgba(59,130,246,0.55)"];
+                            const val    = course.co_po_matrix?.[co.co_id]?.[po.po_id] ?? 0;
+                            const numVal = Number(val) || 0;
+                            const cellBg = numVal === 3 ? "rgba(20,184,166,0.55)"
+                                         : numVal === 2 ? "rgba(20,184,166,0.28)"
+                                         : numVal === 1 ? "rgba(20,184,166,0.14)"
+                                         : "transparent";
                             return (
                               <td key={po.po_id} style={{
-                                padding: "8px 10px", textAlign: "center",
-                                color: val ? T.blueLight : "#475569",
-                                fontWeight: val ? 700 : 400,
-                                background: bg[val] ?? "transparent",
+                                padding: "8px 8px", textAlign: "center",
+                                color: numVal > 0 ? "#F1F5F9" : "#475569",
+                                fontWeight: numVal > 0 ? 700 : 400,
+                                background: cellBg, fontSize: 12,
                               }}>
-                                {val || "—"}
+                                {numVal || "–"}
                               </td>
                             );
                           })}
@@ -5820,14 +6037,21 @@ function CourseFileEditor({ courseId }) {
               )}
 
               {/* CO-PO Justification */}
-              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 22 }}>
-                CO-PO Mapping Justification
-              </p>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 22, marginBottom: 10 }}>
+                <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", margin: 0 }}>
+                  CO-PO Mapping Justification
+                </p>
+                <CoPoJustificationAIBtn
+                  course={course}
+                  onGenerated={v => updateExtra("co_po_justification", v)}
+                  disabled={!course?.cos?.length || !course?.co_po_matrix}
+                />
+              </div>
               <Textarea
                 value={extra.co_po_justification ?? ""}
                 onChange={v => updateExtra("co_po_justification", v)}
                 placeholder={"CO1 → PO1 (3): Directly requires applying engineering knowledge for ML problem formulation.\nCO1 → PO2 (3): Requires identification and analysis of feature selection problems.\nCO2 → PO3 (3): Design of unsupervised learning pipelines for given datasets.\n..."}
-                rows={6}
+                rows={8}
                 mono
               />
             </SectionWrapper>
@@ -5835,7 +6059,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 5 — Previous CO Attainment (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={5} {...SECTION_META[4]} hasContent={hasContent("prev_co_attainment")}>
+            <SectionWrapper no={5} {...SECTION_META.find(s=>s.no===5)} hasContent={hasContent("prev_co_attainment")}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <Field label="Previous Year CO Attainment" required hint="Summarise attainment % or paste table data">
                   <Textarea
@@ -5860,7 +6084,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 6 — Session Plan (auto)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={6} {...SECTION_META[5]} hasContent={sessionPlan.rows.length > 0}>
+            <SectionWrapper no={6} {...SECTION_META.find(s=>s.no===6)} hasContent={sessionPlan.rows.length > 0}>
               {loadErrors.session ? (
                 <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
                   ⚡ {loadErrors.session.includes("404") || loadErrors.session.includes("No session")
@@ -5884,7 +6108,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 7 — Evaluation Plan (auto)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={7} {...SECTION_META[6]} hasContent={evalPlan.rows.length > 0}>
+            <SectionWrapper no={7} {...SECTION_META.find(s=>s.no===7)} hasContent={evalPlan.rows.length > 0}>
               {loadErrors.eval ? (
                 <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
                   ⚡ {loadErrors.eval.includes("404") || loadErrors.eval.includes("No evaluation")
@@ -5918,7 +6142,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 8 — Slow & Advanced Learners (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={8} {...SECTION_META[7]} hasContent={hasContent("slow_learners")}>
+            <SectionWrapper no={8} {...SECTION_META.find(s=>s.no===8)} hasContent={hasContent("slow_learners")}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <Field label="Slow Learners" hint="Names, PRNs, or list of students needing extra support">
                   <Textarea
@@ -5945,7 +6169,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 9 — CO Attainment Results (auto)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={9} {...SECTION_META[8]} hasContent={!!attainment}>
+            <SectionWrapper no={9} {...SECTION_META.find(s=>s.no===9)} hasContent={!!attainment}>
               {loadErrors.attainment ? (
                 <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
                   ⚡ {loadErrors.attainment.includes("404")
@@ -5960,7 +6184,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 10 — Activity Reports (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={10} {...SECTION_META[9]} hasContent={hasContent("activity_reports")}>
+            <SectionWrapper no={10} {...SECTION_META.find(s=>s.no===10)} hasContent={hasContent("activity_reports")}>
               <Field label="Activity Reports" required hint="List co-curricular events, guest lectures, industrial visits, etc.">
                 <Textarea
                   value={extra.activity_reports}
@@ -5976,7 +6200,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 11 — Learning Materials (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={11} {...SECTION_META[10]} hasContent={hasContent("learning_material_links")}>
+            <SectionWrapper no={11} {...SECTION_META.find(s=>s.no===11)} hasContent={hasContent("learning_material_links")}>
               <Field label="Learning Material Links" required hint="Textbooks, NPTEL, YouTube playlists — one entry per line">
                 <Textarea
                   value={extra.learning_material_links}
@@ -5991,7 +6215,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 12 — Question Bank (auto)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={12} {...SECTION_META[11]} hasContent={false}>
+            <SectionWrapper no={12} {...SECTION_META.find(s=>s.no===12)} hasContent={false}>
               <InfoBox>
                 ⚡ Question papers are auto-included from the Question Bank. Generate papers from
                 the Question Paper section for them to appear here.
@@ -6004,7 +6228,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 13 — Attendance Records (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={13} {...SECTION_META[12]} hasContent={hasContent("attendance_links")}>
+            <SectionWrapper no={13} {...SECTION_META.find(s=>s.no===13)} hasContent={hasContent("attendance_links")}>
               <Field label="Attendance Links / Summary" required hint="Paste portal URL and any attendance summary data">
                 <Textarea
                   value={extra.attendance_links}
@@ -6020,7 +6244,7 @@ function CourseFileEditor({ courseId }) {
             {/* ════════════════════════════════════════════════════════════════
                 Section 14 — Student List (manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={14} {...SECTION_META[13]} hasContent={hasContent("student_list")}>
+            <SectionWrapper no={14} {...SECTION_META.find(s=>s.no===14)} hasContent={hasContent("student_list")}>
               <Field label="Student List" hint="SR No | PRN | Name — one per line, group by section if needed">
                 <Textarea
                   value={extra.student_list}

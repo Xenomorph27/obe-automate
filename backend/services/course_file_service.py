@@ -495,7 +495,48 @@ def _build_docx(data: dict) -> bytes:
             matrix_rows.append([co.get("co_id","")] + [_get_mapping(pid) for pid in po_ids_matrix])
         n = len(po_ids_matrix)
         col_w = [1.5] + [round(14.5/max(n,1), 2)] * n
-        _make_table(doc, ["CO"] + po_ids_matrix, matrix_rows, col_w)
+
+        # Build table manually so we can colour cells by strength value
+        num_cols = 1 + n
+        tbl = doc.add_table(rows=1 + len(matrix_rows), cols=num_cols)
+        tbl.style = "Table Grid"
+        hdr_row = tbl.rows[0]
+        for ci, hdr in enumerate(["CO \\ PO/PSO"] + po_ids_matrix):
+            cell = hdr_row.cells[ci]
+            cell.width = Cm(col_w[ci])
+            _set_cell_bg(cell, _NAVY)
+            _set_cell_margins(cell)
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _run(p, hdr, bold=True, size=8, color=_WHITE)
+
+        # Strength colour map: 1=light blue, 2=medium blue, 3=dark blue — all with BLACK text
+        strength_bg = {
+            "1": (209, 231, 246),
+            "2": (130, 188, 235),
+            "3": ( 56, 136, 195),
+            1:   (209, 231, 246),
+            2:   (130, 188, 235),
+            3:   ( 56, 136, 195),
+        }
+        for ri, row in enumerate(matrix_rows):
+            tr = tbl.rows[ri + 1]
+            for ci, val in enumerate(row):
+                cell = tr.cells[ci]
+                cell.width = Cm(col_w[ci])
+                _set_cell_margins(cell)
+                p = cell.paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER if ci > 0 else WD_ALIGN_PARAGRAPH.LEFT
+                str_val = str(val) if val is not None else "-"
+                if ci == 0:
+                    _set_cell_bg(cell, _LGRAY)
+                    _run(p, str_val, bold=True, size=8, color=(0, 0, 0))
+                elif str_val in strength_bg or val in strength_bg:
+                    _set_cell_bg(cell, strength_bg.get(str_val) or strength_bg.get(val) or _WHITE)
+                    _run(p, str_val, bold=True, size=8, color=(0, 0, 0))
+                else:
+                    _set_cell_bg(cell, _WHITE)
+                    _run(p, "-" if str_val in ("-", "0", "") else str_val, size=8, color=(150, 150, 150))
     elif cos:
         _add_para(doc, "[CO-PO mapping not yet configured. Set it up in Course Setup.]", color=(136, 136, 136))
 
