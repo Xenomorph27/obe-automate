@@ -6975,20 +6975,20 @@ function CourseFileEditor({ courseId }) {
                           <div style={{ fontSize:11, fontWeight:700, color:T.textSub, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6, padding:"4px 8px", background:"rgba(255,255,255,0.04)", borderRadius:4 }}>
                             Section {sec} — {secStudents.length} students
                           </div>
-                          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, background:"rgba(8,14,26,0.9)", borderRadius:6, overflow:"hidden" }}>
                             <thead>
-                              <tr style={{ background:"rgba(255,255,255,0.05)" }}>
-                                <th style={{ padding:"6px 10px", textAlign:"left", fontWeight:600, color:T.textSub, borderBottom:`1px solid ${T.border}`, width:44 }}>Sr</th>
-                                <th style={{ padding:"6px 10px", textAlign:"left", fontWeight:600, color:T.textSub, borderBottom:`1px solid ${T.border}`, width:150 }}>PRN</th>
-                                <th style={{ padding:"6px 10px", textAlign:"left", fontWeight:600, color:T.textSub, borderBottom:`1px solid ${T.border}` }}>Name</th>
+                              <tr style={{ background:"rgba(22,32,55,0.95)" }}>
+                                <th style={{ padding:"7px 10px", textAlign:"left", fontWeight:700, color:"#CBD5E1", borderBottom:`1px solid rgba(255,255,255,0.12)`, width:44, fontSize:11 }}>SR</th>
+                                <th style={{ padding:"7px 10px", textAlign:"left", fontWeight:700, color:"#CBD5E1", borderBottom:`1px solid rgba(255,255,255,0.12)`, width:150, fontSize:11 }}>PRN</th>
+                                <th style={{ padding:"7px 10px", textAlign:"left", fontWeight:700, color:"#CBD5E1", borderBottom:`1px solid rgba(255,255,255,0.12)`, fontSize:11 }}>NAME</th>
                               </tr>
                             </thead>
                             <tbody>
                               {secStudents.map((s, i) => (
-                                <tr key={s.prn} style={{ borderBottom:`1px solid rgba(255,255,255,0.04)`, background: i%2===0 ? "transparent" : "rgba(255,255,255,0.02)" }}>
-                                  <td style={{ padding:"5px 10px", color:T.textMuted }}>{i+1}</td>
-                                  <td style={{ padding:"5px 10px", fontFamily:"monospace", color:T.text }}>{s.prn}</td>
-                                  <td style={{ padding:"5px 10px", color:T.text }}>{s.name}</td>
+                                <tr key={s.prn} style={{ borderBottom:`1px solid rgba(255,255,255,0.07)`, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(22,32,55,0.85)" }}>
+                                  <td style={{ padding:"5px 10px", color:"#94A3B8", fontSize:12 }}>{i+1}</td>
+                                  <td style={{ padding:"5px 10px", fontFamily:"monospace", color:"#7DD3FC", fontSize:12 }}>{s.prn}</td>
+                                  <td style={{ padding:"5px 10px", color:"#F1F5F9", fontSize:12, fontWeight:500 }}>{s.name}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -7015,6 +7015,143 @@ function CourseFileEditor({ courseId }) {
                 </div>
               )}
               <AttachmentZone courseId={courseId} sectionNo={14} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 15 — Student Marks (exam-wise & question-wise)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={15} title="Student Marks" icon="📊" auto={true} desc="Exam-wise and question-wise marks auto-populated from uploaded marks and master attainment file" hasContent={cfMarks.length > 0}>
+              {cfMarks.length > 0 ? (() => {
+                // Collect all exam components from marks data
+                const allExams = [...new Set(cfMarks.flatMap(r => Object.keys(r.marks || {})))].sort();
+                // Split into CA exams and ESE
+                const caExams = allExams.filter(e => !/^ESE$/i.test(e));
+                const eseExams = allExams.filter(e => /^ESE$/i.test(e));
+                const orderedExams = [...caExams, ...eseExams];
+
+                return (
+                  <div>
+                    {/* Summary bar */}
+                    <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
+                      <div style={{ background:"rgba(59,130,246,0.1)", border:"1px solid rgba(59,130,246,0.25)", borderRadius:8, padding:"8px 16px", fontSize:12 }}>
+                        <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.06em", marginBottom:2 }}>STUDENTS</div>
+                        <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:16 }}>{cfMarks.length}</div>
+                      </div>
+                      <div style={{ background:"rgba(34,197,94,0.1)", border:"1px solid rgba(34,197,94,0.25)", borderRadius:8, padding:"8px 16px", fontSize:12 }}>
+                        <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.06em", marginBottom:2 }}>EXAMS</div>
+                        <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:16 }}>{orderedExams.length}</div>
+                      </div>
+                      {orderedExams.map(exam => {
+                        const vals = cfMarks.map(r => parseFloat(r.marks?.[exam]) || 0).filter(v => v > 0);
+                        const avg = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : "—";
+                        return (
+                          <div key={exam} style={{ background:"rgba(15,23,42,0.8)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"8px 16px", fontSize:12 }}>
+                            <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.06em", marginBottom:2 }}>{exam.toUpperCase()}</div>
+                            <div style={{ color:"#7DD3FC", fontWeight:700, fontSize:14 }}>avg {avg}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Main marks table */}
+                    <div style={{ overflowX:"auto", borderRadius:8, border:"1px solid rgba(255,255,255,0.1)" }}>
+                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, background:"rgba(8,14,26,0.95)" }}>
+                        <thead>
+                          <tr style={{ background:"rgba(22,32,55,0.98)" }}>
+                            <th style={{ padding:"8px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", position:"sticky", left:0, background:"rgba(22,32,55,0.98)", zIndex:2, minWidth:36 }}>SR</th>
+                            <th style={{ padding:"8px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", position:"sticky", left:36, background:"rgba(22,32,55,0.98)", zIndex:2, minWidth:130 }}>STUDENT NAME</th>
+                            <th style={{ padding:"8px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", minWidth:120 }}>PRN / ID</th>
+                            {orderedExams.map(exam => (
+                              <th key={exam} style={{ padding:"8px 10px", textAlign:"center", color: /^ESE$/i.test(exam) ? "#FCA5A5" : "#86EFAC", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", minWidth:80, borderLeft:"1px solid rgba(255,255,255,0.07)" }}>
+                                {exam}
+                              </th>
+                            ))}
+                            <th style={{ padding:"8px 10px", textAlign:"center", color:"#FCD34D", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", minWidth:80, borderLeft:"1px solid rgba(255,255,255,0.12)" }}>TOTAL</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cfMarks.map((rec, i) => {
+                            const rowMarks = rec.marks || {};
+                            const total = orderedExams.reduce((s,e) => s + (parseFloat(rowMarks[e])||0), 0);
+                            return (
+                              <tr key={rec.student_id || i} style={{ background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
+                                <td style={{ padding:"6px 10px", color:"#64748B", fontSize:11, position:"sticky", left:0, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", zIndex:1 }}>{i+1}</td>
+                                <td style={{ padding:"6px 10px", color:"#F1F5F9", fontWeight:500, position:"sticky", left:36, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", zIndex:1 }}>{rec.student_name || "—"}</td>
+                                <td style={{ padding:"6px 10px", color:"#7DD3FC", fontFamily:"monospace", fontSize:11 }}>{rec.student_id || "—"}</td>
+                                {orderedExams.map(exam => {
+                                  const val = rowMarks[exam];
+                                  const num = parseFloat(val);
+                                  // Check if val is an object (question-wise marks)
+                                  const isObj = val && typeof val === "object";
+                                  return (
+                                    <td key={exam} style={{ padding:"6px 10px", textAlign:"center", color: isNaN(num) ? "#64748B" : num < 0 ? "#F87171" : "#A7F3D0", fontWeight:600, fontSize:12, borderLeft:"1px solid rgba(255,255,255,0.05)" }}>
+                                      {isObj ? (
+                                        <span title={JSON.stringify(val)} style={{ cursor:"help", borderBottom:"1px dashed #64748B" }}>
+                                          {Object.values(val).reduce((s,v)=>s+(parseFloat(v)||0),0).toFixed(1)}*
+                                        </span>
+                                      ) : (
+                                        isNaN(num) ? "—" : num
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                                <td style={{ padding:"6px 10px", textAlign:"center", color:"#FCD34D", fontWeight:700, fontSize:12, borderLeft:"1px solid rgba(255,255,255,0.1)" }}>{total.toFixed(1)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* QP section — exam-wise question papers from master attainment */}
+                    {Object.keys(cfQP).length > 0 && (
+                      <div style={{ marginTop:20 }}>
+                        <div style={{ fontSize:12, fontWeight:700, color:T.textSub, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:10 }}>
+                          📋 Question Papers (from Master Attainment)
+                        </div>
+                        {Object.entries(cfQP).map(([examName, qpData]) => {
+                          const questions = Array.isArray(qpData) ? qpData : (qpData?.qp ?? qpData?.questions ?? []);
+                          if (!questions.length) return null;
+                          return (
+                            <div key={examName} style={{ marginBottom:14, borderRadius:8, border:"1px solid rgba(255,255,255,0.08)", overflow:"hidden" }}>
+                              <div style={{ background:"rgba(22,32,55,0.9)", padding:"8px 14px", fontSize:12, fontWeight:700, color:"#86EFAC", letterSpacing:"0.04em" }}>
+                                {examName} — {questions.length} Questions
+                              </div>
+                              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, background:"rgba(8,14,26,0.9)" }}>
+                                <thead>
+                                  <tr style={{ background:"rgba(15,23,42,0.8)" }}>
+                                    <th style={{ padding:"6px 10px", textAlign:"left", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)", width:40 }}>Q#</th>
+                                    <th style={{ padding:"6px 10px", textAlign:"left", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)" }}>Question</th>
+                                    <th style={{ padding:"6px 10px", textAlign:"center", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)", width:60 }}>Marks</th>
+                                    <th style={{ padding:"6px 10px", textAlign:"center", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)", width:60 }}>CO</th>
+                                    <th style={{ padding:"6px 10px", textAlign:"center", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)", width:80 }}>Bloom</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {questions.map((q, qi) => (
+                                    <tr key={qi} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)", background: qi%2===0 ? "transparent" : "rgba(255,255,255,0.02)" }}>
+                                      <td style={{ padding:"5px 10px", color:"#64748B" }}>{q.q_no ?? (qi+1)}</td>
+                                      <td style={{ padding:"5px 10px", color:"#CBD5E1" }}>{q.question_text ?? q.text ?? q.question ?? "—"}</td>
+                                      <td style={{ padding:"5px 10px", textAlign:"center", color:"#FCD34D", fontWeight:600 }}>{q.marks ?? q.max_marks ?? "—"}</td>
+                                      <td style={{ padding:"5px 10px", textAlign:"center", color:"#7DD3FC" }}>{q.co_id ?? q.co ?? "—"}</td>
+                                      <td style={{ padding:"5px 10px", textAlign:"center", color:"#C4B5FD", fontSize:10 }}>{q.bloom_label ?? q.bloom ?? "—"}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <p style={{ fontSize:11, color:T.textMuted, marginTop:8 }}>* Hover cells marked with * to see per-question breakdown. QP auto-loaded from Master Attainment file.</p>
+                  </div>
+                );
+              })() : (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ No marks data found. Upload student marks from the <strong>Upload Marks</strong> page first. Exam-wise and question-wise marks will appear here automatically.
+                </InfoBox>
+              )}
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
