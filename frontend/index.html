@@ -5776,6 +5776,8 @@ function CourseFileEditor({ courseId }) {
   const [attainment,  setAttainment]  = useState(null);
   const [attachments, setAttachments] = useState([]);
   const [timetable,   setTimetable]   = useState(null);
+  const [students,    setStudents]    = useState([]);
+  const [caSheets,    setCaFileSheets] = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [saving,      setSaving]      = useState(false);
   const [generating,  setGenerating]  = useState(false);
@@ -5796,7 +5798,7 @@ function CourseFileEditor({ courseId }) {
     setLoading(true);
     const errors = {};
 
-    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes, ttRes] =
+    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes, ttRes, studentsRes, caSheetsRes] =
       await Promise.allSettled([
         apiFetch(`/courses/${courseId}`),
         apiFetch(`/course-file/extra/${courseId}`),
@@ -5805,6 +5807,8 @@ function CourseFileEditor({ courseId }) {
         apiFetch(`/attainment/calculate/${courseId}`),
         apiFetch(`/course-file/attachments/${courseId}`),
         apiFetch(`/dashboard/timetable`),
+        apiFetch(`/students/${courseId}`),
+        apiFetch(`/co-po-template/ca-sheets/${courseId}`),
       ]);
 
     if (courseRes.status === "fulfilled") {
@@ -5868,6 +5872,21 @@ function CourseFileEditor({ courseId }) {
 
     if (ttRes?.status === "fulfilled") {
       setTimetable(ttRes.value.data ?? null);
+    }
+
+    if (studentsRes?.status === "fulfilled") {
+      setStudents(studentsRes.value.data ?? studentsRes.value ?? []);
+    }
+
+    if (caSheetsRes?.status === "fulfilled") {
+      const raw = caSheetsRes.value.data ?? caSheetsRes.value ?? {};
+      // raw may be {CA1: {qp, marks}, CA2: ...} or array
+      if (Array.isArray(raw)) {
+        setCaFileSheets(raw);
+      } else if (typeof raw === "object") {
+        const arr = Object.entries(raw).map(([ca, d]) => ({ ca_label: ca, qp: d?.qp ?? [], marks: d?.marks ?? {} }));
+        setCaFileSheets(arr);
+      }
     }
 
     setLoadErrors(errors);
@@ -6705,18 +6724,71 @@ function CourseFileEditor({ courseId }) {
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
-                Section 14 — Student List (manual)
+                Section 14 — Student List (auto from DB + manual)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={14} {...SECTION_META.find(s=>s.no===14)} hasContent={hasContent("student_list")}>
-              <Field label="Student List" hint="SR No | PRN | Name — one per line, group by section if needed">
-                <Textarea
-                  value={extra.student_list}
-                  onChange={v => updateExtra("student_list", v)}
-                  placeholder={"Section A\n1 | 24070126001 | Aadi Kulshreshth\n2 | 24070126002 | Aadya Rastogi\n...\nSection B\n74 | 24070126073 | Ishan Sharma\n..."}
-                  rows={10}
-                  mono
-                />
-              </Field>
+            <SectionWrapper no={14} {...SECTION_META.find(s=>s.no===14)} hasContent={students.length > 0 || hasContent("student_list")}>
+              {students.length > 0 ? (() => {
+                // Group students by section
+                const bySection = {};
+                students.forEach(s => {
+                  const sec = (s.section || "").trim().toUpperCase() || "All";
+                  if (!bySection[sec]) bySection[sec] = [];
+                  bySection[sec].push(s);
+                });
+                const sectionKeys = Object.keys(bySection).sort();
+                return (
+                  <div>
+                    <div style={{ fontSize: 11, color: T.green, marginBottom: 10, fontWeight: 600 }}>
+                      ✓ {students.length} students loaded from database
+                    </div>
+                    {sectionKeys.map(sec => (
+                      <div key={sec} style={{ marginBottom: 16 }}>
+                        {sectionKeys.length > 1 && (
+                          <div style={{ fontSize: 12, fontWeight: 700, color: T.blueLight, marginBottom: 6 }}>
+                            Section {sec}
+                          </div>
+                        )}
+                        <div style={{ overflowX: "auto", borderRadius: 8, border: `1px solid ${T.border}` }}>
+                          <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+                            <thead>
+                              <tr style={{ background: "rgba(15,23,42,0.95)" }}>
+                                <th style={{ padding: "8px 12px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "center", width: 50 }}>Sr. No</th>
+                                <th style={{ padding: "8px 12px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", width: 140 }}>PRN</th>
+                                <th style={{ padding: "8px 12px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left" }}>Name</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {bySection[sec].map((s, i) => (
+                                <tr key={s.prn || i} style={{ borderBottom: `1px solid rgba(255,255,255,0.05)`, background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.012)" }}>
+                                  <td style={{ padding: "6px 12px", textAlign: "center", color: T.textMuted, fontSize: 11 }}>{i + 1}</td>
+                                  <td style={{ padding: "6px 12px", color: T.textSub, fontFamily: "monospace", fontSize: 11 }}>{s.prn}</td>
+                                  <td style={{ padding: "6px 12px", color: T.text }}>{s.name}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                    <p style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
+                      Student data auto-populated from Students page. Add more students there to update this list.
+                    </p>
+                  </div>
+                );
+              })() : (
+                <Field label="Student List" hint="SR No | PRN | Name — one per line, group by section if needed">
+                  <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                    ⚡ No students in database. Import students via the <strong>Students Roster</strong> page, or enter manually below.
+                  </InfoBox>
+                  <Textarea
+                    value={extra.student_list}
+                    onChange={v => updateExtra("student_list", v)}
+                    placeholder={"Section A\n1 | 24070126001 | Aadi Kulshreshth\n2 | 24070126002 | Aadya Rastogi\n...\nSection B\n74 | 24070126073 | Ishan Sharma\n..."}
+                    rows={10}
+                    mono
+                  />
+                </Field>
+              )}
               <AttachmentZone courseId={courseId} sectionNo={14} attachments={attachments} onRefresh={refreshAttachments} />
             </SectionWrapper>
 
