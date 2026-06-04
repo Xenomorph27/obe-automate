@@ -278,3 +278,139 @@ Example — user says "what is CO attainment?":
     except Exception as e:
         logger.error(f"AI table chat error: {e}")
         return {"ok": False, "error": str(e)}
+
+
+# ── CO-PO Justification ────────────────────────────────────────────────────────
+
+class CoPoJustificationRequest(BaseModel):
+    course_name: str
+    course_code: str
+    department: str
+    cos: list
+    pos: list
+    co_po_matrix: dict
+
+@router.post("/co-po-justification/{course_id}")
+async def generate_co_po_justification(
+    course_id: int,
+    req: CoPoJustificationRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Generate CO-PO mapping justifications using backend LLM."""
+    mapping_lines = []
+    for co in req.cos:
+        co_map = req.co_po_matrix.get(co.get("co_id", ""), {})
+        for po_id, val in co_map.items():
+            if val and str(val) not in ("0", ""):
+                po_stmt = next((p.get("statement", po_id) for p in req.pos if p.get("po_id") == po_id), po_id)
+                mapping_lines.append(
+                    f'{co["co_id"]} → {po_id} ({val}): CO="{co.get("statement","")}" | PO="{po_stmt}"'
+                )
+
+    prompt = f"""You are an OBE (Outcome Based Education) expert for engineering colleges. Generate concise CO-PO mapping justifications.
+
+Course: {req.course_name} ({req.course_code})
+Department: {req.department}
+
+Course Outcomes:
+{chr(10).join(f'{c["co_id"]}: {c.get("statement","")} [Bloom\'s: {c.get("bloom_level","")}]' for c in req.cos)}
+
+CO-PO Mapping:
+{chr(10).join(mapping_lines)}
+
+Write one justification line per CO-PO mapping in this exact format:
+CO1 → PO1 (3): <short reason why this CO directly maps to this PO at this strength>.
+
+Rules:
+- Level 3 = direct, strong alignment; Level 2 = moderate; Level 1 = slight/indirect
+- Keep each justification to one line, under 120 characters
+- Be technically specific to the course content
+- Only list mappings that have a non-zero value
+- Do NOT include any preamble or closing remarks, just the justification lines"""
+
+    try:
+        text = await get_llm_response(prompt)
+        return {"status": "success", "data": text.strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Action Plan Generator ──────────────────────────────────────────────────────
+
+class ActionPlanRequest(BaseModel):
+    course_name: str
+    course_code: str
+    prev_co_attainment: str
+
+@router.post("/action-plan/{course_id}")
+async def generate_action_plan(
+    course_id: int,
+    req: ActionPlanRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Generate a remedial action plan based on previous CO attainment."""
+    prompt = f"""You are an OBE expert for engineering colleges. Based on the previous year CO attainment data below, generate a concise remedial action plan.
+
+Course: {req.course_name} ({req.course_code})
+
+Previous CO Attainment:
+{req.prev_co_attainment}
+
+Write a bullet-point action plan (4-6 bullets) addressing the low-attainment COs (below 70%). Each bullet should be a specific, actionable intervention. Format:
+• <action>
+
+Keep it practical: remedial sessions, tutorials, peer learning, reassessment, extra assignments, etc.
+Do NOT include preamble or closing remarks, just the bullet points."""
+
+    try:
+        text = await get_llm_response(prompt)
+        return {"status": "success", "data": text.strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Learning Materials Generator ──────────────────────────────────────────────
+
+class LearningMaterialsRequest(BaseModel):
+    course_name: str
+    course_code: str
+    department: str
+    semester: Optional[str] = ""
+    cos: list = []
+    syllabus_units: list = []
+
+@router.post("/learning-materials/{course_id}")
+async def generate_learning_materials(
+    course_id: int,
+    req: LearningMaterialsRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Generate recommended learning materials for the course."""
+    co_text = "\n".join(f'- {c.get("co_id","")}: {c.get("statement","")}' for c in req.cos) if req.cos else "Not specified"
+    units_text = "\n".join(f'- {u.get("unit_no","")}: {u.get("title","")}' for u in req.syllabus_units) if req.syllabus_units else "Not specified"
+
+    prompt = f"""You are an expert academic resource curator for Indian engineering colleges (NBA/NAAC context). Recommend learning materials for the following course.
+
+Course: {req.course_name} ({req.course_code})
+Department: {req.department}
+Semester: {req.semester}
+
+Course Outcomes:
+{co_text}
+
+Syllabus Units:
+{units_text}
+
+Generate 5-8 learning material recommendations in this exact format (one per line):
+Textbook: <Title> — <Author(s)>, <Publisher>, <Edition/Year>
+or
+<URL>  (<brief description>)
+
+Include: 1-2 standard textbooks, 1-2 NPTEL/Swayam links, 1 YouTube playlist, 1-2 relevant reference books.
+Use real, widely-known resources. Do NOT include preamble or closing remarks, just the material lines."""
+
+    try:
+        text = await get_llm_response(prompt)
+        return {"status": "success", "data": text.strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

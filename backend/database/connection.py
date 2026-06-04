@@ -94,6 +94,12 @@ async def init_db():
         ("course_file_extra", "institution_name",    "VARCHAR(200) DEFAULT 'Symbiosis Institute of Technology'"),
         ("course_file_extra", "institution_address", "VARCHAR(300) DEFAULT 'SIU Pune 412115, Maharashtra, India'"),
         ("course_file_extra", "co_po_justification", "TEXT DEFAULT ''"),
+        # New columns added in v2
+        ("course_file_extra", "po_peo_pso_text",     "TEXT DEFAULT ''"),
+        ("course_file_extra", "peo_text",             "TEXT DEFAULT ''"),
+        ("course_file_extra", "pso_text",             "TEXT DEFAULT ''"),
+        ("course_file_extra", "student_list",         "TEXT DEFAULT ''"),
+        ("course_file_extra", "custom_tabs",          "TEXT DEFAULT '[]'"),
     ]
     async with engine.begin() as conn:
         for table, column, col_type in _new_columns:

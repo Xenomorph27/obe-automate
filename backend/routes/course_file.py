@@ -43,6 +43,10 @@ class CourseFileExtraPayload(BaseModel):
     vision_text: Optional[str] = ""
     mission_text: Optional[str] = ""
     batch: Optional[str] = ""
+    po_peo_pso_text: Optional[str] = ""
+    peo_text: Optional[str] = ""
+    pso_text: Optional[str] = ""
+    co_po_justification: Optional[str] = ""
     prev_co_attainment: Optional[str] = ""
     action_plan: Optional[str] = ""
     slow_learners: Optional[str] = ""
@@ -50,6 +54,8 @@ class CourseFileExtraPayload(BaseModel):
     activity_reports: Optional[str] = ""
     learning_material_links: Optional[str] = ""
     attendance_links: Optional[str] = ""
+    student_list: Optional[str] = ""
+    custom_tabs: Optional[str] = "[]"
 
 
 # ── Existing endpoints ────────────────────────────────────────────────────────
@@ -128,6 +134,10 @@ async def save_course_file_extra(
     extra.vision_text = payload.vision_text or ""
     extra.mission_text = payload.mission_text or ""
     extra.batch = payload.batch or ""
+    extra.po_peo_pso_text = payload.po_peo_pso_text or ""
+    extra.peo_text = payload.peo_text or ""
+    extra.pso_text = payload.pso_text or ""
+    extra.co_po_justification = payload.co_po_justification or ""
     extra.prev_co_attainment = payload.prev_co_attainment or ""
     extra.action_plan = payload.action_plan or ""
     extra.slow_learners = payload.slow_learners or ""
@@ -135,6 +145,8 @@ async def save_course_file_extra(
     extra.activity_reports = payload.activity_reports or ""
     extra.learning_material_links = payload.learning_material_links or ""
     extra.attendance_links = payload.attendance_links or ""
+    extra.student_list = payload.student_list or ""
+    extra.custom_tabs = payload.custom_tabs or "[]"
 
     await db.commit()
     logger.info(f"Course file extra saved for course_id={course_id}")

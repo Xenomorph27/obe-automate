@@ -198,6 +198,11 @@ class CourseFileExtra(Base):
     # Section 2 — Batch info (e.g. "2024-28")
     batch = Column(String(20), nullable=True, default="")
 
+    # Section 2 — POs / PEOs / PSOs (free-text, one per line)
+    po_peo_pso_text = Column(Text, nullable=True, default="")   # PO1–PO12
+    peo_text        = Column(Text, nullable=True, default="")   # PEO1–PEO3
+    pso_text        = Column(Text, nullable=True, default="")   # PSO1–PSO2
+
     # Section 4 — CO-PO justification text
     co_po_justification = Column(Text, nullable=True, default="")
 
@@ -218,6 +223,12 @@ class CourseFileExtra(Base):
     # Section 13 — Attendance links
     attendance_links = Column(Text, nullable=True, default="")
 
+    # Section 14 — Student list
+    student_list = Column(Text, nullable=True, default="")
+
+    # Custom tabs (JSON list)
+    custom_tabs = Column(Text, nullable=True, default="[]")
+
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     course = relationship("Course", back_populates="course_file_extra")
 
@@ -228,6 +239,9 @@ class CourseFileExtra(Base):
             "vision_text": self.vision_text or "",
             "mission_text": self.mission_text or "",
             "batch": self.batch or "",
+            "po_peo_pso_text": getattr(self, "po_peo_pso_text", None) or "",
+            "peo_text": getattr(self, "peo_text", None) or "",
+            "pso_text": getattr(self, "pso_text", None) or "",
             "co_po_justification": getattr(self, "co_po_justification", None) or "",
             "prev_co_attainment": self.prev_co_attainment or "",
             "action_plan": self.action_plan or "",
@@ -236,6 +250,8 @@ class CourseFileExtra(Base):
             "activity_reports": self.activity_reports or "",
             "learning_material_links": self.learning_material_links or "",
             "attendance_links": self.attendance_links or "",
+            "student_list": getattr(self, "student_list", None) or "",
+            "custom_tabs": getattr(self, "custom_tabs", None) or "[]",
         }
 
 

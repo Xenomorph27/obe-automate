@@ -2844,11 +2844,80 @@ function StudyMaterialsPage({course}){
   const [err,setErr]=useState('');
   const [tab,setTab]=useState('textbooks');
 
-  // User-owned entries per tab, persisted in sessionStorage
+  // User-owned entries — loaded from DB (course_file_extra.learning_material_links) then sessionStorage as fallback
   const SK=course?`mat_user_${course.id}`:'mat_user_none';
-  const loadUser=()=>{try{return JSON.parse(sessionStorage.getItem(SK)||'null')||{textbooks:[],web:[],journals:[],moocs:[]};}catch{return{textbooks:[],web:[],journals:[],moocs:[]}}};
-  const [userMats,setUserMats]=useState(loadUser);
-  const saveUser=u=>{setUserMats(u);try{sessionStorage.setItem(SK,JSON.stringify(u));}catch{}};
+  const emptyUser={textbooks:[],web:[],journals:[],moocs:[]};
+  const [userMats,setUserMats]=useState(emptyUser);
+  const [dbSaving,setDbSaving]=useState(false);
+  const saveTimerRef=React.useRef(null);
+
+  // Serialise/deserialise userMats to/from a flat newline string for DB storage
+  function userMatsToLines(u){
+    const lines=[];
+    (u.textbooks||[]).forEach(b=>lines.push(`Textbook: ${b.title||''}${b.author?' — '+b.author:''}${b.publisher?', '+b.publisher:''}${b.edition?', '+b.edition:''}`));
+    (u.web||[]).forEach(w=>lines.push((w.url||w.title||'')+(w.note?' ('+w.note+')':'')));
+    (u.journals||[]).forEach(j=>lines.push(`Journal: ${j.title||''}${j.author?' — '+j.author:''}`));
+    (u.moocs||[]).forEach(m=>lines.push((m.url||m.platform||m.title||'')+(m.note?' ('+m.note+')':'')));
+    return lines.filter(Boolean).join('\n');
+  }
+
+  // Persist to DB (course-file extra) with debounce
+  async function persistToDb(u){
+    if(!course)return;
+    const lines=userMatsToLines(u);
+    try{
+      await apiFetch(`/course-file/extra/${course.id}`,{
+        method:'POST',
+        body:JSON.stringify({learning_material_links:lines}),
+      });
+    }catch(e){console.error('StudyMaterials DB save failed:',e);}
+    setDbSaving(false);
+  }
+
+  const saveUser=u=>{
+    setUserMats(u);
+    // sessionStorage as instant cache
+    try{sessionStorage.setItem(SK,JSON.stringify(u));}catch{}
+    // debounced DB persist
+    setDbSaving(true);
+    if(saveTimerRef.current)clearTimeout(saveTimerRef.current);
+    saveTimerRef.current=setTimeout(()=>persistToDb(u),1500);
+  };
+
+  // On mount: load from DB first, fall back to sessionStorage
+  useEffect(()=>{
+    if(!course)return;
+    (async()=>{
+      try{
+        const res=await apiFetch(`/course-file/extra/${course.id}`);
+        const d=res.data??res??{};
+        const links=(d.learning_material_links||'').trim();
+        if(links){
+          // Parse flat lines back into categories
+          const u={textbooks:[],web:[],journals:[],moocs:[]};
+          links.split('\n').filter(Boolean).forEach(line=>{
+            if(line.startsWith('Textbook:')){
+              const rest=line.replace(/^Textbook:\s*/,'');
+              const [titlePart,...rest2]=rest.split(' — ');
+              u.textbooks.push({id:Date.now()+Math.random(),title:titlePart.trim(),author:rest2.join(' — ').trim()});
+            } else if(line.startsWith('Journal:')){
+              const rest=line.replace(/^Journal:\s*/,'');
+              u.journals.push({id:Date.now()+Math.random(),title:rest.trim()});
+            } else if(line.match(/^https?:\/\//)){
+              const m=line.match(/^(https?:\/\/\S+)\s*(?:\(([^)]+)\))?/);
+              if(m)u.web.push({id:Date.now()+Math.random(),url:m[1],note:m[2]||''});
+            } else if(line){
+              u.web.push({id:Date.now()+Math.random(),title:line.trim()});
+            }
+          });
+          const hasAny=u.textbooks.length||u.web.length||u.journals.length||u.moocs.length;
+          if(hasAny){setUserMats(u);try{sessionStorage.setItem(SK,JSON.stringify(u));}catch{};return;}
+        }
+      }catch(e){/* fallthrough to sessionStorage */}
+      // Fallback: sessionStorage
+      try{const cached=JSON.parse(sessionStorage.getItem(SK)||'null');if(cached)setUserMats(cached);}catch{}
+    })();
+  },[course?.id]);
 
   // Add-form state per tab
   const emptyForm={title:'',author:'',publisher:'',url:'',platform:'',duration:'',unit:'',note:''};
@@ -2938,7 +3007,7 @@ function StudyMaterialsPage({course}){
   };
 
   useEffect(()=>{fetch_();},[course]);
-  useEffect(()=>{setUserMats(loadUser());setShowForm(false);setForm(emptyForm);},[course]);
+  useEffect(()=>{setShowForm(false);setForm(emptyForm);},[course]);
 
   // AI-sourced
   const aiTextbooks=data?.textbooks||data?.reference_books||data?.books||[];
@@ -3270,7 +3339,8 @@ function StudyMaterialsPage({course}){
         <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>Study Materials</div>
         {course&&<div style={{fontSize:'.82rem',color:'var(--text2)',marginTop:'.2rem'}}>{course.course_name} · {course.course_code}</div>}
       </div>
-      <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+      <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',alignItems:'center'}}>
+        {dbSaving && <span style={{fontSize:11,color:'var(--text2)'}}>💾 Saving…</span>}
         <button className="btn btn-outline" onClick={fetch_} disabled={loading||!course}>
           {loading?<><Spin/>Loading…</>:'↻ Refresh'}
         </button>
@@ -4852,8 +4922,11 @@ function AttainmentDisplay({ data }) {
     </InfoBox>
   );
 
-  const coAtt = data.co_attainment ?? data.coAttainment ?? [];
-  const poAtt = data.po_attainment ?? data.poAttainment ?? [];
+  // Backend returns co_attainment as a dict {CO1:{...}, CO2:{...}} not an array
+  const rawCo = data.co_attainment ?? data.coAttainment ?? {};
+  const rawPo = data.po_attainment ?? data.poAttainment ?? {};
+  const coAtt = Array.isArray(rawCo) ? rawCo : Object.values(rawCo);
+  const poAtt = Array.isArray(rawPo) ? rawPo : Object.values(rawPo);
 
   const barColor = v => {
     const n = parseFloat(v);
@@ -4862,44 +4935,84 @@ function AttainmentDisplay({ data }) {
     return T.red;
   };
 
-  const BarRow = ({ id, val }) => {
+  const BarRow = ({ id, val, statement, level, targetMet }) => {
     const pct = Math.min(parseFloat(val) || 0, 100);
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
-        <span style={{ minWidth: 38, fontSize: 12, fontWeight: 700, color: "#CBD5E1" }}>{id}</span>
-        <div style={{ flex: 1, height: 8, background: "rgba(255,255,255,0.06)", borderRadius: 4, overflow: "hidden" }}>
-          <div style={{
-            width: `${pct}%`, height: "100%",
-            background: barColor(pct), borderRadius: 4,
-            transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
-          }} />
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
+          <span style={{ minWidth: 46, fontSize: 12, fontWeight: 700, color: "#CBD5E1" }}>{id}</span>
+          <div style={{ flex: 1, height: 8, background: "rgba(255,255,255,0.06)", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{
+              width: `${pct}%`, height: "100%",
+              background: barColor(pct), borderRadius: 4,
+              transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
+            }} />
+          </div>
+          <span style={{ minWidth: 46, fontSize: 12, fontWeight: 600, color: barColor(pct), textAlign: "right" }}>
+            {pct.toFixed(1)}%
+          </span>
+          {level && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "rgba(255,255,255,0.07)", color: T.textMuted, whiteSpace: "nowrap" }}>{level}</span>}
+          {targetMet !== undefined && (
+            <span style={{ fontSize: 10, color: targetMet ? T.green : T.red }}>{targetMet ? "✓ Target Met" : "✗ Below Target"}</span>
+          )}
         </div>
-        <span style={{ minWidth: 46, fontSize: 12, fontWeight: 600, color: barColor(pct), textAlign: "right" }}>
-          {pct.toFixed(1)}%
-        </span>
+        {statement && <p style={{ margin: "0 0 0 56px", fontSize: 11, color: T.textMuted, lineHeight: 1.4 }}>{statement}</p>}
       </div>
     );
   };
 
   return (
     <div>
+      {data.course_name && (
+        <div style={{ display: "flex", gap: 16, marginBottom: 18, flexWrap: "wrap" }}>
+          {data.overall_co_attainment !== undefined && (
+            <div style={{ padding: "8px 16px", background: "rgba(59,130,246,0.1)", borderRadius: 8, border: "1px solid rgba(59,130,246,0.2)" }}>
+              <p style={{ margin: 0, fontSize: 11, color: T.textMuted }}>Overall CO Attainment</p>
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: barColor(data.overall_co_attainment) }}>{data.overall_co_attainment}%</p>
+            </div>
+          )}
+          {data.total_students !== undefined && (
+            <div style={{ padding: "8px 16px", background: "rgba(255,255,255,0.04)", borderRadius: 8, border: `1px solid ${T.border}` }}>
+              <p style={{ margin: 0, fontSize: 11, color: T.textMuted }}>Total Students</p>
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: T.text }}>{data.total_students}</p>
+            </div>
+          )}
+          {data.threshold_percentage !== undefined && (
+            <div style={{ padding: "8px 16px", background: "rgba(255,255,255,0.04)", borderRadius: 8, border: `1px solid ${T.border}` }}>
+              <p style={{ margin: 0, fontSize: 11, color: T.textMuted }}>Pass Threshold</p>
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: T.text }}>{data.threshold_percentage}%</p>
+            </div>
+          )}
+        </div>
+      )}
       {coAtt.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>
             CO Attainment
           </p>
           {coAtt.map((co, i) => (
-            <BarRow key={i} id={co.co_id ?? `CO${i+1}`} val={co.attainment ?? co.percentage ?? 0} />
+            <BarRow key={i}
+              id={co.co_id ?? `CO${i+1}`}
+              val={co.attainment_percentage ?? co.attainment ?? co.percentage ?? 0}
+              statement={co.statement}
+              level={co.attainment_level}
+              targetMet={co.target_met}
+            />
           ))}
         </div>
       )}
       {poAtt.length > 0 && (
         <div>
-          <p style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>
             PO Attainment
           </p>
           {poAtt.map((po, i) => (
-            <BarRow key={i} id={po.po_id ?? `PO${i+1}`} val={po.attainment ?? po.percentage ?? 0} />
+            <BarRow key={i}
+              id={po.po_id ?? `PO${i+1}`}
+              val={po.attainment_percentage ?? po.attainment ?? po.percentage ?? 0}
+              level={po.attainment_level}
+              targetMet={po.target_met}
+            />
           ))}
         </div>
       )}
@@ -5250,6 +5363,300 @@ function CustomTabSection({ tab, idx, courseId, attachments, onRefresh, onUpdate
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+// ─── Learning Materials: Pull from Study Materials page ──────────────────────
+
+function LearningMaterialsImportBtn({ courseId, onImport }) {
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function pull() {
+    setLoading(true);
+    try {
+      const d = await apiFetch(`/session-plan/materials/${courseId}`).catch(() => null);
+      const raw = d?.data ?? d ?? {};
+      const lines = [];
+
+      const books = raw.textbooks ?? raw.reference_books ?? raw.books ?? [];
+      books.forEach(b => {
+        const title = b.title ?? b.name ?? String(b);
+        const author = b.author ?? b.authors ?? "";
+        const pub    = b.publisher ?? "";
+        const ed     = b.edition ?? b.year ?? "";
+        lines.push(`Textbook: ${title}${author ? " — " + author : ""}${pub ? ", " + pub : ""}${ed ? ", " + ed : ""}`);
+      });
+
+      const webLinks = raw.web_links ?? raw.online_links ?? raw.nptel_links ?? raw.web ?? [];
+      webLinks.forEach(w => {
+        const url  = typeof w === "string" ? w : (w.url ?? w.link ?? "");
+        const desc = typeof w === "object"  ? (w.description ?? w.title ?? "") : "";
+        if (url) lines.push(url + (desc ? "  (" + desc + ")" : ""));
+      });
+
+      const moocs = raw.mooc_courses ?? raw.moocs ?? [];
+      moocs.forEach(m => {
+        const url  = typeof m === "string" ? m : (m.url ?? m.link ?? "");
+        const desc = typeof m === "object"  ? (m.title ?? m.platform ?? "") : "";
+        if (url) lines.push(url + (desc ? "  (" + desc + ")" : ""));
+      });
+
+      if (lines.length) {
+        onImport(lines.join("\n"));
+        setDone(true);
+        setTimeout(() => setDone(false), 3000);
+      }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <button
+      onClick={pull}
+      disabled={loading}
+      title="Pull materials from Study Materials page"
+      style={{
+        display: "flex", alignItems: "center", gap: 5,
+        padding: "4px 11px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+        cursor: loading ? "not-allowed" : "pointer",
+        background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)",
+        color: done ? T.green : "#818cf8", transition: "all 0.15s", whiteSpace: "nowrap",
+      }}
+      onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "rgba(99,102,241,0.22)"; }}
+      onMouseLeave={e => { if (!loading) e.currentTarget.style.background = "rgba(99,102,241,0.12)"; }}
+    >
+      {loading ? <Spinner size={11} /> : (done ? "✓" : "⬇")}
+      {loading ? " Pulling…" : done ? " Imported!" : " Pull from Study Materials"}
+    </button>
+  );
+}
+
+function LearningMaterialsAIBtn({ course, onGenerated }) {
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState("");
+
+  async function generate() {
+    if (busy) return;
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch(`/ai/learning-materials/${course?.id ?? 0}`, {
+        method: "POST",
+        body: JSON.stringify({
+          course_name: course?.course_name ?? "",
+          course_code: course?.course_code ?? "",
+          department: course?.department ?? "",
+          semester: course?.semester ?? "",
+          cos: course?.cos ?? [],
+          syllabus_units: course?.syllabus_units ?? [],
+        }),
+      });
+      const text = res.data ?? res;
+      if (text) onGenerated(String(text));
+      else throw new Error("Empty response");
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {err && <span style={{ fontSize: 10, color: T.red }}>{err}</span>}
+      <button
+        onClick={generate}
+        disabled={busy}
+        title="Generate AI-recommended learning materials"
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "4px 11px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+          cursor: busy ? "not-allowed" : "pointer",
+          background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.3)",
+          color: "#a78bfa", transition: "all 0.15s", whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!busy) e.currentTarget.style.background = "rgba(139,92,246,0.22)"; }}
+        onMouseLeave={e => { if (!busy) e.currentTarget.style.background = "rgba(139,92,246,0.12)"; }}
+      >
+        {busy ? <Spinner size={11} /> : "✨"}
+        {busy ? " Generating…" : " Generate with AI"}
+      </button>
+    </div>
+  );
+}
+
+// ─── Learners Auto-Populate from Attainment ──────────────────────────────────
+
+function LearnersAutoPopulate({ attainment, courseId, onPopulate }) {
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function autoFill() {
+    setLoading(true);
+    try {
+      // Fetch full student marks to categorise slow/advanced
+      const marksRes = await apiFetch(`/attainment/marks/${courseId}`).catch(() => null);
+      const records = marksRes?.data ?? marksRes ?? [];
+
+      // co_attainment dict from attainment prop
+      const rawCo = attainment?.co_attainment ?? {};
+      const coAtt = Array.isArray(rawCo) ? rawCo : Object.values(rawCo);
+      // threshold for "slow" — below 60% of max marks per CO
+      const SLOW_THRESHOLD = 0.60;
+      const ADV_THRESHOLD  = 0.85;
+
+      if (Array.isArray(records) && records.length > 0) {
+        const slowRows = [];
+        const advRows  = [];
+
+        records.forEach(rec => {
+          if (!rec) return;
+          const name = rec.student_name ?? rec.name ?? "";
+          const prn  = rec.prn ?? rec.roll_no ?? "";
+          const marks = rec.marks ?? {};
+
+          // Determine per-CO scores where possible
+          const weakCOs = [];
+          const strongCOs = [];
+
+          coAtt.forEach(co => {
+            const coId = co.co_id;
+            const maxM = co.max_marks ?? 100;
+            // Try to find student marks for this CO
+            const coScore = marks[coId] ?? marks[coId?.toLowerCase()] ?? null;
+            if (coScore !== null && coScore !== undefined) {
+              const pct = parseFloat(coScore) / maxM;
+              if (pct < SLOW_THRESHOLD) weakCOs.push(coId);
+              if (pct >= ADV_THRESHOLD) strongCOs.push(coId);
+            }
+          });
+
+          // Fallback: use overall total if no CO-wise marks
+          if (weakCOs.length === 0 && strongCOs.length === 0) {
+            const total = Object.values(marks).reduce((s, v) => {
+              const n = typeof v === "object" ? (v?.Total ?? 0) : (parseFloat(v) || 0);
+              return s + n;
+            }, 0);
+            const maxTotal = attainment?.total_students ? 100 : 100;
+            const pct = total / maxTotal;
+            if (pct < SLOW_THRESHOLD) coAtt.forEach(co => weakCOs.push(co.co_id));
+            if (pct >= ADV_THRESHOLD)  coAtt.forEach(co => strongCOs.push(co.co_id));
+          }
+
+          if (weakCOs.length > 0)  slowRows.push(`${name.padEnd(20)} | ${prn} | ${weakCOs.join(", ")}`);
+          if (strongCOs.length > 0) advRows.push(`${name.padEnd(20)} | ${prn} | High performance in ${strongCOs.join(", ")}`);
+        });
+
+        const header_s = "Student Name         | PRN      | Weak COs\n" + "-".repeat(55);
+        const header_a = "Student Name         | PRN      | Achievements\n" + "-".repeat(55);
+
+        onPopulate(
+          slowRows.length ? header_s + "\n" + slowRows.join("\n") : null,
+          advRows.length  ? header_a + "\n" + advRows.join("\n")  : null
+        );
+        setDone(true);
+        setTimeout(() => setDone(false), 3000);
+      } else {
+        // No per-student records — just show overall attainment summary
+        const slowCOs = coAtt.filter(co => (co.attainment_percentage ?? 0) < 60).map(co => co.co_id);
+        const advCOs  = coAtt.filter(co => (co.attainment_percentage ?? 0) >= 85).map(co => co.co_id);
+        const note_s = slowCOs.length
+          ? `Low class attainment detected in: ${slowCOs.join(", ")}.\nEnter individual student names and PRNs above for NBA compliance.`
+          : "No COs below 60% threshold. Upload per-student marks for detailed slow learner identification.";
+        onPopulate(note_s, null);
+        setDone(true);
+        setTimeout(() => setDone(false), 3000);
+      }
+    } catch (e) {
+      console.error("Learner auto-populate error:", e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10, marginBottom: 14,
+      padding: "9px 14px", background: "rgba(59,130,246,0.06)",
+      border: "1px solid rgba(59,130,246,0.18)", borderRadius: 8,
+    }}>
+      <span style={{ fontSize: 12, color: T.textSub, flex: 1 }}>
+        ⚡ Auto-categorise students from marks data
+      </span>
+      {done && <span style={{ fontSize: 11, color: T.green }}>✓ Populated!</span>}
+      <button
+        onClick={autoFill}
+        disabled={loading}
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "5px 13px", borderRadius: 6, fontSize: 12, fontWeight: 700,
+          cursor: loading ? "not-allowed" : "pointer",
+          background: "rgba(59,130,246,0.14)", border: "1px solid rgba(59,130,246,0.3)",
+          color: "#60a5fa", transition: "all 0.15s", whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "rgba(59,130,246,0.25)"; }}
+        onMouseLeave={e => { if (!loading) e.currentTarget.style.background = "rgba(59,130,246,0.14)"; }}
+      >
+        {loading ? <Spinner size={11} /> : "⚡"}
+        {loading ? " Loading…" : " Auto-fill from Marks"}
+      </button>
+    </div>
+  );
+}
+
+// ─── Action Plan AI Button ────────────────────────────────────────────────────
+
+function ActionPlanAIBtn({ course, prevCoAttainment, onGenerated, disabled }) {
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState("");
+
+  async function generate() {
+    if (disabled || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch(`/ai/action-plan/${course?.id ?? 0}`, {
+        method: "POST",
+        body: JSON.stringify({
+          course_name: course?.course_name ?? "",
+          course_code: course?.course_code ?? "",
+          prev_co_attainment: prevCoAttainment ?? "",
+        }),
+      });
+      const text = res.data ?? res;
+      if (text) onGenerated(String(text));
+      else throw new Error("Empty response from AI");
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {err && <span style={{ fontSize: 10, color: T.red, maxWidth: 160 }}>{err}</span>}
+      <button
+        onClick={generate}
+        disabled={disabled || busy}
+        title={disabled ? "Enter previous CO attainment data first" : "Generate action plan using AI"}
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "4px 11px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+          cursor: disabled || busy ? "not-allowed" : "pointer",
+          background: busy ? "rgba(16,185,129,0.05)" : "rgba(16,185,129,0.12)",
+          border: "1px solid rgba(16,185,129,0.3)",
+          color: disabled ? T.textMuted : "#34d399",
+          opacity: disabled ? 0.5 : 1,
+          transition: "all 0.15s",
+          whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(16,185,129,0.22)"; }}
+        onMouseLeave={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(16,185,129,0.12)"; }}
+      >
+        {busy ? <Spinner size={11} /> : "✨"}
+        {busy ? " Generating…" : " Generate with AI"}
+      </button>
+    </div>
+  );
+}
+
 // ─── AI CO-PO Justification Generator ────────────────────────────────────────
 
 function CoPoJustificationAIBtn({ course, onGenerated, disabled }) {
@@ -5259,59 +5666,20 @@ function CoPoJustificationAIBtn({ course, onGenerated, disabled }) {
   async function generate() {
     if (disabled || busy) return;
     setBusy(true); setErr("");
-
-    const cos    = course?.cos    ?? [];
-    const pos    = course?.pos    ?? [];
-    const matrix = course?.co_po_matrix ?? {};
-
-    // Build a summary of the mapping for the prompt
-    const mappingLines = [];
-    cos.forEach(co => {
-      const coMap = matrix[co.co_id] ?? {};
-      Object.entries(coMap).forEach(([poId, val]) => {
-        if (val && val !== "0" && val !== 0) {
-          mappingLines.push(`${co.co_id} → ${poId} (${val}): CO="${co.statement}" | PO="${(pos.find(p => p.po_id === poId) || {}).statement || poId}"`);
-        }
-      });
-    });
-
-    const prompt = `You are an OBE (Outcome Based Education) expert for engineering colleges. Generate concise CO-PO mapping justifications for the following course.
-
-Course: ${course?.course_name} (${course?.course_code})
-Department: ${course?.department}
-
-Course Outcomes:
-${cos.map(c => `${c.co_id}: ${c.statement} [Bloom's: ${c.bloom_level}]`).join("\n")}
-
-CO-PO Mapping (CO → PO, strength level):
-${mappingLines.join("\n")}
-
-Write one justification line per CO-PO mapping in this exact format:
-CO1 → PO1 (3): <short reason why this CO directly maps to this PO at this strength>.
-
-Rules:
-- Level 3 = direct, strong alignment
-- Level 2 = moderate/partial alignment  
-- Level 1 = slight/indirect alignment
-- Keep each justification to one line, under 120 characters
-- Be technically specific to the course content
-- Only list mappings that have a non-zero value
-- Do NOT include any preamble or closing remarks, just the justification lines`;
-
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await apiFetch(`/ai/co-po-justification/${course.id}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
+          course_name: course?.course_name ?? "",
+          course_code: course?.course_code ?? "",
+          department: course?.department ?? "",
+          cos: course?.cos ?? [],
+          pos: course?.pos ?? [],
+          co_po_matrix: course?.co_po_matrix ?? {},
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message ?? `HTTP ${res.status}`);
-      const text = (data.content ?? []).map(b => b.text ?? "").join("").trim();
-      if (text) onGenerated(text);
+      const text = res.data ?? res;
+      if (text) onGenerated(String(text));
       else throw new Error("Empty response from AI");
     } catch (e) {
       setErr(e.message);
@@ -5349,14 +5717,15 @@ Rules:
 }
 
 function CourseFileEditor({ courseId }) {
-  // The backend only persists these exact 10 fields in CourseFileExtraPayload.
-  // Do NOT add extra keys here — they'll silently disappear after save/reload.
+  // All fields persisted in CourseFileExtraPayload — keep in sync with backend route.
   const EXTRA_DEFAULTS = {
     vision_text:            "",
     mission_text:           "",
     batch:                  "",
     po_peo_pso_text:        "",
-    syllabus_timetable:     "",
+    peo_text:               "",
+    pso_text:               "",
+    co_po_justification:    "",
     prev_co_attainment:     "",
     action_plan:            "",
     slow_learners:          "",
@@ -5447,7 +5816,17 @@ function CourseFileEditor({ courseId }) {
     if (extraRes.status === "fulfilled") {
       const d = extraRes.value.data ?? extraRes.value ?? {};
       if (Object.keys(d).length > 0) {
-        setExtra(prev => ({ ...prev, ...d }));
+        setExtra(prev => {
+          const merged = { ...prev, ...d };
+          // Auto-fill POs from course data if DB has empty po_peo_pso_text
+          if (!merged.po_peo_pso_text?.trim()) {
+            const coursePOs = (courseRes.value?.data ?? courseRes.value)?.pos ?? [];
+            if (coursePOs.length) {
+              merged.po_peo_pso_text = coursePOs.map(p => `${p.po_id}: ${p.statement}`).join("\n");
+            }
+          }
+          return merged;
+        });
       }
     } else {
       errors.extra = extraRes.reason?.message;
@@ -5818,6 +6197,30 @@ function CourseFileEditor({ courseId }) {
               <InfoBox color={T.blueLight} bg="rgba(59,130,246,0.06)" border="rgba(59,130,246,0.18)">
                 Enter all Program Outcomes (PO1–PO12), Program Educational Objectives (PEO1–PEO3), and Program Specific Outcomes (PSO1–PSO2) as defined by your department. These appear verbatim in the course file.
               </InfoBox>
+              {/* Auto-fill button — fills POs from course.pos if they exist */}
+              {(() => {
+                const coursePOs = course?.pos ?? [];
+                if (!coursePOs.length) return null;
+                const alreadyFilled = extra.po_peo_pso_text?.trim().length > 0;
+                return (
+                  <div style={{ marginTop: 10, marginBottom: 2 }}>
+                    <button
+                      onClick={() => {
+                        if (alreadyFilled && !confirm("Overwrite existing POs text with data from Course Setup?")) return;
+                        const lines = coursePOs.map(p => `${p.po_id}: ${p.statement}`).join("\n");
+                        updateExtra("po_peo_pso_text", lines);
+                      }}
+                      style={{
+                        padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.3)",
+                        color: "#93c5fd", cursor: "pointer",
+                      }}
+                    >
+                      ⚡ Fill POs from Course Setup ({coursePOs.length} POs found)
+                    </button>
+                  </div>
+                );
+              })()}
               <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <Field label="Program Outcomes (POs)" required hint="One per line, e.g. PO1: Engineering Knowledge — Apply...">
                   <Textarea
@@ -6091,14 +6494,26 @@ function CourseFileEditor({ courseId }) {
                     mono
                   />
                 </Field>
-                <Field label="Action Plan" required hint="Remedial actions taken to address attainment gaps">
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                      Action Plan <span style={{ color: T.red }}>*</span>
+                    </span>
+                    <ActionPlanAIBtn
+                      course={course}
+                      prevCoAttainment={extra.prev_co_attainment}
+                      onGenerated={v => updateExtra("action_plan", v)}
+                      disabled={!extra.prev_co_attainment?.trim()}
+                    />
+                  </div>
                   <Textarea
                     value={extra.action_plan}
                     onChange={v => updateExtra("action_plan", v)}
                     placeholder={"• Remedial sessions for students below 60%\n• Additional tutorials for CO2 topics\n• Peer learning groups formed\n• Reassessment conducted in Week 12"}
                     rows={6}
                   />
-                </Field>
+                  <p style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Remedial actions taken to address attainment gaps</p>
+                </div>
               </div>
             </SectionWrapper>
 
@@ -6164,6 +6579,17 @@ function CourseFileEditor({ courseId }) {
                 Section 8 — Slow & Advanced Learners (manual)
             ════════════════════════════════════════════════════════════════ */}
             <SectionWrapper no={8} {...SECTION_META.find(s=>s.no===8)} hasContent={hasContent("slow_learners")}>
+              {/* Auto-populate banner */}
+              {attainment && (
+                <LearnersAutoPopulate
+                  attainment={attainment}
+                  courseId={courseId}
+                  onPopulate={(slow, advanced) => {
+                    if (slow) updateExtra("slow_learners", slow);
+                    if (advanced) updateExtra("advanced_learners", advanced);
+                  }}
+                />
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <Field label="Slow Learners" hint="Names, PRNs, or list of students needing extra support">
                   <Textarea
@@ -6219,18 +6645,34 @@ function CourseFileEditor({ courseId }) {
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
-                Section 11 — Learning Materials (manual)
+                Section 11 — Learning Materials (manual + AI + pull from Study Materials)
             ════════════════════════════════════════════════════════════════ */}
             <SectionWrapper no={11} {...SECTION_META.find(s=>s.no===11)} hasContent={hasContent("learning_material_links")}>
-              <Field label="Learning Material Links" required hint="Textbooks, NPTEL, YouTube playlists — one entry per line">
-                <Textarea
-                  value={extra.learning_material_links}
-                  onChange={v => updateExtra("learning_material_links", v)}
-                  placeholder={"Textbook: Introduction to Machine Learning — Goodfellow et al.\nhttps://www.coursera.org/learn/machine-learning\nhttps://nptel.ac.in/courses/106/106/106106139/\nhttps://www.youtube.com/playlist?list=PLkDaE6sCZn6Ec-XTbcX1uRg2_u4xOEky0"}
-                  rows={6}
-                  mono
-                />
-              </Field>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                  Learning Material Links <span style={{ color: T.red }}>*</span>
+                </p>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <LearningMaterialsImportBtn
+                    courseId={courseId}
+                    onImport={v => updateExtra("learning_material_links", v)}
+                  />
+                  <LearningMaterialsAIBtn
+                    course={course}
+                    onGenerated={v => updateExtra("learning_material_links",
+                      extra.learning_material_links ? extra.learning_material_links + "\n" + v : v
+                    )}
+                  />
+                </div>
+              </div>
+              <Textarea
+                value={extra.learning_material_links}
+                onChange={v => updateExtra("learning_material_links", v)}
+                placeholder={"Textbook: Introduction to Machine Learning — Goodfellow et al.\nhttps://www.coursera.org/learn/machine-learning\nhttps://nptel.ac.in/courses/106/106/106106139/\nhttps://www.youtube.com/playlist?list=PLkDaE6sCZn6Ec-XTbcX1uRg2_u4xOEky0"}
+                rows={7}
+                mono
+              />
+              <p style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Textbooks, NPTEL, YouTube playlists — one entry per line. Data is auto-saved to DB.</p>
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
