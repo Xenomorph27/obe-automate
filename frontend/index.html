@@ -6004,6 +6004,10 @@ function CourseFileEditor({ courseId }) {
   const [generating,  setGenerating]  = useState(false);
   const [saveStatus,  setSaveStatus]  = useState(null); // "saved" | "error" | null
   const [loadErrors,  setLoadErrors]  = useState({});
+  const [cfStudents,  setCfStudents]  = useState([]); // student roster loaded from DB
+  const [cfMarks,     setCfMarks]     = useState([]); // exam-wise marks from attainment
+  const [cfQP,        setCfQP]        = useState({}); // CA name → question paper from master attainment
+  const [cfAiMats,    setCfAiMats]    = useState(null); // AI-generated materials {textbooks,web,journals,moocs}
 
   // Ref always holds latest extra — fixes stale-closure autosave bug
   const extraRef   = useRef(extra);
@@ -6019,7 +6023,7 @@ function CourseFileEditor({ courseId }) {
     setLoading(true);
     const errors = {};
 
-    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes, ttRes] =
+    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes, ttRes, studentsRes, marksRes] =
       await Promise.allSettled([
         apiFetch(`/courses/${courseId}`),
         apiFetch(`/course-file/extra/${courseId}`),
@@ -6028,6 +6032,8 @@ function CourseFileEditor({ courseId }) {
         apiFetch(`/attainment/calculate/${courseId}`),
         apiFetch(`/course-file/attachments/${courseId}`),
         apiFetch(`/dashboard/timetable`),
+        apiFetch(`/students/${courseId}`),
+        apiFetch(`/attainment/marks/${courseId}`),
       ]);
 
     if (courseRes.status === "fulfilled") {
@@ -6092,6 +6098,22 @@ function CourseFileEditor({ courseId }) {
     if (ttRes?.status === "fulfilled") {
       setTimetable(ttRes.value.data ?? null);
     }
+
+    if (studentsRes.status === "fulfilled") {
+      setCfStudents(studentsRes.value.data ?? []);
+    }
+
+    if (marksRes.status === "fulfilled") {
+      setCfMarks(marksRes.value.data ?? []);
+    }
+
+    // Load QP sheets from master attainment (co-po-template)
+    try {
+      const sheetsRes = await apiFetch(`/co-po-template/load-all-sheets/${courseId}`);
+      if (sheetsRes.sheets && Object.keys(sheetsRes.sheets).length > 0) {
+        setCfQP(sheetsRes.sheets);
+      }
+    } catch { /* silent */ }
 
     setLoadErrors(errors);
     setLoading(false);
@@ -6934,18 +6956,64 @@ function CourseFileEditor({ courseId }) {
             </SectionWrapper>
 
             {/* ════════════════════════════════════════════════════════════════
-                Section 14 — Student List (manual)
+                Section 14 — Student List (auto from DB roster)
             ════════════════════════════════════════════════════════════════ */}
-            <SectionWrapper no={14} {...SECTION_META.find(s=>s.no===14)} hasContent={hasContent("student_list")}>
-              <Field label="Student List" hint="SR No | PRN | Name — one per line, group by section if needed">
-                <Textarea
-                  value={extra.student_list}
-                  onChange={v => updateExtra("student_list", v)}
-                  placeholder={"Section A\n1 | 24070126001 | Aadi Kulshreshth\n2 | 24070126002 | Aadya Rastogi\n...\nSection B\n74 | 24070126073 | Ishan Sharma\n..."}
-                  rows={10}
-                  mono
-                />
-              </Field>
+            <SectionWrapper no={14} {...SECTION_META.find(s=>s.no===14)} hasContent={cfStudents.length > 0 || hasContent("student_list")}>
+              {cfStudents.length > 0 ? (() => {
+                const sections = [...new Set(cfStudents.map(s => s.section))].sort();
+                return (
+                  <div>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                      <p style={{ margin:0, fontSize:12, fontWeight:700, color:T.textSub, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                        Student Roster — {cfStudents.length} students ({sections.map(s=>`Section ${s}`).join(", ")})
+                      </p>
+                    </div>
+                    {sections.map(sec => {
+                      const secStudents = cfStudents.filter(s => s.section === sec);
+                      return (
+                        <div key={sec} style={{ marginBottom:16 }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:T.textSub, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6, padding:"4px 8px", background:"rgba(255,255,255,0.04)", borderRadius:4 }}>
+                            Section {sec} — {secStudents.length} students
+                          </div>
+                          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                            <thead>
+                              <tr style={{ background:"rgba(255,255,255,0.05)" }}>
+                                <th style={{ padding:"6px 10px", textAlign:"left", fontWeight:600, color:T.textSub, borderBottom:`1px solid ${T.border}`, width:44 }}>Sr</th>
+                                <th style={{ padding:"6px 10px", textAlign:"left", fontWeight:600, color:T.textSub, borderBottom:`1px solid ${T.border}`, width:150 }}>PRN</th>
+                                <th style={{ padding:"6px 10px", textAlign:"left", fontWeight:600, color:T.textSub, borderBottom:`1px solid ${T.border}` }}>Name</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {secStudents.map((s, i) => (
+                                <tr key={s.prn} style={{ borderBottom:`1px solid rgba(255,255,255,0.04)`, background: i%2===0 ? "transparent" : "rgba(255,255,255,0.02)" }}>
+                                  <td style={{ padding:"5px 10px", color:T.textMuted }}>{i+1}</td>
+                                  <td style={{ padding:"5px 10px", fontFamily:"monospace", color:T.text }}>{s.prn}</td>
+                                  <td style={{ padding:"5px 10px", color:T.text }}>{s.name}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })() : (
+                <div>
+                  <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                    ⚡ No students found. Upload the SIT roster xlsx from the <strong>Student Roster</strong> page first. Once uploaded, the full batch-wise list will appear here automatically.
+                  </InfoBox>
+                  <Field label="Manual Student List" hint="SR No | PRN | Name — one per line (fallback if roster not uploaded)">
+                    <Textarea
+                      value={extra.student_list}
+                      onChange={v => updateExtra("student_list", v)}
+                      placeholder={"Section A\n1 | 24070126001 | Aadi Kulshreshth\n2 | 24070126002 | Aadya Rastogi\n...\nSection B\n74 | 24070126073 | Ishan Sharma\n..."}
+                      rows={10}
+                      mono
+                    />
+                  </Field>
+                </div>
+              )}
               <AttachmentZone courseId={courseId} sectionNo={14} attachments={attachments} onRefresh={refreshAttachments} />
             </SectionWrapper>
 
