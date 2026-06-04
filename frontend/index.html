@@ -5918,16 +5918,36 @@ function CourseFileEditor({ courseId }) {
                   {(() => {
                     const schedule = timetable.schedule || {};
                     const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+                    // Format a slot entry {time, course, section, room} into a display label
+                    function slotLabel(entry) {
+                      if (!entry) return "";
+                      if (typeof entry === "string") return entry.trim();
+                      if (typeof entry === "object") {
+                        const parts = [];
+                        if (entry.time)    parts.push(entry.time);
+                        if (entry.course || entry.subject) parts.push(entry.course || entry.subject);
+                        if (entry.section) parts.push(entry.section);
+                        if (entry.room)    parts.push(`(${entry.room})`);
+                        return parts.join(" ") || JSON.stringify(entry);
+                      }
+                      return String(entry);
+                    }
+
                     return days.map(day => {
-                      const slots = schedule[day] || {};
-                      const entries = Object.entries(slots).filter(([, v]) => v && String(v).trim());
+                      const raw = schedule[day];
+                      // schedule[day] may be an array of slot objects OR a plain dict {timeSlot: value}
+                      const entries = Array.isArray(raw)
+                        ? raw.filter(e => e && (e.course || e.subject || typeof e === "string"))
+                        : Object.values(raw || {}).filter(v => v && typeof v === "object" ? (v.course || v.subject) : String(v).trim());
+
                       return (
                         <div key={day} style={{ padding: "8px 14px", borderTop: `1px solid rgba(255,255,255,0.06)`, display: "flex", alignItems: "flex-start", gap: 12 }}>
                           <span style={{ minWidth: 90, fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", paddingTop: 2 }}>{day}</span>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {entries.length > 0 ? entries.map(([time, val], i) => (
+                            {entries.length > 0 ? entries.map((entry, i) => (
                               <span key={i} style={{ fontSize: 11, background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 4, padding: "2px 8px", color: "#fb923c" }}>
-                                {time} {val}
+                                {slotLabel(entry)}
                               </span>
                             )) : (
                               <span style={{ fontSize: 11, color: T.textMuted }}>—</span>
