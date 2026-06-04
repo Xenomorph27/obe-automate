@@ -684,3 +684,121 @@ async def get_gap_analysis(
     except Exception:
         logger.exception(f"Error running gap analysis for course {course_id}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+# ── POST /marks/{course_id}/docx ─────────────────────────────────────────────
+
+@router.post("/marks/{course_id}/docx", status_code=201)
+async def upload_marks_docx(
+    course_id: int,
+    file: UploadFile = File(..., description="Course file docx with marks tables"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """
+    Parse marks from a course file docx.
+    Looks for tables that have PRN + Name + CO columns.
+    Each table is treated as one CA component (CA1, CA2, CA3, ESE…).
+    """
+    import io as _io
+    logger.info(f"DOCX marks upload for course_id={course_id}, file={file.filename}")
+    if not file.filename.endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only .docx files are supported.")
+
+    try:
+        from docx import Document
+    except ImportError:
+        raise HTTPException(status_code=500, detail="python-docx not installed on server.")
+
+    file_bytes = await file.read()
+    try:
+        doc = Document(_io.BytesIO(file_bytes))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot open docx: {e}")
+
+    all_marks: dict = {}   # prn → {component: {co/Total: val}}
+    name_map: dict = {}
+
+    ca_labels = ["CA1", "CA2", "CA3", "ESE", "CA4", "CA5"]
+    table_count = 0
+
+    for table in doc.tables:
+        rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+        if not rows:
+            continue
+
+        # Find header row (must contain PRN or Roll No)
+        header_idx = None
+        for ri, row in enumerate(rows[:6]):
+            row_upper = [c.upper() for c in row]
+            if any("PRN" in c or "ROLL" in c for c in row_upper):
+                header_idx = ri
+                break
+        if header_idx is None:
+            continue
+
+        headers = rows[header_idx]
+        prn_idx = next((j for j, h in enumerate(headers) if "PRN" in h.upper() or "ROLL" in h.upper()), None)
+        name_idx = next((j for j, h in enumerate(headers) if "NAME" in h.upper()), None)
+        # Find Total column
+        total_idx = next(
+            (j for j, h in enumerate(headers)
+             if h.upper() in ("TOTAL", "TOTAL MARKS") or h.upper().startswith("TOTAL/")),
+            None
+        )
+        # CO columns
+        co_cols = [(j, h) for j, h in enumerate(headers) if h.upper().startswith("CO") and j != prn_idx]
+
+        if prn_idx is None or (not co_cols and total_idx is None):
+            continue
+
+        component = ca_labels[table_count] if table_count < len(ca_labels) else f"CA{table_count+1}"
+        table_count += 1
+
+        for row in rows[header_idx + 1:]:
+            if not row or prn_idx >= len(row) or not row[prn_idx]:
+                continue
+            prn = row[prn_idx].strip()
+            # Must look like a PRN (numeric, ≥8 chars)
+            if not prn or not prn.replace(" ", "").isdigit() or len(prn) < 8:
+                continue
+
+            name = row[name_idx].strip() if name_idx is not None and name_idx < len(row) else prn
+            marks_entry: dict = {}
+
+            for ci, co_h in co_cols:
+                val = row[ci] if ci < len(row) else ""
+                try:
+                    marks_entry[co_h] = float(val) if val else 0.0
+                except (ValueError, TypeError):
+                    marks_entry[co_h] = 0.0
+
+            if total_idx is not None and total_idx < len(row):
+                try:
+                    marks_entry["Total"] = float(row[total_idx])
+                except (ValueError, TypeError):
+                    pass
+
+            if prn not in all_marks:
+                all_marks[prn] = {}
+            all_marks[prn][component] = marks_entry
+            name_map[prn] = name
+
+    if not all_marks:
+        raise HTTPException(
+            status_code=400,
+            detail="No marks tables found in docx. Ensure tables have PRN/Roll No and CO columns (CO1, CO2…)."
+        )
+
+    # Save via AttainmentService
+    students_payload = [
+        {"student_id": prn, "student_name": name_map.get(prn, prn), "marks": comp_marks}
+        for prn, comp_marks in all_marks.items()
+    ]
+    service = AttainmentService(db)
+    result = await service.save_marks(course_id, students_payload)
+
+    return {
+        "status": "success",
+        "data": result,
+        "parsed_students": len(all_marks),
+    }

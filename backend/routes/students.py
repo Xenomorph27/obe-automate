@@ -48,10 +48,11 @@ def _parse_sit_roster(file_bytes: bytes) -> List[dict]:
         if "Section C" in col_a or col_a == "Section C ":
             current_section = "C"; continue
 
-        # Student row: PRN is a number starting with 24
-        if col_b and str(col_b).startswith("24") and col_c and col_c not in ("AIML","PRN",""):
+        # Student row: PRN is a number starting with 23/24/25 (lateral entry students have 25xxx)
+        col_b_str = str(col_b) if col_b else ""
+        if col_b and any(col_b_str.startswith(p) for p in ("23","24","25")) and col_c and col_c not in ("AIML","PRN",""):
             try:
-                prn = int(col_b)
+                prn = int(col_b_str)
             except (ValueError, TypeError):
                 continue
             students.append({
