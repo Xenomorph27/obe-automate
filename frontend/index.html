@@ -7022,129 +7022,224 @@ function CourseFileEditor({ courseId }) {
             ════════════════════════════════════════════════════════════════ */}
             <SectionWrapper no={15} title="Student Marks" icon="📊" auto={true} desc="Exam-wise and question-wise marks auto-populated from uploaded marks and master attainment file" hasContent={cfMarks.length > 0}>
               {cfMarks.length > 0 ? (() => {
-                // Collect all exam components from marks data
-                const allExams = [...new Set(cfMarks.flatMap(r => Object.keys(r.marks || {})))].sort();
-                // Split into CA exams and ESE
-                const caExams = allExams.filter(e => !/^ESE$/i.test(e));
-                const eseExams = allExams.filter(e => /^ESE$/i.test(e));
-                const orderedExams = [...caExams, ...eseExams];
+                // Build per-exam data: collect all exams, then for each exam gather question columns + student rows
+                const EXAM_ORDER = ["Assignment","End Semester","Quiz 1","Quiz 2","Unit Test 1","Unit Test 2","Unit Test 3"];
+                const allExams = [...new Set(cfMarks.flatMap(r => Object.keys(r.marks || {})))];
+                const orderedExams = [
+                  ...EXAM_ORDER.filter(e => allExams.some(x => x.toLowerCase()===e.toLowerCase())),
+                  ...allExams.filter(e => !EXAM_ORDER.some(x => x.toLowerCase()===e.toLowerCase())).sort()
+                ];
 
+                // For each exam, figure out if marks are question-wise (object) or flat (number)
+                const getExamRows = (exam) => cfMarks.map(rec => {
+                  const val = rec.marks?.[exam];
+                  const isQW = val && typeof val === "object" && !Array.isArray(val);
+                  return { ...rec, examVal: val, isQW, qwMap: isQW ? val : null,
+                    total: isQW ? Object.values(val).reduce((s,v)=>s+(parseFloat(v)||0),0) : (parseFloat(val)||0) };
+                });
+
+                // Get question headers from cfQP for this exam (try exact + case-insensitive match)
+                const getQP = (exam) => {
+                  const key = Object.keys(cfQP).find(k => k.toLowerCase()===exam.toLowerCase()) || exam;
+                  const raw = cfQP[key];
+                  if (!raw) return [];
+                  return Array.isArray(raw) ? raw : (raw.qp ?? raw.questions ?? []);
+                };
+
+                // Infer Bloom level from question text using keyword matching
+                const bloomKeywords = {
+                  Remember: ["define","list","state","recall","identify","name","what is","who","when","where"],
+                  Understand: ["explain","describe","summarize","interpret","classify","compare","discuss"],
+                  Apply: ["solve","calculate","use","demonstrate","implement","apply","compute","find"],
+                  Analyse: ["analyse","analyze","differentiate","examine","break down","distinguish","derive"],
+                  Evaluate: ["evaluate","justify","assess","critique","judge","argue","validate"],
+                  Create: ["design","develop","construct","formulate","generate","propose","create","build"]
+                };
+                const inferBloomUI = (text) => {
+                  if (!text) return null;
+                  const low = text.toLowerCase();
+                  for (const [level, kws] of Object.entries(bloomKeywords)) {
+                    if (kws.some(k => low.startsWith(k) || low.includes(" "+k+" ") || low.includes(" "+k+"."))) return level;
+                  }
+                  return null;
+                };
+                const bloomColor2 = {Remember:"#94A3B8",Understand:"#60A5FA",Apply:"#34D399",Analyse:"#A78BFA",Analyze:"#A78BFA",Evaluate:"#FBBF24",Create:"#F472B6"};
+
+                // Global summary bar
                 return (
                   <div>
-                    {/* Summary bar */}
-                    <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
-                      <div style={{ background:"rgba(59,130,246,0.1)", border:"1px solid rgba(59,130,246,0.25)", borderRadius:8, padding:"8px 16px", fontSize:12 }}>
-                        <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.06em", marginBottom:2 }}>STUDENTS</div>
-                        <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:16 }}>{cfMarks.length}</div>
+                    <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
+                      <div style={{ background:"rgba(59,130,246,0.12)", border:"1px solid rgba(59,130,246,0.3)", borderRadius:8, padding:"8px 18px" }}>
+                        <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.07em" }}>STUDENTS</div>
+                        <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:18, marginTop:2 }}>{cfMarks.length}</div>
                       </div>
-                      <div style={{ background:"rgba(34,197,94,0.1)", border:"1px solid rgba(34,197,94,0.25)", borderRadius:8, padding:"8px 16px", fontSize:12 }}>
-                        <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.06em", marginBottom:2 }}>EXAMS</div>
-                        <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:16 }}>{orderedExams.length}</div>
+                      <div style={{ background:"rgba(34,197,94,0.12)", border:"1px solid rgba(34,197,94,0.3)", borderRadius:8, padding:"8px 18px" }}>
+                        <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.07em" }}>EXAMS</div>
+                        <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:18, marginTop:2 }}>{orderedExams.length}</div>
                       </div>
                       {orderedExams.map(exam => {
-                        const vals = cfMarks.map(r => parseFloat(r.marks?.[exam]) || 0).filter(v => v > 0);
-                        const avg = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : "—";
+                        const rows = getExamRows(exam);
+                        const totals = rows.map(r => r.total).filter(v => v > 0);
+                        const avg = totals.length ? (totals.reduce((a,b)=>a+b,0)/totals.length).toFixed(1) : "—";
+                        const isESE = /end.sem|ese/i.test(exam);
                         return (
-                          <div key={exam} style={{ background:"rgba(15,23,42,0.8)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"8px 16px", fontSize:12 }}>
-                            <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.06em", marginBottom:2 }}>{exam.toUpperCase()}</div>
-                            <div style={{ color:"#7DD3FC", fontWeight:700, fontSize:14 }}>avg {avg}</div>
+                          <div key={exam} style={{ background:"rgba(15,23,42,0.85)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"8px 18px" }}>
+                            <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.07em" }}>{exam.toUpperCase()}</div>
+                            <div style={{ color: isESE ? "#FCA5A5" : "#7DD3FC", fontWeight:700, fontSize:15, marginTop:2 }}>avg {avg}</div>
                           </div>
                         );
                       })}
                     </div>
 
-                    {/* Main marks table */}
-                    <div style={{ overflowX:"auto", borderRadius:8, border:"1px solid rgba(255,255,255,0.1)" }}>
-                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, background:"rgba(8,14,26,0.95)" }}>
-                        <thead>
-                          <tr style={{ background:"rgba(22,32,55,0.98)" }}>
-                            <th style={{ padding:"8px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", position:"sticky", left:0, background:"rgba(22,32,55,0.98)", zIndex:2, minWidth:36 }}>SR</th>
-                            <th style={{ padding:"8px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", position:"sticky", left:36, background:"rgba(22,32,55,0.98)", zIndex:2, minWidth:130 }}>STUDENT NAME</th>
-                            <th style={{ padding:"8px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", minWidth:120 }}>PRN / ID</th>
-                            {orderedExams.map(exam => (
-                              <th key={exam} style={{ padding:"8px 10px", textAlign:"center", color: /^ESE$/i.test(exam) ? "#FCA5A5" : "#86EFAC", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", minWidth:80, borderLeft:"1px solid rgba(255,255,255,0.07)" }}>
-                                {exam}
-                              </th>
-                            ))}
-                            <th style={{ padding:"8px 10px", textAlign:"center", color:"#FCD34D", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", minWidth:80, borderLeft:"1px solid rgba(255,255,255,0.12)" }}>TOTAL</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {cfMarks.map((rec, i) => {
-                            const rowMarks = rec.marks || {};
-                            const total = orderedExams.reduce((s,e) => s + (parseFloat(rowMarks[e])||0), 0);
-                            return (
-                              <tr key={rec.student_id || i} style={{ background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
-                                <td style={{ padding:"6px 10px", color:"#64748B", fontSize:11, position:"sticky", left:0, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", zIndex:1 }}>{i+1}</td>
-                                <td style={{ padding:"6px 10px", color:"#F1F5F9", fontWeight:500, position:"sticky", left:36, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", zIndex:1 }}>{rec.student_name || "—"}</td>
-                                <td style={{ padding:"6px 10px", color:"#7DD3FC", fontFamily:"monospace", fontSize:11 }}>{rec.student_id || "—"}</td>
-                                {orderedExams.map(exam => {
-                                  const val = rowMarks[exam];
-                                  const num = parseFloat(val);
-                                  // Check if val is an object (question-wise marks)
-                                  const isObj = val && typeof val === "object";
-                                  return (
-                                    <td key={exam} style={{ padding:"6px 10px", textAlign:"center", color: isNaN(num) ? "#64748B" : num < 0 ? "#F87171" : "#A7F3D0", fontWeight:600, fontSize:12, borderLeft:"1px solid rgba(255,255,255,0.05)" }}>
-                                      {isObj ? (
-                                        <span title={JSON.stringify(val)} style={{ cursor:"help", borderBottom:"1px dashed #64748B" }}>
-                                          {Object.values(val).reduce((s,v)=>s+(parseFloat(v)||0),0).toFixed(1)}*
-                                        </span>
-                                      ) : (
-                                        isNaN(num) ? "—" : num
-                                      )}
-                                    </td>
-                                  );
-                                })}
-                                <td style={{ padding:"6px 10px", textAlign:"center", color:"#FCD34D", fontWeight:700, fontSize:12, borderLeft:"1px solid rgba(255,255,255,0.1)" }}>{total.toFixed(1)}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                    {/* Per-exam segregated sections */}
+                    {orderedExams.map(exam => {
+                      const rows = getExamRows(exam);
+                      const qp = getQP(exam);
+                      const isESE = /end.sem|ese/i.test(exam);
 
-                    {/* QP section — exam-wise question papers from master attainment */}
-                    {Object.keys(cfQP).length > 0 && (
-                      <div style={{ marginTop:20 }}>
-                        <div style={{ fontSize:12, fontWeight:700, color:T.textSub, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:10 }}>
-                          📋 Question Papers (from Master Attainment)
-                        </div>
-                        {Object.entries(cfQP).map(([examName, qpData]) => {
-                          const questions = Array.isArray(qpData) ? qpData : (qpData?.qp ?? qpData?.questions ?? []);
-                          if (!questions.length) return null;
-                          return (
-                            <div key={examName} style={{ marginBottom:14, borderRadius:8, border:"1px solid rgba(255,255,255,0.08)", overflow:"hidden" }}>
-                              <div style={{ background:"rgba(22,32,55,0.9)", padding:"8px 14px", fontSize:12, fontWeight:700, color:"#86EFAC", letterSpacing:"0.04em" }}>
-                                {examName} — {questions.length} Questions
-                              </div>
-                              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, background:"rgba(8,14,26,0.9)" }}>
+                      // Determine column mode: question-wise or flat
+                      const anyQW = rows.some(r => r.isQW);
+                      // Collect all question keys from either qp or actual marks objects
+                      let qCols = [];
+                      if (anyQW) {
+                        const fromQP = qp.map(q => String(q.q_no ?? ""));
+                        const fromMarks = [...new Set(rows.flatMap(r => r.qwMap ? Object.keys(r.qwMap) : []))];
+                        qCols = fromQP.length ? fromQP : fromMarks;
+                      }
+
+                      // Compute per-question max from QP
+                      const qMax = {};
+                      qp.forEach(q => { qMax[String(q.q_no ?? "")] = parseFloat(q.marks) || null; });
+
+                      // Class averages
+                      const validTotals = rows.map(r => r.total).filter(v => v > 0);
+                      const classAvg = validTotals.length ? (validTotals.reduce((a,b)=>a+b,0)/validTotals.length).toFixed(1) : "—";
+                      const qColAvgs = {};
+                      if (anyQW) {
+                        qCols.forEach(qk => {
+                          const vals = rows.map(r => parseFloat(r.qwMap?.[qk])||0).filter(v=>v>0);
+                          qColAvgs[qk] = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : "—";
+                        });
+                      }
+
+                      const totalMax = anyQW
+                        ? qCols.reduce((s,qk) => s + (qMax[qk]||0), 0)
+                        : (qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0) || null);
+
+                      const headerBg = isESE ? "rgba(220,38,38,0.15)" : "rgba(22,32,55,0.98)";
+                      const headerAccent = isESE ? "#FCA5A5" : "#86EFAC";
+
+                      return (
+                        <div key={exam} style={{ marginBottom:28, borderRadius:10, border:"1px solid rgba(255,255,255,0.1)", overflow:"hidden" }}>
+                          {/* Exam header */}
+                          <div style={{ background:headerBg, padding:"10px 16px", display:"flex", alignItems:"center", gap:14, borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
+                            <div style={{ color:headerAccent, fontWeight:700, fontSize:14 }}>📝 {exam}</div>
+                            <div style={{ display:"flex", gap:10, marginLeft:"auto", flexWrap:"wrap" }}>
+                              {[
+                                ["Students", cfMarks.length],
+                                ["Class Avg", classAvg],
+                                ["Max Marks", totalMax ? (Number.isInteger(totalMax)?totalMax:totalMax.toFixed(1)) : "—"],
+                                ["Questions", anyQW ? qCols.length : (qp.length || "—")]
+                              ].map(([lbl,val])=>(
+                                <div key={lbl} style={{ background:"rgba(0,0,0,0.3)", borderRadius:6, padding:"4px 12px", textAlign:"center" }}>
+                                  <div style={{ color:"#64748B", fontSize:9, fontWeight:700, letterSpacing:"0.06em" }}>{lbl}</div>
+                                  <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:13 }}>{val}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Question paper sub-header if available */}
+                          {qp.length > 0 && (
+                            <div style={{ background:"rgba(8,14,26,0.6)", padding:"8px 16px", borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+                              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
                                 <thead>
-                                  <tr style={{ background:"rgba(15,23,42,0.8)" }}>
-                                    <th style={{ padding:"6px 10px", textAlign:"left", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)", width:40 }}>Q#</th>
-                                    <th style={{ padding:"6px 10px", textAlign:"left", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)" }}>Question</th>
-                                    <th style={{ padding:"6px 10px", textAlign:"center", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)", width:60 }}>Marks</th>
-                                    <th style={{ padding:"6px 10px", textAlign:"center", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)", width:60 }}>CO</th>
-                                    <th style={{ padding:"6px 10px", textAlign:"center", color:"#94A3B8", fontWeight:700, borderBottom:"1px solid rgba(255,255,255,0.08)", width:80 }}>Bloom</th>
+                                  <tr>
+                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"left", padding:"3px 8px", width:36 }}>Q#</th>
+                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"left", padding:"3px 8px" }}>Question</th>
+                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"center", padding:"3px 8px", width:50 }}>Marks</th>
+                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"center", padding:"3px 8px", width:50 }}>CO</th>
+                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"center", padding:"3px 8px", width:100 }}>Bloom</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {questions.map((q, qi) => (
-                                    <tr key={qi} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)", background: qi%2===0 ? "transparent" : "rgba(255,255,255,0.02)" }}>
-                                      <td style={{ padding:"5px 10px", color:"#64748B" }}>{q.q_no ?? (qi+1)}</td>
-                                      <td style={{ padding:"5px 10px", color:"#CBD5E1" }}>{q.question_text ?? q.text ?? q.question ?? "—"}</td>
-                                      <td style={{ padding:"5px 10px", textAlign:"center", color:"#FCD34D", fontWeight:600 }}>{q.marks ?? q.max_marks ?? "—"}</td>
-                                      <td style={{ padding:"5px 10px", textAlign:"center", color:"#7DD3FC" }}>{q.co_id ?? q.co ?? "—"}</td>
-                                      <td style={{ padding:"5px 10px", textAlign:"center", color:"#C4B5FD", fontSize:10 }}>{q.bloom_label ?? q.bloom ?? "—"}</td>
-                                    </tr>
-                                  ))}
+                                  {qp.map((q,qi)=>{
+                                    const bl = q.bloom_label ?? q.bloom ?? inferBloomUI(q.question_text) ?? "—";
+                                    const blColor = bloomColor2[bl] || "#94A3B8";
+                                    return (
+                                      <tr key={qi} style={{ borderTop:"1px solid rgba(255,255,255,0.04)" }}>
+                                        <td style={{ color:"#94A3B8", padding:"3px 8px" }}>{q.q_no ?? qi+1}</td>
+                                        <td style={{ color:"#CBD5E1", padding:"3px 8px", fontSize:11 }}>{q.question_text ?? "—"}</td>
+                                        <td style={{ color:"#FCD34D", fontWeight:600, textAlign:"center", padding:"3px 8px" }}>{q.marks ?? "—"}</td>
+                                        <td style={{ color:"#7DD3FC", textAlign:"center", padding:"3px 8px" }}>{q.co_id ?? q.co ?? "—"}</td>
+                                        <td style={{ textAlign:"center", padding:"3px 8px" }}>
+                                          {bl !== "—" ? <span style={{ background:blColor+"22", color:blColor, padding:"2px 7px", borderRadius:4, fontSize:10, fontWeight:600 }}>{bl}</span> : "—"}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    <p style={{ fontSize:11, color:T.textMuted, marginTop:8 }}>* Hover cells marked with * to see per-question breakdown. QP auto-loaded from Master Attainment file.</p>
+                          )}
+
+                          {/* Marks table */}
+                          <div style={{ overflowX:"auto" }}>
+                            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11.5, background:"rgba(8,14,26,0.95)" }}>
+                              <thead>
+                                <tr style={{ background:"rgba(22,32,55,0.98)" }}>
+                                  <th style={{ padding:"7px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", position:"sticky", left:0, background:"rgba(22,32,55,0.98)", zIndex:2, minWidth:32 }}>#</th>
+                                  <th style={{ padding:"7px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", position:"sticky", left:32, background:"rgba(22,32,55,0.98)", zIndex:2, minWidth:140 }}>STUDENT NAME</th>
+                                  <th style={{ padding:"7px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", minWidth:110 }}>PRN</th>
+                                  {anyQW ? qCols.map(qk => (
+                                    <th key={qk} style={{ padding:"7px 8px", textAlign:"center", color:headerAccent, fontWeight:700, fontSize:10, borderBottom:"1px solid rgba(255,255,255,0.12)", borderLeft:"1px solid rgba(255,255,255,0.07)", minWidth:55 }}>
+                                      <div>{qk}</div>
+                                      {qMax[qk] && <div style={{ color:"#64748B", fontWeight:400, fontSize:9 }}>/{qMax[qk]}</div>}
+                                    </th>
+                                  )) : null}
+                                  <th style={{ padding:"7px 10px", textAlign:"center", color:"#FCD34D", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", borderLeft:"1px solid rgba(255,255,255,0.12)", minWidth:65 }}>
+                                    TOTAL{totalMax ? <span style={{fontWeight:400,color:"#64748B",fontSize:9}}> /{totalMax}</span> : ""}
+                                  </th>
+                                </tr>
+                                {/* Class average row */}
+                                <tr style={{ background:"rgba(16,185,129,0.08)", borderBottom:"2px solid rgba(16,185,129,0.25)" }}>
+                                  <td style={{ padding:"5px 10px", color:"#10B981", fontWeight:700, fontSize:10, position:"sticky", left:0, background:"rgba(16,185,129,0.08)" }}>avg</td>
+                                  <td style={{ padding:"5px 10px", color:"#10B981", fontWeight:700, fontSize:11, position:"sticky", left:32, background:"rgba(16,185,129,0.08)" }}>Class Average</td>
+                                  <td style={{ padding:"5px 10px", color:"#64748B", fontSize:10 }}>—</td>
+                                  {anyQW ? qCols.map(qk => (
+                                    <td key={qk} style={{ padding:"5px 8px", textAlign:"center", color:"#10B981", fontWeight:700, fontSize:11, borderLeft:"1px solid rgba(255,255,255,0.05)" }}>{qColAvgs[qk]}</td>
+                                  )) : null}
+                                  <td style={{ padding:"5px 10px", textAlign:"center", color:"#10B981", fontWeight:700, fontSize:13, borderLeft:"1px solid rgba(255,255,255,0.1)" }}>{classAvg}</td>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map((rec, i) => (
+                                  <tr key={rec.student_id || i} style={{ background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                                    <td style={{ padding:"5px 10px", color:"#64748B", fontSize:10, position:"sticky", left:0, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", zIndex:1 }}>{i+1}</td>
+                                    <td style={{ padding:"5px 10px", color:"#F1F5F9", fontWeight:500, position:"sticky", left:32, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", zIndex:1 }}>{rec.student_name || "—"}</td>
+                                    <td style={{ padding:"5px 10px", color:"#7DD3FC", fontFamily:"monospace", fontSize:10 }}>{rec.student_id || "—"}</td>
+                                    {anyQW ? qCols.map(qk => {
+                                      const v = parseFloat(rec.qwMap?.[qk]) || 0;
+                                      const mx = qMax[qk];
+                                      const pct = mx ? v/mx : null;
+                                      const col = pct===null ? "#CBD5E1" : pct>=0.6 ? "#86EFAC" : pct>=0.4 ? "#FCD34D" : "#FCA5A5";
+                                      return (
+                                        <td key={qk} style={{ padding:"5px 8px", textAlign:"center", color:col, fontWeight:600, fontSize:12, borderLeft:"1px solid rgba(255,255,255,0.04)" }}>
+                                          {v || ""}
+                                        </td>
+                                      );
+                                    }) : null}
+                                    <td style={{ padding:"5px 10px", textAlign:"center", color:"#FCD34D", fontWeight:700, fontSize:12, borderLeft:"1px solid rgba(255,255,255,0.08)" }}>
+                                      {rec.total > 0 ? rec.total.toFixed(1) : "—"}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })() : (
