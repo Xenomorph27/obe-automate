@@ -291,18 +291,36 @@ def _render_timetable(doc, timetable: dict):
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 _run(p, str(entry or ""), size=7)
 
-        # Summary row (total workload)
-        summary = tt.get("summary", [])
+        # Summary rows — render each summary item as a separate multi-cell row
+        # summary can be:
+        #   list of strings  → each string merged across all columns
+        #   list of lists    → each inner list = one row of cell values
         if summary:
-            for s_row in summary:
+            for s_item in summary:
                 sum_tr = tbl.add_row()
-                merged_sum = sum_tr.cells[0]
-                for ci in range(1, num_cols):
-                    merged_sum = merged_sum.merge(sum_tr.cells[ci])
-                _set_cell_bg(merged_sum, _LGRAY)
-                _set_cell_margins(merged_sum, top=40, bottom=40)
-                p = merged_sum.paragraphs[0]
-                _run(p, str(s_row), size=8)
+                if isinstance(s_item, list):
+                    # Pad/truncate to num_cols
+                    vals = list(s_item) + [""] * num_cols
+                    vals = vals[:num_cols]
+                    for ci, val in enumerate(vals):
+                        c = sum_tr.cells[ci]
+                        _set_cell_bg(c, _LGRAY)
+                        _set_cell_margins(c, top=40, bottom=40, left=60, right=60)
+                        p = c.paragraphs[0]
+                        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        if ci == num_cols - 1:
+                            _run(p, str(val or ""), bold=True, size=8)
+                        else:
+                            _run(p, str(val or ""), size=8)
+                else:
+                    # Fall back: merge all cells for a plain text summary line
+                    merged_sum = sum_tr.cells[0]
+                    for ci in range(1, num_cols):
+                        merged_sum = merged_sum.merge(sum_tr.cells[ci])
+                    _set_cell_bg(merged_sum, _LGRAY)
+                    _set_cell_margins(merged_sum, top=40, bottom=40)
+                    p = merged_sum.paragraphs[0]
+                    _run(p, str(s_item), size=8)
 
         doc.add_paragraph()
 
@@ -385,21 +403,41 @@ def _build_docx(data: dict) -> bytes:
 
     # ── 1. Vision & Mission ────────────────────────────────────────────────────
     _section_title(doc, 1, "Vision & Mission of the Department")
+    _heading2(doc, "VISION OF THE DEPARTMENT")
     if data.get("vision_text"):
-        _heading2(doc, "VISION OF THE DEPARTMENT")
         _add_para(doc, data["vision_text"])
     else:
-        _heading2(doc, "VISION OF THE DEPARTMENT")
-        _add_para(doc, "[Vision not yet filled. Edit in Course File section.]", color=(136, 136, 136))
+        _add_para(doc, "To impart quality education with research insights for developing competent global engineers in the field of Artificial Intelligence and Machine Learning to solve societal problems.")
 
+    _heading2(doc, "MISSION OF THE DEPARTMENT")
     if data.get("mission_text"):
-        _heading2(doc, "MISSION OF THE DEPARTMENT")
         for line in (data["mission_text"] or "").split("\n"):
-            if line.strip():
-                _add_para(doc, line)
+            if not line.strip():
+                continue
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(3)
+            p.paragraph_format.space_after  = Pt(3)
+            # Detect M1:/M2:/M3: prefix and render it bold
+            import re as _re
+            m = _re.match(r'^(M\d+:\s*)(.*)', line.strip(), _re.DOTALL)
+            if m:
+                prefix, rest = m.group(1), m.group(2)
+                _run(p, prefix, bold=True, size=10)
+                _run(p, rest, size=10)
+            else:
+                _run(p, line.strip(), size=10)
     else:
-        _heading2(doc, "MISSION OF THE DEPARTMENT")
-        _add_para(doc, "[Mission not yet filled. Edit in Course File section.]", color=(136, 136, 136))
+        _STANDARD_MISSION = [
+            ("M1: ", "To educate students on cutting-edge AIML technologies with strong industry connections to develop problem-solving capabilities, leadership, and teamwork skills."),
+            ("M2: ", "To produce quality research through national and international collaborations leading to publications, IPR, and sponsored/funded projects."),
+            ("M3: ", "To inculcate professional values with lifelong learning through curricular and co-curricular activities and create globally-aware citizens."),
+        ]
+        for prefix, rest in _STANDARD_MISSION:
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(3)
+            p.paragraph_format.space_after  = Pt(3)
+            _run(p, prefix, bold=True, size=10)
+            _run(p, rest, size=10)
 
     # ── 2. POs, PEOs, PSOs ────────────────────────────────────────────────────
     _section_title(doc, 2, "Program Outcomes (POs), Program Educational Objectives (PEOs) and Program Specific Outcomes (PSOs)")
@@ -425,7 +463,39 @@ def _build_docx(data: dict) -> bytes:
         if db_pos_have_text
         else [[pid, stmt] for pid, stmt in _STANDARD_POS]
     )
-    _make_table(doc, ["", "Program Outcomes"], po_rows, [1.5, 14.5])
+    # Build PO table manually so each row's description can have a bold label prefix
+    _po_tbl = doc.add_table(rows=1 + len(po_rows), cols=2)
+    _po_tbl.style = "Table Grid"
+    for ci, hdr_txt in enumerate(["", "Program Outcomes"]):
+        cell = _po_tbl.rows[0].cells[ci]
+        cell.width = Cm([1.5, 14.5][ci])
+        _set_cell_bg(cell, _NAVY)
+        _set_cell_margins(cell)
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p, hdr_txt, bold=True, size=9, color=_WHITE)
+    import re as _re2
+    for ri, (po_id, po_text) in enumerate(po_rows):
+        bg = _WHITE if ri % 2 == 0 else _LIGHT
+        tr = _po_tbl.rows[ri + 1]
+        # ID cell
+        id_cell = tr.cells[0]
+        id_cell.width = Cm(1.5)
+        _set_cell_bg(id_cell, bg)
+        _set_cell_margins(id_cell)
+        _run(id_cell.paragraphs[0], str(po_id or ""), size=9)
+        # Description cell — bold label up to first colon
+        desc_cell = tr.cells[1]
+        desc_cell.width = Cm(14.5)
+        _set_cell_bg(desc_cell, bg)
+        _set_cell_margins(desc_cell)
+        p = desc_cell.paragraphs[0]
+        m = _re2.match(r'^([^:]+:\s*)(.*)', str(po_text or ""), _re2.DOTALL)
+        if m:
+            _run(p, m.group(1), bold=True, size=9)
+            _run(p, m.group(2), size=9)
+        else:
+            _run(p, str(po_text or ""), size=9)
 
     _heading2(doc, "Program Educational Objectives (PEOs)")
     peos = [
@@ -653,7 +723,6 @@ def _build_docx(data: dict) -> bytes:
     # CO-PO Justification — single-column table, one row per paragraph
     co_po_justification = data.get("co_po_justification") or ""
 
-    # FIX: If DB has no justification, use standard NBA-style justification table rows
     _STANDARD_JUSTIFICATION = [
         "PO1 (Engineering Knowledge): Strongly linked to all COs because they all require deep understanding of machine learning, algorithms, and data fundamentals.",
         "PO2 (Problem Analysis): Essential for contrasting algorithms, analyzing clustering, and explaining advanced methods.",
@@ -661,12 +730,12 @@ def _build_docx(data: dict) -> bytes:
         "PO4 (Investigations): Relevant for comparative analysis involving experiments.",
         "PO5 (Modern Tool Usage): Needed for applying dimensionality reduction and deep learning with tools and frameworks.",
         "PO6 (Engineer and Society): Considered moderately for CO1 due to understanding societal impacts related to data and algorithm choices.",
-        "PSO1: COs focus on applying core AI/ML concepts such as algorithm understanding, dimensionality reduction, clustering, and deep learning, which directly supports the PSO's emphasis on practical knowledge.",
+        "PSO1 COs focus on applying core AI/ML concepts such as algorithm understanding, dimensionality reduction, clustering, and deep learning, which directly supports the PSO's emphasis on practical knowledge",
         "CO1 (Contrasting algorithms and data types) lays the foundational understanding required for analyzing and selecting appropriate AI/ML techniques.",
-        "CO2 and CO3 (Applying dimensionality reduction and clustering techniques) address designing and developing models — key parts of creating intelligent systems.",
+        "CO2 and CO3 (Applying dimensionality reduction and clustering techniques) address designing and developing models\u2014key parts of creating intelligent systems.",
         "CO4 (Explaining advanced clustering for domain-specific datasets) highlights the ability to customize AI solutions for real-world, multi-disciplinary problems.",
         "CO5 (Demonstrating deep learning methods like autoencoders) reflects advanced practical skills needed for developing state-of-the-art intelligent applications.",
-        "PSO2: CO1 builds a fundamental understanding of AI/ML concepts by distinguishing various algorithm types and data characteristics, which is essential as a base for advanced, cutting-edge AI areas like NLP and Computer Vision. CO2 applies core ML techniques vital for handling high-dimensional data in IoT and Cloud computing. CO3 clustering methods are foundational in Reinforcement Learning and Data Security analytics. CO4 enables domain adaptation and specialization in emerging AI fields. CO5 deep learning techniques like autoencoders are crucial in Computer Vision and NLP.",
+        "PSO2- CO1 (Contrast ML algorithm types and classify data types): This CO builds a fundamental understanding of AI/ML concepts by distinguishing various algorithm types and data characteristics, which is essential as a base for advanced, cutting-edge AI areas like NLP and Computer Vision.  CO2 (Apply dimensionality reduction and model unsupervised learning): By applying and modeling core ML techniques, students gain practical skills that are vital for handling high-dimensional data encountered in domains such as IoT and Cloud computing.  CO3 (Model static and hierarchical clustering with comparative analysis): Clustering methods are foundational in many AI applications including Reinforcement Learning and Data Security analytics, thereby supporting specialization in these areas.  CO4 (Explain incremental and advanced clustering algorithms for domain-specific datasets): This CO enables understanding of domain adaptation and specialization, preparing students to tackle specific challenges in emerging AI fields.  CO5 (Demonstrate deep unsupervised learning approaches like autoencoders): Deep learning techniques like autoencoders are crucial in advanced AI areas such as Computer Vision and NLP, directly supporting the PSO\u2019s goal of excelling in cutting-edge domains.",
     ]
 
     if co_po_justification.strip():
@@ -676,29 +745,92 @@ def _build_docx(data: dict) -> bytes:
 
     _heading2(doc, "Justifications for CO - PO mapping:")
     if lines:
-        just_tbl = doc.add_table(rows=len(lines), cols=1)
+        # Build table with blank spacer rows between each entry (matching example format)
+        num_rows = len(lines) * 2 - 1  # content rows + blank spacers
+        just_tbl = doc.add_table(rows=num_rows, cols=1)
         just_tbl.style = "Table Grid"
         for ri, line in enumerate(lines):
-            cell = just_tbl.rows[ri].cells[0]
-            _set_cell_bg(cell, _WHITE if ri % 2 == 0 else _LIGHT)
+            # Content row
+            cell = just_tbl.rows[ri * 2].cells[0]
+            _set_cell_bg(cell, _WHITE)
             _set_cell_margins(cell)
             p = cell.paragraphs[0]
             _run(p, line, size=9)
+            # Blank spacer row (except after last)
+            if ri < len(lines) - 1:
+                spacer_cell = just_tbl.rows[ri * 2 + 1].cells[0]
+                _set_cell_bg(spacer_cell, _WHITE)
+                _set_cell_margins(spacer_cell, top=20, bottom=20)
+                spacer_cell.paragraphs[0]  # leave empty
 
     # ── 5. Previous CO Attainment ─────────────────────────────────────────────
     _section_title(doc, 5, "CO Attainment of the course from the previous academic year and the action plan")
-    if data.get("prev_co_attainment"):
-        _add_para(doc, data["prev_co_attainment"])
-    else:
-        _add_para(doc, "[Previous year CO attainment data not yet entered.]", color=(136, 136, 136))
 
-    _heading2(doc, "Action Plan")
-    if data.get("action_plan"):
-        for line in (data["action_plan"] or "").split("\n"):
-            if line.strip():
-                _add_para(doc, line, space_before=2, space_after=2)
+    prev_co_att = data.get("prev_co_attainment") or ""
+    if prev_co_att.strip():
+        # Try to parse as structured CO attainment data (JSON list or plain text)
+        import json as _json
+        try:
+            att_data = _json.loads(prev_co_att)
+            if isinstance(att_data, list) and att_data:
+                # Render as a table: CO | Target | Attained | Status
+                att_hdrs = ["CO", "Target (%)", "Attained (%)", "Status"]
+                att_col_w = [2.0, 3.0, 3.0, 8.0]
+                att_tbl = doc.add_table(rows=1 + len(att_data), cols=4)
+                att_tbl.style = "Table Grid"
+                for ci, hdr in enumerate(att_hdrs):
+                    cell = att_tbl.rows[0].cells[ci]
+                    cell.width = Cm(att_col_w[ci])
+                    _set_cell_bg(cell, _NAVY)
+                    _set_cell_margins(cell)
+                    p = cell.paragraphs[0]
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    _run(p, hdr, bold=True, size=9, color=_WHITE)
+                for ri, entry in enumerate(att_data):
+                    bg = _WHITE if ri % 2 == 0 else _LIGHT
+                    tr = att_tbl.rows[ri + 1]
+                    vals = [
+                        entry.get("co", f"CO{ri+1}"),
+                        str(entry.get("target", "")),
+                        str(entry.get("attained", entry.get("percentage", ""))),
+                        entry.get("status", ""),
+                    ]
+                    for ci, val in enumerate(vals):
+                        cell = tr.cells[ci]
+                        cell.width = Cm(att_col_w[ci])
+                        _set_cell_bg(cell, bg)
+                        _set_cell_margins(cell)
+                        p = cell.paragraphs[0]
+                        p.alignment = WD_ALIGN_PARAGRAPH.CENTER if ci < 3 else WD_ALIGN_PARAGRAPH.LEFT
+                        _run(p, str(val or ""), size=9)
+            else:
+                for line in prev_co_att.split("\n"):
+                    if line.strip():
+                        _add_para(doc, line, space_before=2, space_after=2)
+        except (ValueError, TypeError):
+            # Plain text — render as-is
+            for line in prev_co_att.split("\n"):
+                if line.strip():
+                    _add_para(doc, line, space_before=2, space_after=2)
     else:
-        _add_para(doc, "Action Plan- The attainment is higher than the set targets for all COs.")
+        # Blank — matching example (two empty lines, no placeholder text)
+        doc.add_paragraph()
+        doc.add_paragraph()
+
+    # Action Plan — bold text matching example format
+    action_plan = data.get("action_plan") or ""
+    if action_plan.strip():
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after  = Pt(4)
+        for line in action_plan.split("\n"):
+            if line.strip():
+                _run(p, line.strip(), bold=True, size=10)
+    else:
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after  = Pt(4)
+        _run(p, "Action Plan- The attainment is higher than the set targets for all CO\u2019s.", bold=True, size=10)
 
     # ── 6. Session Plan ───────────────────────────────────────────────────────
     _section_title(doc, 6, "Session Plan with CO mapping to each lecture")
