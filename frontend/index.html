@@ -7122,6 +7122,62 @@ function CourseFileEditor({ courseId }) {
                       })}
                     </div>
 
+                    {/* Dedicated QP section:*/}
+                    {/* ── Dedicated Question Papers Section ── */}
+                    {Object.keys(cfQP).length > 0 && (
+                      <div style={{ marginBottom:28 }}>
+                        <div style={{ fontSize:13, fontWeight:700, color:"#94A3B8", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:12 }}>
+                          📋 Question Papers
+                        </div>
+                        {Object.entries(cfQP).map(([examName, qpData]) => {
+                          const questions = Array.isArray(qpData) ? qpData : (qpData?.qp ?? qpData?.questions ?? []);
+                          if (!questions.length) return null;
+                          const totalMarks = questions.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                          const blColorMap = {Remember:"#6B7280",Understand:"#3B82F6",Apply:"#10B981",Analyse:"#8B5CF6",Analyze:"#8B5CF6",Evaluate:"#F59E0B",Create:"#EC4899"};
+                          return (
+                            <div key={examName} style={{ marginBottom:16, borderRadius:8, overflow:"hidden", border:"1px solid #CBD5E1" }}>
+                              <div style={{ background:"#1E3A5F", padding:"8px 14px", display:"flex", alignItems:"center", gap:10 }}>
+                                <span style={{ color:"#FFFFFF", fontWeight:700, fontSize:13 }}>{examName}</span>
+                                <span style={{ color:"#94A3B8", fontSize:11 }}>{questions.length} questions · {totalMarks} marks</span>
+                              </div>
+                              <div style={{ background:"#FFFFFF", overflowX:"auto" }}>
+                                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                                  <thead>
+                                    <tr style={{ background:"#F1F5F9" }}>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"left", padding:"8px 10px", width:40 }}>Q#</th>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"left", padding:"8px 10px" }}>QUESTION</th>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"center", padding:"8px 10px", width:60 }}>MARKS</th>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"center", padding:"8px 10px", width:60 }}>CO</th>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"center", padding:"8px 10px", width:110 }}>BLOOM</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {questions.map((q,qi)=>{
+                                      const bl = inferBloomUI(q.question_text) ?? q.bloom_label ?? q.bloom ?? "—";
+                                      const blColor = blColorMap[bl] || "#9CA3AF";
+                                      return (
+                                        <tr key={qi} style={{ background:qi%2===0?"#FFFFFF":"#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
+                                          <td style={{ color:"#374151", fontWeight:600, padding:"8px 10px", textAlign:"center" }}>{q.q_no ?? qi+1}</td>
+                                          <td style={{ color:"#111827", padding:"8px 10px" }}>{q.question_text ?? "—"}</td>
+                                          <td style={{ color:"#D97706", fontWeight:700, textAlign:"center", padding:"8px 10px" }}>{q.marks ?? "—"}</td>
+                                          <td style={{ color:"#1D4ED8", fontWeight:600, textAlign:"center", padding:"8px 10px" }}>{q.co_id ?? q.co ?? "—"}</td>
+                                          <td style={{ textAlign:"center", padding:"8px 10px" }}>
+                                            {bl !== "—" ? <span style={{ background:blColor, color:"#FFFFFF", padding:"3px 10px", borderRadius:4, fontSize:10, fontWeight:700 }}>{bl}</span> : "—"}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    
+
                     {/* Per-exam segregated sections */}
                     {orderedExams.map(exam => {
                       const rows = getExamRows(exam);
