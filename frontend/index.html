@@ -6139,7 +6139,7 @@ function CourseFileEditor({ courseId }) {
                   }
                 });
               });
-              setCfBloomMap(bloomMap);
+              if (typeof setCfBloomMap === "function") setCfBloomMap(bloomMap);
             }
           }
         } catch { /* bloom AI failed silently */ }
@@ -7182,7 +7182,7 @@ function CourseFileEditor({ courseId }) {
 
                           {/* Question Paper — dedicated white card section */}
                           {qp.length > 0 && (() => {
-                            const aiBloomForExam = cfBloomMap[exam] || {};
+                            let aiBloomForExam = {}; try { aiBloomForExam = cfBloomMap[exam] || {}; } catch(e) {}
                             return (
                               <div style={{ margin:"0 0 0 0", borderBottom:"2px solid rgba(255,255,255,0.1)" }}>
                                 <div style={{ background:"#1E293B", padding:"7px 16px", display:"flex", alignItems:"center", gap:8 }}>
