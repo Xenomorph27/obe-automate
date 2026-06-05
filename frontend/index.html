@@ -6007,6 +6007,7 @@ function CourseFileEditor({ courseId }) {
   const [cfStudents,  setCfStudents]  = useState([]); // student roster loaded from DB
   const [cfMarks,     setCfMarks]     = useState([]); // exam-wise marks from attainment
   const [cfQP,        setCfQP]        = useState({}); // CA name → question paper from master attainment
+  const [cfBloomMap,  setCfBloomMap]  = useState({}); // CA name → {q_no → bloom string} from AI
   const [cfAiMats,    setCfAiMats]    = useState(null); // AI-generated materials {textbooks,web,journals,moocs}
 
   // Ref always holds latest extra — fixes stale-closure autosave bug

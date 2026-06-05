@@ -31,4 +31,4 @@ RUN mkdir -p generated_docs/session_plans \
 ENV PORT=8000
 EXPOSE $PORT
 
-CMD uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
