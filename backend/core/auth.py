@@ -21,7 +21,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query as QueryParam, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -85,19 +85,27 @@ def decode_token(token: str) -> dict:
         )
 
 
-# ── OAuth2 scheme ─────────────────────────────────────────────────────────────
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-
-
-# ── FastAPI dependencies ──────────────────────────────────────────────────────
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    token_header: str = Depends(oauth2_scheme),
+    token_query: str = QueryParam(default=None, alias="token"),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Dependency: validate JWT and return the User row."""
+    """Dependency: validate JWT — accepts Bearer header OR ?token= query param."""
+    token = token_header or token_query
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     payload = decode_token(token)
+
+
+
+    
     user_id = int(payload.get("sub", 0))
 
     result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
