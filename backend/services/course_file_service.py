@@ -295,6 +295,7 @@ def _render_timetable(doc, timetable: dict):
         # summary can be:
         #   list of strings  → each string merged across all columns
         #   list of lists    → each inner list = one row of cell values
+        summary = tt.get("summary", [])
         if summary:
             for s_item in summary:
                 sum_tr = tbl.add_row()
