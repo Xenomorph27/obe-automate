@@ -7153,7 +7153,8 @@ function CourseFileEditor({ courseId }) {
                                   </thead>
                                   <tbody>
                                     {questions.map((q,qi)=>{
-                                      const bl = inferBloomUI(q.question_text) ?? q.bloom_label ?? q.bloom ?? "—";
+                                      let aiB = {}; try { aiB = cfBloomMap[examName] || {}; } catch(e) {}
+                                      const bl = aiB[String(q.q_no ?? qi+1)] ?? q.bloom_label ?? q.bloom ?? inferBloomUI(q.question_text) ?? "—";
                                       const blColor = blColorMap[bl] || "#9CA3AF";
                                       return (
                                         <tr key={qi} style={{ background:qi%2===0?"#FFFFFF":"#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
