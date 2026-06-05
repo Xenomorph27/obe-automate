@@ -6112,6 +6112,36 @@ function CourseFileEditor({ courseId }) {
       const sheetsRes = await apiFetch(`/co-po-template/load-all-sheets/${courseId}`);
       if (sheetsRes.sheets && Object.keys(sheetsRes.sheets).length > 0) {
         setCfQP(sheetsRes.sheets);
+        // AI bloom classification for all questions across all CA sheets
+        try {
+          const allQTexts = [];
+          Object.entries(sheetsRes.sheets).forEach(([ca, data]) => {
+            (data.qp || []).forEach(q => {
+              if (q.question_text) allQTexts.push(q.question_text);
+            });
+          });
+          if (allQTexts.length > 0) {
+            const bloomRes = await apiFetch('/syllabus/classify-bloom', {
+              method: 'POST',
+              body: JSON.stringify({ statements: allQTexts })
+            });
+            if (bloomRes.levels) {
+              // Map results back per CA → q_no
+              const bloomMap = {};
+              let idx = 0;
+              Object.entries(sheetsRes.sheets).forEach(([ca, data]) => {
+                bloomMap[ca] = {};
+                (data.qp || []).forEach(q => {
+                  if (q.question_text) {
+                    bloomMap[ca][String(q.q_no ?? '')] = bloomRes.levels[idx] || null;
+                    idx++;
+                  }
+                });
+              });
+              setCfBloomMap(bloomMap);
+            }
+          }
+        } catch { /* bloom AI failed silently */ }
       }
     } catch { /* silent */ }
 
@@ -7149,39 +7179,65 @@ function CourseFileEditor({ courseId }) {
                             </div>
                           </div>
 
-                          {/* Question paper sub-header if available */}
-                          {qp.length > 0 && (
-                            <div style={{ background:"rgba(8,14,26,0.6)", padding:"8px 16px", borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
-                              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
-                                <thead>
-                                  <tr>
-                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"left", padding:"3px 8px", width:36 }}>Q#</th>
-                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"left", padding:"3px 8px" }}>Question</th>
-                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"center", padding:"3px 8px", width:50 }}>Marks</th>
-                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"center", padding:"3px 8px", width:50 }}>CO</th>
-                                    <th style={{ color:"#64748B", fontWeight:600, textAlign:"center", padding:"3px 8px", width:100 }}>Bloom</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {qp.map((q,qi)=>{
-                                    const bl = q.bloom_label ?? q.bloom ?? inferBloomUI(q.question_text) ?? "—";
-                                    const blColor = bloomColor2[bl] || "#94A3B8";
-                                    return (
-                                      <tr key={qi} style={{ borderTop:"1px solid rgba(255,255,255,0.04)" }}>
-                                        <td style={{ color:"#94A3B8", padding:"3px 8px" }}>{q.q_no ?? qi+1}</td>
-                                        <td style={{ color:"#CBD5E1", padding:"3px 8px", fontSize:11 }}>{q.question_text ?? "—"}</td>
-                                        <td style={{ color:"#FCD34D", fontWeight:600, textAlign:"center", padding:"3px 8px" }}>{q.marks ?? "—"}</td>
-                                        <td style={{ color:"#7DD3FC", textAlign:"center", padding:"3px 8px" }}>{q.co_id ?? q.co ?? "—"}</td>
-                                        <td style={{ textAlign:"center", padding:"3px 8px" }}>
-                                          {bl !== "—" ? <span style={{ background:blColor+"22", color:blColor, padding:"2px 7px", borderRadius:4, fontSize:10, fontWeight:600 }}>{bl}</span> : "—"}
-                                        </td>
+                          {/* Question Paper — dedicated white card section */}
+                          {qp.length > 0 && (() => {
+                            const aiBloomForExam = cfBloomMap[exam] || {};
+                            return (
+                              <div style={{ margin:"0 0 0 0", borderBottom:"2px solid rgba(255,255,255,0.1)" }}>
+                                <div style={{ background:"#1E293B", padding:"7px 16px", display:"flex", alignItems:"center", gap:8 }}>
+                                  <span style={{ color:"#94A3B8", fontSize:11, fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                                    📋 Question Paper — {exam}
+                                  </span>
+                                  <span style={{ marginLeft:"auto", color:"#64748B", fontSize:10 }}>{qp.length} questions · max {qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0)} marks</span>
+                                </div>
+                                <div style={{ background:"#FFFFFF", overflowX:"auto" }}>
+                                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                                    <thead>
+                                      <tr style={{ background:"#1E3A5F" }}>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"left", padding:"8px 10px", width:40, fontSize:11 }}>Q#</th>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"left", padding:"8px 10px", fontSize:11 }}>QUESTION</th>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"center", padding:"8px 10px", width:60, fontSize:11 }}>MARKS</th>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"center", padding:"8px 10px", width:60, fontSize:11 }}>CO</th>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"center", padding:"8px 10px", width:110, fontSize:11 }}>BLOOM</th>
                                       </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
+                                    </thead>
+                                    <tbody>
+                                      {qp.map((q,qi)=>{
+                                        const qno = String(q.q_no ?? qi+1);
+                                        // Priority: AI result > stored label > keyword inference
+                                        const bl = aiBloomForExam[qno] ?? q.bloom_label ?? q.bloom ?? inferBloomUI(q.question_text) ?? "—";
+                                        const blColorMap = {Remember:"#6B7280",Understand:"#3B82F6",Apply:"#10B981",Analyse:"#8B5CF6",Analyze:"#8B5CF6",Evaluate:"#F59E0B",Create:"#EC4899"};
+                                        const blColor = blColorMap[bl] || "#9CA3AF";
+                                        const isEven = qi % 2 === 0;
+                                        return (
+                                          <tr key={qi} style={{ background: isEven ? "#FFFFFF" : "#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
+                                            <td style={{ color:"#374151", fontWeight:600, padding:"8px 10px", textAlign:"center" }}>{qno}</td>
+                                            <td style={{ color:"#111827", padding:"8px 10px", lineHeight:1.5 }}>{q.question_text ?? "—"}</td>
+                                            <td style={{ color:"#D97706", fontWeight:700, textAlign:"center", padding:"8px 10px" }}>{q.marks ?? "—"}</td>
+                                            <td style={{ color:"#1D4ED8", fontWeight:600, textAlign:"center", padding:"8px 10px" }}>{q.co_id ?? q.co ?? "—"}</td>
+                                            <td style={{ textAlign:"center", padding:"8px 10px" }}>
+                                              {bl !== "—"
+                                                ? <span style={{ background:blColor, color:"#FFFFFF", padding:"3px 10px", borderRadius:4, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>{bl}</span>
+                                                : <span style={{ color:"#9CA3AF", fontSize:11 }}>—</span>}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                    <tfoot>
+                                      <tr style={{ background:"#F1F5F9", borderTop:"2px solid #CBD5E1" }}>
+                                        <td colSpan={2} style={{ padding:"6px 10px", color:"#374151", fontWeight:700, fontSize:11, textAlign:"right" }}>Total Marks:</td>
+                                        <td style={{ padding:"6px 10px", color:"#065F46", fontWeight:700, fontSize:13, textAlign:"center", background:"#D1FAE5" }}>
+                                          {qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0)}
+                                        </td>
+                                        <td colSpan={2}/>
+                                      </tr>
+                                    </tfoot>
+                                  </table>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* Marks table */}
                           <div style={{ overflowX:"auto" }}>
