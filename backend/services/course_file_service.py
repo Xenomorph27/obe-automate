@@ -672,48 +672,187 @@ def _build_docx(data: dict) -> bytes:
         _add_para(doc, "[Evaluation plan not yet generated. Use the Evaluation Plan page first.]",
                   color=(136, 136, 136))
 
-    _heading2(doc, "Evaluation Components Details")
+    # ── 7b. Question Papers ───────────────────────────────────────────────────
+    _heading2(doc, "Question Papers")
+    bloom_map = {1: "Remember", 2: "Understand", 3: "Apply",
+                 4: "Analyse",  5: "Evaluate",   6: "Create"}
 
-    for ca in (data.get("ca_sheets") or []):
-        qp = ca.get("qp") or []
+    ca_sheets_all = data.get("ca_sheets") or []
+    any_qp = any((ca.get("qp") or []) for ca in ca_sheets_all)
+    if any_qp:
+        for ca in ca_sheets_all:
+            qp = ca.get("qp") or []
+            if not qp:
+                continue
+            _heading2(doc, f"{ca.get('ca_label','')} — Question Paper")
+            bl_map_for_ca = data.get("bloom_ai_map", {}).get(ca.get("ca_label",""), {})
+            qp_rows = []
+            for q in qp:
+                q_no   = q.get("q_no","")
+                q_text = q.get("question_text","")
+                marks  = q.get("marks","")
+                co     = q.get("co_id","")
+                # AI-mapped bloom level: use stored value, AI override, or raw int→name
+                bl_raw = q.get("bloom_level","")
+                if bl_raw and isinstance(bl_raw, int):
+                    bl_str = bloom_map.get(bl_raw, str(bl_raw))
+                elif bl_raw:
+                    bl_str = str(bl_raw)
+                else:
+                    bl_str = ""
+                # Apply AI override if present
+                bl_str = bl_map_for_ca.get(str(q_no), bl_str) or bl_str
+                qp_rows.append([q_no, q_text, marks, co, bl_str])
+            _make_table(doc,
+                        ["Q.No", "Question", "Marks", "CO", "Bloom's Level"],
+                        qp_rows,
+                        [1.0, 9.5, 1.2, 1.8, 2.0])
+    else:
+        _add_para(doc, "[No question papers uploaded yet. Upload via the Evaluation Plan page.]",
+                  color=(136, 136, 136))
+
+    # ── 8. Student Marks ─────────────────────────────────────────────────────
+    _section_title(doc, 8, "Student Marks")
+    _add_para(doc, "Exam-wise and question-wise marks auto-populated from uploaded marks and "
+                   "master attainment file.", size=9, color=(80, 80, 80))
+
+    student_map = data.get("student_map") or {}
+    students_list = data.get("students") or []
+    has_any_marks_section = False
+
+    for ca in ca_sheets_all:
+        qp         = ca.get("qp") or []
+        marks_data = ca.get("marks") or {}
+        ca_label   = ca.get("ca_label", "")
         if not qp:
             continue
-        _heading2(doc, f"{ca.get('ca_label','')} — Question Paper")
-        _make_table(doc,
-                    ["Q.No", "Question", "Marks", "CO", "BL"],
-                    [[q.get("q_no",""), q.get("question_text",""), q.get("marks",""),
-                      q.get("co_id",""), q.get("bloom_level","")] for q in qp],
-                    [1.0, 10.0, 1.2, 1.8, 1.5])
 
-        marks_data = ca.get("marks") or {}
         has_real_marks = any(
             any(float(v or 0) > 0 for v in mks.values())
             for mks in marks_data.values()
             if isinstance(mks, dict)
         )
-        if marks_data and has_real_marks:
-            _heading2(doc, f"{ca.get('ca_label','')} — Marks")
-            q_nos = [q.get("q_no","") for q in qp]
-            student_map = data.get("student_map") or {}
+
+        q_nos       = [q.get("q_no","") for q in qp]
+        q_max_marks = [float(q.get("marks", 0) or 0) for q in qp]
+        total_max   = sum(q_max_marks)
+        num_students = len(students_list)
+
+        # Compute per-question averages and overall avg
+        if has_real_marks and num_students:
+            q_avgs = []
+            for qi, q in enumerate(qp):
+                vals = [
+                    float((marks_data.get(s["prn"]) or {}).get(q.get("q_no"), 0) or 0)
+                    for s in students_list
+                ]
+                q_avgs.append(f"{sum(vals)/len(vals):.1f}" if vals else "—")
+            all_totals = []
+            for s in students_list:
+                mks = marks_data.get(s["prn"]) or {}
+                all_totals.append(sum(float(mks.get(q.get("q_no"),0) or 0) for q in qp))
+            overall_avg = f"{sum(all_totals)/len(all_totals):.1f}" if all_totals else "—"
+        else:
+            q_avgs = ["—"] * len(qp)
+            overall_avg = "—"
+
+        # Header summary info for this exam
+        _heading2(doc, f"{ca_label}")
+        info_tbl = doc.add_table(rows=1, cols=5)
+        info_tbl.style = "Table Grid"
+        info_labels = ["Exam", "Students", "Avg (Assignment)" if "assign" in ca_label.lower()
+                       else f"Avg ({ca_label})", "Max Marks", "Questions"]
+        info_vals   = [ca_label, str(num_students), overall_avg, str(int(total_max)) if total_max else "—", str(len(qp))]
+        for ci, (lbl, val) in enumerate(zip(info_labels, info_vals)):
+            cell = info_tbl.rows[0].cells[ci]
+            _set_cell_bg(cell, _NAVY)
+            _set_cell_margins(cell)
+            p1 = cell.paragraphs[0]
+            p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _run(p1, lbl, bold=True, size=8, color=_WHITE)
+            p2 = cell.add_paragraph()
+            p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _run(p2, val, bold=True, size=10, color=_WHITE)
+
+        doc.add_paragraph()
+
+        if has_real_marks:
+            has_any_marks_section = True
             mk_rows = []
-            for prn, mks in marks_data.items():
-                name = student_map.get(prn) or student_map.get(str(prn)) or "—"
+
+            # Avg row first
+            avg_row = ["—", "Class Average"] + q_avgs + [overall_avg]
+            mk_rows.append(("avg", avg_row))
+
+            for s in students_list:
+                prn  = s["prn"]
+                name = s.get("name","")
+                mks  = marks_data.get(prn) or {}
                 row  = [prn, name]
                 tot  = 0.0
                 for q in qp:
-                    v = float((mks or {}).get(q.get("q_no"), 0) or 0)
+                    v = float(mks.get(q.get("q_no"), 0) or 0)
                     row.append(str(v) if v else "")
                     tot += v
-                row.append(str(tot) if tot else "")
-                mk_rows.append(row)
-            n = len(q_nos)
-            col_w = [2.5, 4.5] + [round(7.0/max(n,1), 2)]*n + [1.5]
-            _make_table(doc, ["PRN", "Name"] + q_nos + ["Total"], mk_rows, col_w)
-        elif marks_data and not has_real_marks:
-            _add_para(doc, "[Marks not yet entered for this component.]", color=(136, 136, 136))
+                row.append(f"{tot:.1f}" if tot else "")
+                mk_rows.append(("student", row))
 
-    # ── 8. Slow & Advanced Learners ───────────────────────────────────────────
-    _section_title(doc, 8, "List of Slow and Advanced learners and the action plans")
+            # Also include students from marks_data not in students_list
+            known_prns = {s["prn"] for s in students_list}
+            for prn, mks in marks_data.items():
+                if prn not in known_prns and isinstance(mks, dict):
+                    name = student_map.get(prn) or "—"
+                    row  = [prn, name]
+                    tot  = 0.0
+                    for q in qp:
+                        v = float(mks.get(q.get("q_no"), 0) or 0)
+                        row.append(str(v) if v else "")
+                        tot += v
+                    row.append(f"{tot:.1f}" if tot else "")
+                    mk_rows.append(("student", row))
+
+            n = len(q_nos)
+            col_w = [2.5, 4.5] + [round(7.5/max(n,1), 2)]*n + [1.5]
+            # Build table manually to colour avg row differently
+            num_cols = 2 + n + 1
+            tbl = doc.add_table(rows=1 + len(mk_rows), cols=num_cols)
+            tbl.style = "Table Grid"
+            # Header
+            hdr_row = tbl.rows[0]
+            headers = ["PRN", "Name"] + [f"{q_nos[i]}\n(/{int(q_max_marks[i]) if q_max_marks[i] else '?'})" for i in range(n)] + ["Total"]
+            for ci2, hdr_txt in enumerate(headers):
+                cell = hdr_row.cells[ci2]
+                cell.width = Cm(col_w[ci2])
+                _set_cell_bg(cell, _NAVY)
+                _set_cell_margins(cell)
+                p = cell.paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _run(p, hdr_txt, bold=True, size=8, color=_WHITE)
+            # Data rows
+            for ri, (row_type, row_data) in enumerate(mk_rows):
+                bg = _GREEN if row_type == "avg" else (_WHITE if ri % 2 == 1 else _LIGHT)
+                tr = tbl.rows[ri + 1]
+                for ci2, val in enumerate(row_data):
+                    cell = tr.cells[ci2]
+                    cell.width = Cm(col_w[ci2])
+                    _set_cell_bg(cell, bg)
+                    _set_cell_margins(cell)
+                    p = cell.paragraphs[0]
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER if ci2 >= 2 else WD_ALIGN_PARAGRAPH.LEFT
+                    is_avg_row = (row_type == "avg")
+                    _run(p, str(val or ""), bold=is_avg_row, size=8,
+                         color=(0,100,0) if is_avg_row else (0,0,0))
+        else:
+            _add_para(doc, f"[Marks not yet entered for {ca_label}. Upload via the marks upload.]",
+                      color=(136, 136, 136))
+        doc.add_paragraph()
+
+    if not ca_sheets_all:
+        _add_para(doc, "[No evaluation components found. Generate evaluation plan first.]",
+                  color=(136, 136, 136))
+
+    # ── 9. Slow & Advanced Learners ───────────────────────────────────────────
+    _section_title(doc, 9, "List of Slow and Advanced learners and the action plans")
 
     _heading2(doc, "Advance Learners")
     advanced_list = data.get("advanced_learners_parsed") or []
@@ -740,7 +879,7 @@ def _build_docx(data: dict) -> bytes:
         _add_para(doc, "[Slow learner list will appear once CA marks are entered.]", color=(136, 136, 136))
 
     # ── 9. CO Attainment (internal) ───────────────────────────────────────────
-    _section_title(doc, 9, "CO Attainment of Internal Evaluation")
+    _section_title(doc, 10, "CO Attainment of Internal Evaluation")
     co_attainment = data.get("co_attainment") or {}
     if co_attainment:
         ca_rows = []
@@ -754,7 +893,7 @@ def _build_docx(data: dict) -> bytes:
                   color=(136, 136, 136))
 
     # ── 10. Activity Reports ──────────────────────────────────────────────────
-    _section_title(doc, 10, "Reports of activities planned and conducted")
+    _section_title(doc, 11, "Reports of activities planned and conducted")
     activity_reports = data.get("activity_reports") or ""
     if activity_reports.strip():
         # Try to parse as JSON structured reports
@@ -789,7 +928,7 @@ def _build_docx(data: dict) -> bytes:
                   color=(136, 136, 136))
 
     # ── 11. Learning Material ─────────────────────────────────────────────────
-    _section_title(doc, 11, "Learning Material")
+    _section_title(doc, 12, "Learning Material")
     if data.get("learning_material_links"):
         _heading2(doc, "LMS / Online Resources")
         for link in data["learning_material_links"].split("\n"):
@@ -852,7 +991,7 @@ def _build_docx(data: dict) -> bytes:
                   color=(136, 136, 136))
 
     # ── 12. Question Bank ─────────────────────────────────────────────────────
-    _section_title(doc, 12, "Question Bank")
+    _section_title(doc, 13, "Question Bank")
     questions = data.get("questions") or []
     if questions:
         from collections import defaultdict as _dd2
@@ -872,7 +1011,7 @@ def _build_docx(data: dict) -> bytes:
                   color=(136, 136, 136))
 
     # ── 13. Attendance ────────────────────────────────────────────────────────
-    _section_title(doc, 13, "Compiled Attendance")
+    _section_title(doc, 14, "Compiled Attendance")
     if data.get("attendance_links"):
         for link in data["attendance_links"].split("\n"):
             link = link.strip()
@@ -1129,6 +1268,71 @@ class CourseFileService:
             result.extend(qs[:max_per_co])
         return result
 
+
+
+    async def _ai_bloom_map(self, ca_sheets: list) -> dict:
+        """
+        For each CA sheet, AI-classify any questions missing a bloom level.
+        Returns {ca_label: {q_no: bloom_level_str}}.
+        Falls back gracefully if LLM unavailable.
+        """
+        import json as _json
+        from backend.core.llm import get_llm_response
+
+        BLOOM_NAMES = ["Remember", "Understand", "Apply", "Analyse", "Evaluate", "Create"]
+        result = {}
+
+        for ca in (ca_sheets or []):
+            qp = ca.get("qp") or []
+            ca_label = ca.get("ca_label", "")
+            if not qp:
+                continue
+
+            # Collect questions with missing bloom level
+            needs_ai = [
+                q for q in qp
+                if not q.get("bloom_level") or q.get("bloom_level") == 0
+            ]
+            if not needs_ai:
+                continue
+
+            lines = []
+            for q in needs_ai:
+                q_no = str(q.get("q_no", "?"))
+                text = str(q.get("question_text", ""))[:120]
+                lines.append("  Q" + q_no + ". " + text)
+            q_list = "\n".join(lines)
+
+            prompt = (
+                "You are an expert in Bloom's Taxonomy for engineering education. "
+                "Classify each question below into exactly ONE Bloom level from: "
+                "Remember, Understand, Apply, Analyse, Evaluate, Create. "
+                "Return a JSON object mapping Q-number (e.g. \"Q1\") to Bloom level string. "
+                "Respond ONLY with the JSON, no markdown fences, no explanation.\n\n"
+                "Questions:\n" + q_list
+            )
+
+            try:
+                raw = await get_llm_response(prompt)
+                raw = raw.strip()
+                if raw.startswith("```"):
+                    raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                mapping = _json.loads(raw)
+                clean = {}
+                for k, v in mapping.items():
+                    v_str = str(v).strip()
+                    matched = next(
+                        (b for b in BLOOM_NAMES if b.lower() in v_str.lower()), None
+                    )
+                    if matched:
+                        key = str(k).replace("Q", "").strip()
+                        clean[key] = matched
+                result[ca_label] = clean
+            except Exception as e:
+                logger.warning("AI bloom mapping failed for %s: %s", ca_label, e)
+
+        return result
+
     async def generate(self, course_id: int) -> dict:
         course_svc = CourseService(self.db)
         course     = await course_svc.get_course(course_id)
@@ -1186,6 +1390,10 @@ class CourseFileService:
             "questions":      questions,
             "attendance_links": extra.get("attendance_links", ""),
         }
+
+        # ── AI Bloom-level mapping for question papers ─────────────────────
+        # Auto-classify any questions missing a bloom level (no button needed)
+        data["bloom_ai_map"] = await self._ai_bloom_map(ca_sheets)
 
         docx_bytes = _build_docx(data)
 
