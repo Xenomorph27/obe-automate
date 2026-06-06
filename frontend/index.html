@@ -7611,30 +7611,28 @@ function MasterAttainmentPage({course, saveCourse}){
 
   // Auto-save coPoMatrix to course record whenever it changes (debounced 1.5s)
   const coPoMatrixInitialized=React.useRef(false);
+  const latestCoPoMatrix=React.useRef(coPoMatrix);
+  React.useEffect(()=>{latestCoPoMatrix.current=coPoMatrix;},[coPoMatrix]);
   React.useEffect(()=>{
     // Skip the very first render (initialization from course.co_po_matrix)
     if(!course||!Object.keys(coPoMatrix).length){coPoMatrixInitialized.current=false;return;}
     if(!coPoMatrixInitialized.current){coPoMatrixInitialized.current=true;return;}
     if(coPoMatrixSaveTimer.current) clearTimeout(coPoMatrixSaveTimer.current);
     coPoMatrixSaveTimer.current=setTimeout(async()=>{
-      try{
-        await fetch(API+'/courses/'+course.id,{method:'PUT',
-          headers:{...hdrForm(),'Content-Type':'application/json'},
-          body:JSON.stringify({
-            cos:course.cos,pos:course.pos,co_po_matrix:coPoMatrix,
-            course_name:course.course_name,course_code:course.course_code,
-            department:course.department,semester:course.semester,
-            academic_year:course.academic_year,faculty_name:course.faculty_name,
-            credits:course.credits||3,total_hours:course.total_hours||45,
-            evaluation_config:course.evaluation_config||{}
-          })
-        });
-        // Keep course object in sync so Course File tab reads the latest matrix
-        course.co_po_matrix=coPoMatrix;
-        if(saveCourse) saveCourse({...course, co_po_matrix:coPoMatrix});
-      }catch(e){console.warn('CO-PO matrix auto-save failed',e);}
+      await persistMatrix(latestCoPoMatrix.current);
     },1500);
   },[coPoMatrix]);
+  // Flush pending save on unmount so switching tabs never loses data
+  React.useEffect(()=>{
+    return()=>{
+      if(coPoMatrixSaveTimer.current){
+        clearTimeout(coPoMatrixSaveTimer.current);
+        if(coPoMatrixInitialized.current&&Object.keys(latestCoPoMatrix.current).length){
+          persistMatrix(latestCoPoMatrix.current);
+        }
+      }
+    };
+  },[]);
 
   const generate=async()=>{
     if(!course){setErr('Select a course first.');return;}
@@ -8663,6 +8661,25 @@ function MasterAttainmentPage({course, saveCourse}){
     );
   };
 
+  const persistMatrix=async(matrix)=>{
+    if(!course)return;
+    try{
+      await fetch(API+'/courses/'+course.id,{method:'PUT',
+        headers:{...hdrForm(),'Content-Type':'application/json'},
+        body:JSON.stringify({
+          cos:course.cos,pos:course.pos,co_po_matrix:matrix,
+          course_name:course.course_name,course_code:course.course_code,
+          department:course.department,semester:course.semester,
+          academic_year:course.academic_year,faculty_name:course.faculty_name,
+          credits:course.credits||3,total_hours:course.total_hours||45,
+          evaluation_config:course.evaluation_config||{}
+        })
+      });
+      course.co_po_matrix=matrix;
+      if(saveCourse) saveCourse({...course,co_po_matrix:matrix});
+    }catch(e){console.warn('CO-PO matrix persist failed',e);}
+  };
+
   const runAiMapping=async()=>{
     if(!course||!coList.length||!poList.length)return;
     setAiMappingLoading(true);setAiMappingMsg('');
@@ -8686,10 +8703,10 @@ function MasterAttainmentPage({course, saveCourse}){
             else if(!(poId in (prev[coId]||{})))next[coId][poId]=0;
           });
         });
+        // IMMEDIATELY persist so switching tabs doesn't lose the AI result
+        persistMatrix(next);
         return next;
       });
-      // The coPoMatrix state update above is the source of truth.
-      // The auto-save useEffect will persist it to the backend automatically.
       setAiMappingMsg('✅ AI mapping applied! Review and adjust as needed.');
     }catch(e){
       setAiMappingMsg('❌ '+e.message);
