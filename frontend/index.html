@@ -1049,9 +1049,9 @@ function CourseDetailPage({course,go,setCourse}){
 
     {/* ── Delete Confirmation Modal ── */}
     {showDeleteConfirm&&<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowDeleteConfirm(false)}>
-      <div style={{background:'#1a1a1a',borderRadius:16,padding:'2rem',maxWidth:420,width:'90%',border:'2px solid #ef4444',boxShadow:'0 25px 60px rgba(0,0,0,.8)'}} onClick={e=>e.stopPropagation()}>
-        <div style={{fontSize:'1.2rem',fontWeight:700,color:'#ef4444',marginBottom:'.75rem'}}>⚠️ Delete Course</div>
-        <div style={{fontSize:'.9rem',color:'var(--text1)',marginBottom:'1.2rem',lineHeight:1.6}}>
+      <div style={{background:'#ffffff',borderRadius:16,padding:'2rem',maxWidth:420,width:'90%',border:'2px solid #ef4444',boxShadow:'0 25px 60px rgba(0,0,0,.5)'}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontSize:'1.2rem',fontWeight:700,color:'#dc2626',marginBottom:'.75rem'}}>⚠️ Delete Course</div>
+        <div style={{fontSize:'.9rem',color:'#111827',marginBottom:'1.2rem',lineHeight:1.6}}>
           This will <strong>permanently delete</strong> the course <strong>{course.course_name}</strong> and all associated data including session plan, evaluation plan, marks, question bank, generated docx and all uploaded files.<br/><br/>
           Type <strong style={{color:'#ef4444'}}>{course.course_code}</strong> to confirm:
         </div>
@@ -1059,11 +1059,11 @@ function CourseDetailPage({course,go,setCourse}){
           value={deleteInput}
           onChange={e=>setDeleteInput(e.target.value)}
           placeholder={course.course_code}
-          style={{width:'100%',padding:'.6rem .8rem',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg2)',color:'var(--text1)',fontSize:'.9rem',marginBottom:'1rem',boxSizing:'border-box'}}
+          style={{width:'100%',padding:'.6rem .8rem',borderRadius:8,border:'1px solid #d1d5db',background:'#f9fafb',color:'#111827',fontSize:'.9rem',marginBottom:'1rem',boxSizing:'border-box'}}
           autoFocus
         />
         <div style={{display:'flex',gap:'.75rem',justifyContent:'flex-end'}}>
-          <button onClick={()=>setShowDeleteConfirm(false)} style={{padding:'.5rem 1.2rem',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg2)',color:'var(--text1)',cursor:'pointer',fontFamily:'DM Sans,sans-serif',fontWeight:600}}>
+          <button onClick={()=>setShowDeleteConfirm(false)} style={{padding:'.5rem 1.2rem',borderRadius:8,border:'1px solid #d1d5db',background:'#f3f4f6',color:'#374151',cursor:'pointer',fontFamily:'DM Sans,sans-serif',fontWeight:600}}>
             Cancel
           </button>
           <button
