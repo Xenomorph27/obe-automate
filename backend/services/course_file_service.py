@@ -1672,22 +1672,25 @@ def _build_docx(data: dict) -> bytes:
     _section_title(doc, 12, "Question Bank")
 
     # Merge DB questions + all CA/ESE sheet questions so bank is never empty
+    # Dedup key = (question_text, co_id, source) so same text under different CO is kept
     questions = list(data.get("questions") or [])
-    seen_qtexts = {q.get("question_text","").strip().lower() for q in questions}
+    seen = {(q.get("question_text","").strip().lower(), q.get("co_id",""), "") for q in questions}
     for ca in (data.get("ca_sheets") or []):
         ca_label = ca.get("ca_label", "")
         for q in (ca.get("qp") or []):
-            qt = (q.get("question_text") or "").strip()
-            if qt and qt.lower() not in seen_qtexts:
+            qt  = (q.get("question_text") or "").strip()
+            co  = q.get("co_id", "")
+            key = (qt.lower(), co, ca_label)
+            if qt and key not in seen:
                 questions.append({
                     "question_text": qt,
-                    "co_id":         q.get("co_id", ""),
+                    "co_id":         co,
                     "bloom_level":   q.get("bloom_level", ""),
                     "marks":         q.get("marks", ""),
                     "unit_no":       q.get("unit_no", ""),
                     "source":        ca_label,
                 })
-                seen_qtexts.add(qt.lower())
+                seen.add(key)
 
     if questions:
         from collections import defaultdict as _dd2
