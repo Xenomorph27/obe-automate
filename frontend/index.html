@@ -1017,8 +1017,8 @@ function CourseDetailPage({course,go,setCourse}){
   return(<div className="page-body fade-up">
     {/* ── Header ── */}
     <div style={{background:'linear-gradient(135deg,#0A0A0A 0%,#2A1500 100%)',borderRadius:14,padding:'1.5rem 1.75rem',marginBottom:'1.5rem',color:'#fff',position:'relative',overflow:'hidden'}}>
-      <div style={{position:'absolute',top:-30,right:-30,width:160,height:160,borderRadius:'50%',background:'rgba(255,255,255,.06)'}}></div>
-      <div style={{position:'absolute',bottom:-50,right:80,width:100,height:100,borderRadius:'50%',background:'rgba(255,255,255,.04)'}}></div>
+      <div style={{position:'absolute',top:-30,right:-30,width:160,height:160,borderRadius:'50%',background:'rgba(255,255,255,.06)',pointerEvents:'none'}}></div>
+      <div style={{position:'absolute',bottom:-50,right:80,width:100,height:100,borderRadius:'50%',background:'rgba(255,255,255,.04)',pointerEvents:'none'}}></div>
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:'1rem'}}>
         <div>
           <div style={{fontSize:'.72rem',letterSpacing:'.1em',textTransform:'uppercase',color:'#FDBA74',marginBottom:'.3rem',fontWeight:600}}>Course Detail</div>
