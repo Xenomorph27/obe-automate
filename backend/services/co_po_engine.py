@@ -349,12 +349,29 @@ def rule_engine(cos: list, all_po_ids: list) -> dict:
 #     a cap of 1 prevents inflation while still recording a weak link.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_SOFT_POS = {"PO6", "PO7", "PO8", "PO9", "PO10", "PO11"}
+# PO6–PO11 are GATED — rule engine keyword gate is the ONLY authority.
+# AI output is completely ignored for these POs.
+# They stay 0 unless the CO text explicitly contains a gate keyword.
+_GATED_HARD = {"PO6", "PO7", "PO8", "PO9", "PO10", "PO11"}
+
+# PO1–PO5, PO12 — core technical POs where AI is a valid second opinion.
+_CORE_POS   = {"PO1", "PO2", "PO3", "PO4", "PO5", "PO12"}
 
 
 def merge_rule_ai(rule_map: dict, ai_map: dict, co_ids: list, all_po_ids: list) -> dict:
     """
     Merge rule-based and AI mappings into a final CO-PO matrix.
+
+    For PO6–PO11 (gated):
+        Rule engine result is FINAL. AI is ignored entirely.
+        This prevents the AI from inflating soft POs it has no evidence for.
+
+    For PO1–PO5, PO12 (core technical POs):
+        Both rule engine and AI are considered:
+        - Both 0          → 0 (no relationship)
+        - Rule 0, AI > 0  → take AI (AI found something rules missed)
+        - Rule > 0, AI 0  → take rule (rule anchor holds)
+        - Both > 0        → weighted blend: rules 60%, AI 40%, rounded
     """
     merged = {}
     for co_id in co_ids:
@@ -365,28 +382,25 @@ def merge_rule_ai(rule_map: dict, ai_map: dict, co_ids: list, all_po_ids: list) 
             rv = int(r.get(po, 0))
             av = int(a.get(po, 0))
 
-            if rv == 0 and av == 0:
-                # Both agree: no relationship
+            if po in _GATED_HARD:
+                # Hard gate: rule engine is sole authority. AI ignored.
+                val = rv
+
+            elif rv == 0 and av == 0:
                 val = 0
 
             elif rv == 0 and av > 0:
-                if po in _SOFT_POS:
-                    # AI says soft PO is relevant but rule gate wasn't triggered.
-                    # Accept with caution — cap at 1 (low).
-                    val = 1
-                else:
-                    # AI found something for a core PO that rules missed → trust AI
-                    val = av
+                # AI found something rules missed — trust AI for core POs
+                val = av
 
             elif rv > 0 and av == 0:
-                # Rules found a relationship, AI missed it → keep rules
+                # Rule anchor holds
                 val = rv
 
             else:
-                # Both say >0: weighted blend (rules 60%, AI 40%)
+                # Both agree there is a relationship — weighted blend
                 val = round(rv * 0.6 + av * 0.4)
 
-            # Clamp to valid range
             merged[co_id][po] = max(0, min(3, val))
 
     return merged
