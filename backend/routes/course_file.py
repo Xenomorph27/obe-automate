@@ -69,7 +69,7 @@ async def generate_course_file(
     """Generate the complete 13-section OBE course file as a Word document."""
     logger.info(f"Course file generation requested for course_id={course_id}")
     try:
-        svc = CourseFileService(db)
+        svc = CourseFileService(db, current_user=current_user)
         result = await svc.generate(course_id)
         return {"status": "success", "data": result}
     except OBEException as e:

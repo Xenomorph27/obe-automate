@@ -1797,8 +1797,9 @@ def _build_docx(data: dict) -> bytes:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CourseFileService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, current_user=None):
         self.db = db
+        self.current_user = current_user
 
     @staticmethod
     def get_filepath(course_id: int) -> str:
@@ -1853,14 +1854,20 @@ class CourseFileService:
                  "unit_no": getattr(q, "unit_no", None)} for q in qs]
 
     async def _get_timetable(self) -> dict:
-        """Pull the uploaded timetable from storage."""
+        """Pull the uploaded timetable from the current user DB record (dashboard upload)."""
+        try:
+            if self.current_user and getattr(self.current_user, "timetable_json", None):
+                return json.loads(self.current_user.timetable_json)
+        except Exception as e:
+            logger.warning(f"Could not read timetable from user record: {e}")
+        # Fallback: legacy file-based storage
         try:
             storage = get_storage()
             path = storage.get_path("timetables", "current_timetable.json")
             if path and Path(path).exists():
                 return json.loads(Path(path).read_text(encoding="utf-8"))
         except Exception as e:
-            logger.warning(f"Could not read timetable: {e}")
+            logger.warning(f"Could not read timetable from file storage: {e}")
         return {}
 
     async def _get_study_materials(self, course_id: int) -> dict:
