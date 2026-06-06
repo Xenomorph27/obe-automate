@@ -1041,14 +1041,14 @@ def _build_docx(data: dict) -> bytes:
             q_avgs = []
             for q in qp:
                 vals = [
-                    float((marks_data.get(s["prn"]) or {}).get(q.get("q_no"), 0) or 0)
+                    float((marks_data.get(s["prn"]) or {}).get(str(q.get("q_no","")), 0) or 0)
                     for s in students_list
                 ]
                 q_avgs.append(f"{sum(vals)/len(vals):.1f}" if vals else "—")
             all_totals = []
             for s in students_list:
                 mks = marks_data.get(s["prn"]) or {}
-                all_totals.append(sum(float(mks.get(q.get("q_no"),0) or 0) for q in qp))
+                all_totals.append(sum(float(mks.get(str(q.get("q_no","")),0) or 0) for q in qp))
             overall_avg = f"{sum(all_totals)/len(all_totals):.1f}" if all_totals else "—"
         else:
             q_avgs = ["0.0"] * len(qp)
@@ -1129,7 +1129,7 @@ def _build_docx(data: dict) -> bytes:
             row_vals = [str(ri+1), name]
             tot = 0.0
             for q in qp:
-                v = float(mks.get(q.get("q_no"), 0) or 0)
+                v = float(mks.get(str(q.get("q_no","")), 0) or 0)
                 row_vals.append(str(v) if has_real_marks and v else "")
                 tot += v
             row_vals.append(f"{tot:.1f}" if has_real_marks and tot else "")
@@ -1184,7 +1184,7 @@ def _build_docx(data: dict) -> bytes:
                 qp2        = ca.get("qp") or []
                 marks_data2 = ca.get("marks") or {}
                 mks         = marks_data2.get(prn) or {}
-                tot         = sum(float(mks.get(q.get("q_no"),0) or 0) for q in qp2)
+                tot         = sum(float(mks.get(str(q.get("q_no","")),0) or 0) for q in qp2)
                 row.append(f"{tot:.1f}" if tot else "")
                 grand += tot
             row.append(f"{grand:.1f}" if grand else "")
@@ -1693,7 +1693,7 @@ class CourseFileService:
                     continue
                 passed = sum(
                     1 for s in students
-                    if sum(float((marks_data.get(s["prn"]) or {}).get(q.get("q_no"), 0))
+                    if sum(float((marks_data.get(s["prn"]) or {}).get(str(q.get("q_no","")), 0))
                            for q in qp) / max_marks * 100 >= 60
                 )
                 total_pct += (passed / len(students)) * 100
@@ -1714,7 +1714,7 @@ class CourseFileService:
             if not total_marks:
                 continue
             for s in students:
-                obtained = sum(float((marks_data.get(s["prn"]) or {}).get(q.get("q_no"), 0))
+                obtained = sum(float((marks_data.get(s["prn"]) or {}).get(str(q.get("q_no","")), 0))
                                for q in qp)
                 if obtained > 0:
                     has_any_marks = True
