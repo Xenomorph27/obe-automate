@@ -247,9 +247,9 @@ _GATED_POS = [
     # Only if CO explicitly mentions project planning, management, or resources.
     (
         "PO11",
-        r"\b(project\w*|manag\w+|schedule|budget|resource|plan\w+|deliverable|"
-        r"milestone|agile|scrum|sprint|stakeholder|risk|cost|timeline|"
-        r"feasibility|procurement|leadership)\b",
+        r"\b(project.manag\w*|manag\w+.project|schedule|budget|resource.plan\w*|deliverable|"
+        r"milestone|agile|scrum|sprint|stakeholder|cost.estimat\w*|timeline|"
+        r"feasibility|procurement|leadership.in.project)\b",
         2
     ),
 ]
@@ -321,7 +321,7 @@ def rule_engine(cos: list, all_po_ids: list) -> dict:
     result = {}
     for co in cos:
         co_id = co["co_id"]
-        stmt  = co.get("co_statement", co.get("description", ""))
+        stmt  = co.get("co_statement") or co.get("statement") or co.get("description") or ""
         scores = _map_single_co(stmt)
         # Map to the exact PO ids requested; PSOs default 0 (AI fills them)
         result[co_id] = {po: scores.get(po, 0) for po in all_po_ids}

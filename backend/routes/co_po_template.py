@@ -261,7 +261,7 @@ async def ai_co_po_mapping(
     from backend.core.exceptions import LLMError
 
     co_text = "\n".join(
-        f"- {c['co_id']}: {c.get('co_statement', c.get('description', c['co_id']))}"
+        f"- {c['co_id']}: {c.get('co_statement') or c.get('statement') or c.get('description') or c['co_id']}"
         for c in body.cos
     )
     # Use full NBA standard PO descriptions regardless of what frontend sends
@@ -302,7 +302,7 @@ async def ai_co_po_mapping(
     co_analysis_lines = []
     for co in body.cos:
         cid  = co["co_id"]
-        stmt = co.get("co_statement", co.get("description", ""))
+        stmt = co.get("co_statement") or co.get("statement") or co.get("description") or ""
         co_analysis_lines.append(f"{cid}: \"{stmt}\"")
         co_analysis_lines.append(f"  -> For each PO ask: Does this CO explicitly require or develop the skill/knowledge described by that PO?")
         co_analysis_lines.append(f"  -> Assign 3 only if strongly and directly, 2 if moderately, 1 if peripherally, 0 if unrelated.")
