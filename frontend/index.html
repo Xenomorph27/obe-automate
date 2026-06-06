@@ -7449,6 +7449,8 @@ function MasterAttainmentPage({course}){
   const [eseQP,setEseQP]=React.useState([]);
   const [eseMarks,setEseMarks]=React.useState({});
   const [coPoMatrix,setCoPoMatrix]=React.useState({});
+  const [aiMappingLoading,setAiMappingLoading]=React.useState(false);
+  const [aiMappingMsg,setAiMappingMsg]=React.useState('');
   const [poList,setPoList]=React.useState([]);
   const [finalAttn,setFinalAttn]=React.useState({});
 
@@ -7472,6 +7474,7 @@ function MasterAttainmentPage({course}){
     setCoList((course.cos||[]).map(c=>({...c,target:60,bloom_level:normBloom(c.bloom_level)})));
     setPoList(course.pos||[]);
     setCoPoMatrix(course.co_po_matrix||{});
+    setAiMappingMsg('');
     // Load CA names from evaluation plan (matches real component names like "Quiz 1", "Unit Test 1", etc.)
     const loadCaNamesAndSheets=async()=>{
       let caList=[];
@@ -8578,6 +8581,49 @@ function MasterAttainmentPage({course}){
     );
   };
 
+  const runAiMapping=async()=>{
+    if(!course||!coList.length||!poList.length)return;
+    setAiMappingLoading(true);setAiMappingMsg('');
+    try{
+      const cos=coList.map(c=>({co_id:c.co_id,co_statement:c.co_statement||c.description||c.co_id}));
+      const pos=poList.map(p=>({po_id:p.po_id||p,po_statement:p.po_statement||p.description||p.po_id||p}));
+      const r=await fetch(API+'/co-po-template/ai-mapping/'+course.id,{
+        method:'POST',headers:{...hdrForm(),'Content-Type':'application/json'},
+        body:JSON.stringify({cos,pos,psos:[]})
+      });
+      const d=await r.json();
+      if(!r.ok)throw new Error(d.detail||'AI mapping failed');
+      const mapping=d.data||{};
+      // Merge into current matrix — only overwrite non-zero AI values
+      setCoPoMatrix(prev=>{
+        const next={...prev};
+        Object.entries(mapping).forEach(([coId,poMap])=>{
+          next[coId]={...(prev[coId]||{})};
+          Object.entries(poMap).forEach(([poId,val])=>{
+            if(val>0)next[coId][poId]=val;
+            else if(!(poId in (prev[coId]||{})))next[coId][poId]=0;
+          });
+        });
+        return next;
+      });
+      // Auto-save to course record
+      try{
+        const updated={...course,co_po_matrix:{...course.co_po_matrix,...mapping}};
+        await fetch(API+'/courses/'+course.id,{method:'PUT',
+          headers:{...hdrForm(),'Content-Type':'application/json'},
+          body:JSON.stringify({cos:course.cos,pos:course.pos,co_po_matrix:{...course.co_po_matrix,...mapping},
+            course_name:course.course_name,course_code:course.course_code,
+            department:course.department,semester:course.semester,
+            academic_year:course.academic_year,faculty_name:course.faculty_name,
+            credits:course.credits||3,total_hours:course.total_hours||45,
+            evaluation_config:course.evaluation_config||{}})});
+      }catch(e){console.warn('Auto-save failed',e);}
+      setAiMappingMsg('✅ AI mapping applied! Review and adjust as needed.');
+    }catch(e){
+      setAiMappingMsg('❌ '+e.message);
+    }finally{setAiMappingLoading(false);}
+  };
+
   const renderPOAttn=()=>{
     const poIds=poList.length?poList.map(p=>p.po_id||p):[...Array(12)].map((_,i)=>'PO'+(i+1));
     return(
@@ -8585,6 +8631,15 @@ function MasterAttainmentPage({course}){
         <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>🔗 CO-PO Mapping & PO Attainment</div>
         <div style={{background:'var(--bg2)',borderRadius:8,padding:'1rem',marginBottom:'1rem',fontSize:'.82rem',color:'var(--text2)'}}>
           Edit correlation weights (0 = none, 1 = low, 2 = medium, 3 = high). PO attainment is auto-calculated from CO attainment × weights.
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1rem',flexWrap:'wrap'}}>
+          <button className="btn btn-primary" onClick={runAiMapping} disabled={aiMappingLoading||!coList.length}
+            style={{background:'linear-gradient(135deg,#7c3aed,#4f46e5)',border:'none',display:'flex',alignItems:'center',gap:6,padding:'8px 18px',fontSize:'.83rem'}}>
+            {aiMappingLoading
+              ? <><Spin/> Generating AI Mapping…</>
+              : <><span style={{fontSize:'1rem'}}>✨</span> AI Suggest CO-PO Mapping</>}
+          </button>
+          {aiMappingMsg&&<span style={{fontSize:'.82rem',color:aiMappingMsg.startsWith('✅')?'var(--green)':'var(--red)'}}>{aiMappingMsg}</span>}
         </div>
         {!poList.length&&<Alrt t="warning" msg="No PO/PSO data found. Add POs in Course Setup → CO-PO Matrix, or the default PO1–PO12 columns are shown below."/>}
         <div className="tbl-wrap" style={{overflowX:'auto'}}>
@@ -8627,7 +8682,8 @@ function MasterAttainmentPage({course}){
                     const a=finalAttn[co.co_id];
                     return w&&a?{w,a}:null;
                   }).filter(Boolean);
-                  const a=vals.length?Math.round(vals.reduce((s,v)=>s+v.w*v.a,0)/(3*vals.length)):null;
+                  const sumW=vals.reduce((s,v)=>s+v.w,0);
+                  const a=sumW?Math.round(vals.reduce((s,v)=>s+v.w*v.a,0)/sumW):null;
                   return<td key={po} style={{padding:'7px',textAlign:'center',color:'#fff',fontWeight:700,fontSize:'.82rem'}}>{a!==null?a+'%':'—'}</td>;
                 })}
               </tr>
