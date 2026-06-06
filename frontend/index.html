@@ -8666,7 +8666,7 @@ function MasterAttainmentPage({course}){
     if(!course||!coList.length||!poList.length)return;
     setAiMappingLoading(true);setAiMappingMsg('');
     try{
-      const cos=coList.map(c=>({co_id:c.co_id,co_statement:c.co_statement||c.description||c.co_id}));
+      const cos=coList.map(c=>({co_id:c.co_id,co_statement:c.co_statement||c.statement||c.description||c.co_id}));
       const pos=poList.map(p=>({po_id:p.po_id||p,po_statement:p.po_statement||p.description||p.po_id||p}));
       const r=await fetch(API+'/co-po-template/ai-mapping/'+course.id,{
         method:'POST',headers:{...hdrForm(),'Content-Type':'application/json'},
