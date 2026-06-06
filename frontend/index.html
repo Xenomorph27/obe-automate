@@ -8687,8 +8687,8 @@ function MasterAttainmentPage({course}){
         });
         return next;
       });
-      // Auto-save to course record (merged matrix is already set in state; useEffect will persist it)
-      course.co_po_matrix={...coPoMatrix,...mapping};
+      // The coPoMatrix state update above is the source of truth.
+      // The auto-save useEffect will persist it to the backend automatically.
       setAiMappingMsg('✅ AI mapping applied! Review and adjust as needed.');
     }catch(e){
       setAiMappingMsg('❌ '+e.message);
