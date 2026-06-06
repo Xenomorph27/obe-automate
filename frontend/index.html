@@ -3483,7 +3483,7 @@ function StudyMaterialsPage({course}){
               <thead><tr><th>Sr.</th><th>Resource</th><th>Unit</th><th>Link</th><th>Source</th><th></th></tr></thead>
               <tbody>{all.map((w,i)=><tr key={w._id||w.id||i}>
                 <td style={{color:'var(--text3)'}}>{i+1}</td>
-                <td style={{fontWeight:500,fontSize:'.855rem'}}>{w.title||w.name||w.link||w}{w.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{w.note}</div>}</td>
+                <td style={{fontWeight:500,fontSize:'.855rem'}}>{w.title||w.name||w.link||w.url||"(no title)"}{w.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{w.note}</div>}</td>
                 <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{w.unit||w.module||'—'}</td>
                 <td>{(w.url||w.link_url||w.href)?<a href={w.url||w.link_url||w.href} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
                 <td>{w._isAI?<AiBadge/>:<UserBadge/>}</td>
@@ -3500,7 +3500,7 @@ function StudyMaterialsPage({course}){
               <thead><tr><th>Sr.</th><th>Title</th><th>DOI / URL</th><th>Source</th><th></th></tr></thead>
               <tbody>{all.map((j,i)=><tr key={j._id||j.id||i}>
                 <td style={{color:'var(--text3)'}}>{i+1}</td>
-                <td style={{fontWeight:500,fontSize:'.855rem'}}>{j.title||j.name||j}{j.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{j.note}</div>}</td>
+                <td style={{fontWeight:500,fontSize:'.855rem'}}>{j.title||j.name||j.url||"(no title)"}{j.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{j.note}</div>}</td>
                 <td>{(j.url||j.doi)?<a href={j.url||j.doi} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
                 <td>{j._isAI?<AiBadge/>:<UserBadge/>}</td>
                 <td><DelBtn onClick={()=>j._isAI?handleDelete(i,true,aiJournals,'journals'):handleDelete(j.id,false)}/></td>
@@ -3519,7 +3519,7 @@ function StudyMaterialsPage({course}){
                     {m._isAI?<AiBadge/>:<UserBadge/>}
                     <DelBtn onClick={()=>m._isAI?handleDelete(i,true,aiMoocs,'moocs'):handleDelete(m.id,false)}/>
                   </div>
-                  <div style={{fontWeight:600,fontSize:'.875rem',marginBottom:'.35rem',paddingRight:'4rem'}}>{m.title||m.name||m.course||m}</div>
+                  <div style={{fontWeight:600,fontSize:'.875rem',marginBottom:'.35rem',paddingRight:'4rem'}}>{m.title||m.name||m.course||m.url||"(no title)"}</div>
                   {m.platform&&<div style={{fontSize:'.78rem',color:'var(--blue2)',marginBottom:'.25rem'}}>{m.platform}</div>}
                   {m.duration&&<div style={{fontSize:'.75rem',color:'var(--text3)'}}>⏱ {m.duration}</div>}
                   {m.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',marginTop:'.25rem'}}>{m.note}</div>}
