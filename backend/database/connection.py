@@ -100,6 +100,8 @@ async def init_db():
         ("course_file_extra", "pso_text",             "TEXT DEFAULT ''"),
         ("course_file_extra", "student_list",         "TEXT DEFAULT ''"),
         ("course_file_extra", "custom_tabs",          "TEXT DEFAULT '[]'"),
+        # Timetable persisted per-user in DB (survives redeploys)
+        ("users",             "timetable_json",          "TEXT DEFAULT NULL"),
     ]
     async with engine.begin() as conn:
         for table, column, col_type in _new_columns:
