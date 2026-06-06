@@ -3,12 +3,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from backend.core.auth import require_auth
 from backend.database.user_models import User
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from backend.database.connection import get_db
 from backend.services.course_service import CourseService
 from backend.core.exceptions import OBEException
 from backend.core.logger import get_logger
+from backend.core.storage import get_storage
+from backend.database.models import CourseFileAttachment
+from backend.services.course_file_service import CourseFileService
 from pydantic import BaseModel, Field
 from typing import Dict, List
+import os
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/courses", tags=["Courses"])
@@ -149,3 +154,64 @@ async def update_course(
     except Exception as e:
         logger.exception("Unexpected error during course update")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.delete("/{course_id}")
+async def delete_course(
+    course_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """
+    Permanently delete a course and ALL associated data:
+    - DB rows (session plan, eval plan, marks, questions, attachments, course file extra) via CASCADE
+    - Generated .docx file from storage
+    - All uploaded attachment files from storage
+    """
+    logger.info(f"Delete request for course_id={course_id} by user={current_user.id}")
+
+    # 1. Verify course exists
+    service = CourseService(db)
+    try:
+        course = await service.get_course(course_id)
+    except OBEException as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+
+    storage = get_storage()
+
+    # 2. Delete generated .docx from storage
+    try:
+        docx_path = CourseFileService.get_filepath(course_id)
+        if os.path.exists(docx_path):
+            os.remove(docx_path)
+            logger.info(f"Deleted docx for course {course_id}: {docx_path}")
+    except Exception as e:
+        logger.warning(f"Could not delete docx for course {course_id}: {e}")
+
+    # 3. Delete all attachment files from storage
+    try:
+        result = await db.execute(
+            select(CourseFileAttachment).where(CourseFileAttachment.course_id == course_id)
+        )
+        attachments = result.scalars().all()
+        for att in attachments:
+            try:
+                if att.stored_path and os.path.exists(att.stored_path):
+                    os.remove(att.stored_path)
+                    logger.info(f"Deleted attachment file: {att.stored_path}")
+            except Exception as e:
+                logger.warning(f"Could not delete attachment {att.id}: {e}")
+    except Exception as e:
+        logger.warning(f"Error fetching attachments for course {course_id}: {e}")
+
+    # 4. Delete course DB row (cascades handle all child rows automatically)
+    try:
+        await db.delete(course)
+        await db.commit()
+        logger.info(f"Course {course_id} and all related DB data deleted.")
+    except Exception as e:
+        await db.rollback()
+        logger.exception(f"Failed to delete course {course_id} from DB")
+        raise HTTPException(status_code=500, detail="Failed to delete course from database")
+
+    return {"status": "success", "message": f"Course {course_id} and all associated data deleted."}

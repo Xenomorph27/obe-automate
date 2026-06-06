@@ -936,6 +936,9 @@ function CourseDetailPage({course,go,setCourse}){
   const [attData,setAttData]=useState(null);
   const [attLoading,setAttLoading]=useState(false);
   const [editMode,setEditMode]=useState(false);
+  const [showDeleteConfirm,setShowDeleteConfirm]=useState(false);
+  const [deleteInput,setDeleteInput]=useState('');
+  const [deleting,setDeleting]=useState(false);
   const [editF,setEditF]=useState({});
   const [editCos,setEditCos]=useState([]);
   const [saving,setSaving]=useState(false);
@@ -974,6 +977,21 @@ function CourseDetailPage({course,go,setCourse}){
   };
 
   if(!course)return(<div className="page-body fade-up"><Alrt t="warning" msg="Select a course from the Courses page."/></div>);
+  const handleDeleteCourse = async () => {
+    if(deleteInput !== course.course_code) return;
+    setDeleting(true);
+    try {
+      await api(`/courses/${course.id}`, {method:'DELETE'});
+      if(setCourse) setCourse(null);
+      go('courses');
+    } catch(e) {
+      alert('Failed to delete course. Please try again.');
+    } finally {
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
   const cos=editMode?editCos:(course.cos||[]);
   const pos=course.pos||[];
   const matrix=course.co_po_matrix||{};
@@ -1013,9 +1031,14 @@ function CourseDetailPage({course,go,setCourse}){
           </div>
         </div>
         <div style={{textAlign:'right',display:'flex',flexDirection:'column',alignItems:'flex-end',gap:'.4rem'}}>
-          <button onClick={()=>setEditMode(m=>!m)} style={{background:editMode?'rgba(234,88,12,.8)':'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',borderRadius:8,color:'#fff',padding:'5px 14px',cursor:'pointer',fontSize:'.8rem',fontWeight:600,fontFamily:'DM Sans,sans-serif'}}>
-            {editMode?'✕ Cancel Edit':'✎ Edit Course'}
-          </button>
+          <div style={{display:'flex',gap:'.5rem'}}>
+            <button onClick={()=>setEditMode(m=>!m)} style={{background:editMode?'rgba(234,88,12,.8)':'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',borderRadius:8,color:'#fff',padding:'5px 14px',cursor:'pointer',fontSize:'.8rem',fontWeight:600,fontFamily:'DM Sans,sans-serif'}}>
+              {editMode?'✕ Cancel Edit':'✎ Edit Course'}
+            </button>
+            <button onClick={()=>{setShowDeleteConfirm(true);setDeleteInput('');}} style={{background:'rgba(239,68,68,.25)',border:'1px solid rgba(239,68,68,.6)',borderRadius:8,color:'#fca5a5',padding:'5px 14px',cursor:'pointer',fontSize:'.8rem',fontWeight:600,fontFamily:'DM Sans,sans-serif'}}>
+              🗑 Delete
+            </button>
+          </div>
           <div style={{fontSize:'.78rem',color:'#FDBA74'}}>Faculty</div>
           <div style={{fontWeight:700,fontSize:'1rem'}}>{course.faculty_name}</div>
           <div style={{fontSize:'.78rem',color:'#FFEDD5'}}>{course.department}</div>
@@ -1023,6 +1046,36 @@ function CourseDetailPage({course,go,setCourse}){
         </div>
       </div>
     </div>
+
+    {/* ── Delete Confirmation Modal ── */}
+    {showDeleteConfirm&&<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowDeleteConfirm(false)}>
+      <div style={{background:'var(--bg1)',borderRadius:16,padding:'2rem',maxWidth:420,width:'90%',border:'2px solid #ef4444'}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontSize:'1.2rem',fontWeight:700,color:'#ef4444',marginBottom:'.75rem'}}>⚠️ Delete Course</div>
+        <div style={{fontSize:'.9rem',color:'var(--text1)',marginBottom:'1.2rem',lineHeight:1.6}}>
+          This will <strong>permanently delete</strong> the course <strong>{course.course_name}</strong> and all associated data including session plan, evaluation plan, marks, question bank, generated docx and all uploaded files.<br/><br/>
+          Type <strong style={{color:'#ef4444'}}>{course.course_code}</strong> to confirm:
+        </div>
+        <input
+          value={deleteInput}
+          onChange={e=>setDeleteInput(e.target.value)}
+          placeholder={course.course_code}
+          style={{width:'100%',padding:'.6rem .8rem',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg2)',color:'var(--text1)',fontSize:'.9rem',marginBottom:'1rem',boxSizing:'border-box'}}
+          autoFocus
+        />
+        <div style={{display:'flex',gap:'.75rem',justifyContent:'flex-end'}}>
+          <button onClick={()=>setShowDeleteConfirm(false)} style={{padding:'.5rem 1.2rem',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg2)',color:'var(--text1)',cursor:'pointer',fontFamily:'DM Sans,sans-serif',fontWeight:600}}>
+            Cancel
+          </button>
+          <button
+            onClick={handleDeleteCourse}
+            disabled={deleteInput!==course.course_code||deleting}
+            style={{padding:'.5rem 1.2rem',borderRadius:8,border:'none',background:deleteInput===course.course_code?'#ef4444':'#6b2020',color:'#fff',cursor:deleteInput===course.course_code?'pointer':'not-allowed',opacity:deleteInput===course.course_code?1:0.5,fontFamily:'DM Sans,sans-serif',fontWeight:700}}
+          >
+            {deleting?'Deleting…':'Delete Forever'}
+          </button>
+        </div>
+      </div>
+    </div>}
 
     {/* ── Edit Mode Panel ── */}
     {editMode&&<div className="card card-p" style={{marginBottom:'1.5rem',border:'2px solid var(--blue2)'}}>
