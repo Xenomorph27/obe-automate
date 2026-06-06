@@ -264,8 +264,24 @@ async def ai_co_po_mapping(
         f"- {c['co_id']}: {c.get('co_statement', c.get('description', c['co_id']))}"
         for c in body.cos
     )
+    # Use full NBA standard PO descriptions regardless of what frontend sends
+    # This gives the AI real content to reason against instead of empty labels
+    _NBA_PO = {
+        "PO1":  "Engineering Knowledge: Apply knowledge of mathematics, science, engineering fundamentals to solve complex engineering problems.",
+        "PO2":  "Problem Analysis: Identify, formulate, review research literature, and analyze complex engineering problems to reach substantiated conclusions.",
+        "PO3":  "Design/Development of Solutions: Design solutions for complex engineering problems and design systems/components/processes that meet specifications with societal and environmental considerations.",
+        "PO4":  "Conduct Investigations of Complex Problems: Use research-based knowledge and methods including design of experiments, analysis and interpretation of data to provide valid conclusions.",
+        "PO5":  "Modern Tool Usage: Create, select, and apply appropriate techniques, resources, and modern engineering and IT tools including prediction and modelling for complex activities.",
+        "PO6":  "The Engineer and Society: Apply reasoning informed by contextual knowledge to assess societal, health, safety, legal and cultural issues relevant to professional engineering practice.",
+        "PO7":  "Environment and Sustainability: Understand the impact of professional engineering solutions in societal and environmental contexts and demonstrate knowledge of sustainable development.",
+        "PO8":  "Ethics: Apply ethical principles and commit to professional ethics, responsibilities, and norms of engineering practice.",
+        "PO9":  "Individual and Team Work: Function effectively as an individual, and as a member or leader in diverse teams and multidisciplinary settings.",
+        "PO10": "Communication: Communicate effectively on complex engineering activities with engineering community and society at large — reports, documentation, presentations.",
+        "PO11": "Project Management and Finance: Demonstrate knowledge and understanding of engineering and management principles and apply them to manage projects in multidisciplinary environments.",
+        "PO12": "Life-long Learning: Recognize the need for and engage in independent and life-long learning in the broadest context of technological change.",
+    }
     po_text = "\n".join(
-        f"- {p['po_id']}: {p.get('po_statement', p.get('description', p.get('po_id', '')))}"
+        f"- {p['po_id']}: {_NBA_PO.get(p['po_id'], p.get('po_statement', p.get('description', p.get('po_id', ''))))}"
         for p in body.pos
     )
     pso_text = "\n".join(
@@ -293,55 +309,77 @@ async def ai_co_po_mapping(
         co_analysis_lines.append("")
     co_analysis = "\n".join(co_analysis_lines)
 
-    prompt = f"""You are a senior NBA/NAAC accreditation consultant analyzing Course Outcomes (COs) and Program Outcomes (POs) for an engineering course.
+    prompt = f"""You are a senior NBA/NAAC accreditation expert. Your job is to produce a justified, academically rigorous CO-PO mapping for an engineering course.
 
-Your task: For EACH CO, independently evaluate its relationship with EVERY PO/PSO and assign a strength value.
-
-STRENGTH SCALE (NBA standard):
-3 = HIGH   — The CO directly and substantially addresses this PO. The CO cannot be achieved without this PO skill.
-2 = MEDIUM — The CO moderately contributes to this PO. There is clear but partial overlap.
-1 = LOW    — The CO has minor or indirect relevance to this PO.
-0 = NONE   — No meaningful relationship between this CO and PO.
-
-CRITICAL RULES — follow strictly:
-- Analyze each CO INDEPENDENTLY based on its actual statement. Do NOT assign a diagonal or sequential pattern.
-- Most COs will have 0 for many POs — that is correct and expected.
-- PO1 (Engineering Knowledge) is relevant to almost all COs in a technical course.
-- PO2 (Problem Analysis) applies to COs involving analysis, comparison, classification.
-- PO3 (Design/Solutions) applies to COs involving modeling, designing, implementing.
-- PO4 (Investigation) applies to COs involving experiments, data analysis, comparative studies.
-- PO5 (Modern Tools) applies to COs that require software, frameworks, or computational tools.
-- PO6 (Engineer & Society) rarely applies unless CO explicitly mentions societal/ethical impact.
-- PO7 (Environment) applies only if CO explicitly mentions sustainability or environmental context.
-- PO8 (Ethics) applies only if CO explicitly involves ethical reasoning.
-- PO9 (Teamwork) applies only if CO explicitly involves group/team activities.
-- PO10 (Communication) applies only if CO explicitly involves reports, presentations, documentation.
-- PO11 (Project Mgmt) applies only if CO involves managing a project or resources.
-- PO12 (Lifelong Learning) applies broadly to all COs at level 1 since any learning supports this.
-
-COURSE OUTCOMES TO ANALYZE:
+=== COURSE OUTCOMES ===
 {co_text}
 
-PROGRAM OUTCOMES:
+=== PROGRAM OUTCOMES ===
 {po_text}
 {pso_block}
 
-ANALYSIS GUIDE (reason through each CO before assigning):
+=== YOUR TASK ===
+For every CO, assign a mapping strength (0/1/2/3) to every PO by following this exact reasoning process:
+
+STEP 1 — Read each CO statement carefully. Identify the ACTION VERB and SUBJECT MATTER.
+  - "Explain" = knowledge recall and comprehension → strong PO1, moderate PO2
+  - "Describe" = conceptual understanding → strong PO1, moderate PO2
+  - "Discuss" = analysis and evaluation → strong PO1, strong PO2
+  - "Design/Implement/Develop" = solution building → strong PO1, PO2, PO3
+  - "Investigate/Analyze/Compare" = research skills → PO1, PO2, PO4
+  - "Apply/Use tools/software" = modern tools → PO5
+  - "Understand deep learning/neural networks" = tools + design → PO1, PO3, PO5
+
+STEP 2 — For each PO, ask: "Does THIS CO's content require THIS skill to achieve it?"
+  PO1 (Engineering Knowledge): Is domain knowledge required? → Yes for almost all technical COs = 3
+  PO2 (Problem Analysis): Does the CO involve analyzing, comparing, or reasoning about systems? → 2-3 if yes
+  PO3 (Design Solutions): Does the CO involve building, designing, or implementing something? → 2-3 if yes
+  PO4 (Investigation): Does the CO involve experiments, data analysis, or research methods? → 1-2 if yes
+  PO5 (Modern Tool Usage): Does achieving this CO require using software, frameworks, or computational tools? → 1-3 if yes
+  PO6 (Engineer & Society): Does the CO explicitly address societal impact? → 0 unless stated
+  PO7 (Environment): Does the CO address sustainability or environmental concerns? → 0 unless stated
+  PO8 (Ethics): Does the CO involve ethical decision-making? → 0 unless stated
+  PO9 (Individual/Team Work): Does the CO involve collaborative work explicitly? → 0 unless stated
+  PO10 (Communication): Does the CO require producing reports, presentations, or documentation? → 0 unless stated
+  PO11 (Project Management): Does the CO involve managing resources or a project? → 0 unless stated
+  PO12 (Life-long Learning): All COs support ongoing learning = 1 universally
+
+STEP 3 — MANDATORY COVERAGE CHECK before finalizing:
+  - Every CO must map to AT LEAST 2-3 POs with value > 0
+  - PO1 should be 3 for almost every technical CO
+  - PO12 must be 1 for every CO
+  - PO2 should be ≥1 for any CO with analytical verbs (explain, describe, discuss, analyze)
+  - PO5 should be ≥1 for any CO involving algorithms, deep learning, or computational methods
+  - PO6, PO7, PO8, PO9, PO10, PO11 = 0 unless the CO statement explicitly mentions those domains
+
+STEP 4 — ANTI-PATTERN CHECK:
+  WRONG: CO1→PO1 only, CO2→PO2 only, CO3→PO3 only (diagonal — forbidden)
+  WRONG: All COs identical mapping (copy-paste — forbidden)
+  RIGHT: Each CO has a unique profile based on its verb and subject matter
+
+=== ANALYSIS FOR THIS COURSE ===
 {co_analysis}
 
-OUTPUT FORMAT: Return ONLY a valid JSON object. No markdown. No explanation. No code fences.
-Every CO must list every PO. Use 0 for no mapping.
+=== OUTPUT ===
+Return ONLY a valid JSON object. No markdown, no explanation, no code fences.
+Every CO must list every PO. Values must be 0, 1, 2, or 3.
 {{
-  "CO1": {{"PO1": 0, "PO2": 0, "PO3": 0, "PO4": 0, "PO5": 0, "PO6": 0, "PO7": 0, "PO8": 0, "PO9": 0, "PO10": 0, "PO11": 0, "PO12": 0}},
-  ...all COs...
+  "CO1": {{"PO1": 3, "PO2": 2, "PO3": 0, "PO4": 0, "PO5": 1, "PO6": 0, "PO7": 0, "PO8": 0, "PO9": 0, "PO10": 0, "PO11": 0, "PO12": 1}},
+  ...
 }}
 COs required: {co_ids_str}
 POs required: {po_ids_str}"""
 
+    # ── Step 1: Rule engine (deterministic, always runs) ────────────────────
+    from backend.services.co_po_engine import rule_engine, merge_rule_ai
+    rule_map = rule_engine(body.cos, all_po_ids)
+    logger.info(f"Rule engine mapping for course_id={course_id}: {list(rule_map.keys())}")
+
+    # ── Step 2: AI layer (validates + fills gaps) ────────────────────────────
+    ai_map = {}
     try:
         text = await get_llm_response(prompt)
 
-        # Strip accidental markdown fences
         text = text.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
@@ -349,24 +387,32 @@ POs required: {po_ids_str}"""
                 text = text.lstrip()[4:]
         text = text.strip()
 
-        # Find the JSON object in the response
         start = text.find("{")
         end   = text.rfind("}") + 1
         if start == -1 or end == 0:
-            raise ValueError("No JSON object found in LLM response")
-        mapping = _json.loads(text[start:end])
+            raise ValueError("No JSON object in LLM response")
+        raw_ai = _json.loads(text[start:end])
 
-        # Ensure all values are integers and all CO/PO keys present
-        clean = {}
+        # Normalise AI output — integers, all CO/PO keys present
         for co_id in co_ids:
-            co_map = mapping.get(co_id, {})
-            clean[co_id] = {po: int(co_map.get(po, 0)) for po in all_po_ids}
+            co_map = raw_ai.get(co_id, {})
+            ai_map[co_id] = {po: int(co_map.get(po, 0)) for po in all_po_ids}
 
-        logger.info(f"AI CO-PO mapping generated for course_id={course_id}: {list(clean.keys())}")
-        return {"status": "success", "data": clean}
+        logger.info(f"AI mapping received for course_id={course_id}")
 
     except LLMError as e:
-        raise HTTPException(status_code=503, detail=f"No LLM provider available: {str(e)}. Configure GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY.")
+        logger.warning(f"LLM unavailable for course_id={course_id}: {e} — using rule engine only")
     except Exception as e:
-        logger.exception(f"AI CO-PO mapping failed for course_id={course_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"AI mapping failed: {str(e)}")
+        logger.warning(f"AI mapping failed for course_id={course_id}: {e} — using rule engine only")
+
+    # ── Step 3: Merge — rules anchor, AI adjusts within ±1 ──────────────────
+    if ai_map:
+        final = merge_rule_ai(rule_map, ai_map, co_ids, all_po_ids)
+        source = "rule_engine + AI"
+    else:
+        # AI unavailable — rule engine alone (still good)
+        final = rule_map
+        source = "rule_engine_only"
+
+    logger.info(f"CO-PO mapping final ({source}) for course_id={course_id}: {list(final.keys())}")
+    return {"status": "success", "data": final, "source": source}
