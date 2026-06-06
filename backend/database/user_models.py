@@ -6,7 +6,7 @@ Added separately to avoid breaking existing models.py
 Imported in init_db() via models.py.
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
 from backend.database.connection import Base
 
 
@@ -23,6 +23,7 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     last_login = Column(DateTime(timezone=True), nullable=True)
+    timetable_json = Column(Text, nullable=True, default=None)  # persisted per-user timetable
 
     def to_dict(self):
         return {

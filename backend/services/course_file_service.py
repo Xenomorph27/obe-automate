@@ -1352,7 +1352,7 @@ def _build_docx(data: dict) -> bytes:
     doc.add_paragraph()
 
     # PO-level attainment matrix
-    if co_attainment and co_po_matrix and cos_list:
+    if co_attainment and cos_list:
         _heading2(doc, "PO / PSO Attainment")
         po_ids_att = [f"PO{i}" for i in range(1, 13)] + ["PSO1", "PSO2"]
 
@@ -1360,7 +1360,15 @@ def _build_docx(data: dict) -> bytes:
         def _effective_mapping(co_id):
             if use_standard_mapping:
                 return _STANDARD_CO_PO.get(co_id, {})
-            return co_po_matrix.get(co_id) or {}
+            return (co_po_matrix or {}).get(co_id) or {}
+
+        # Build CO attainment levels (convert % to 1/2/3 scale)
+        # Formula from reference doc: ≥70% → 3, ≥40% → 2, else → 1
+        def _co_level(co_id):
+            pct = co_attainment.get(co_id)
+            if not pct:
+                return None
+            return 3 if pct >= 70 else (2 if pct >= 40 else 1)
 
         po_att_rows = []
         for co in cos_list:
@@ -1371,27 +1379,58 @@ def _build_docx(data: dict) -> bytes:
                 return str(v) if v and str(v) not in ("0","") else ""
             po_att_rows.append([_gm(pid) for pid in po_ids_att])
 
-        po_weighted = []
+        # PO attainment = weighted avg of (CO_level × CO_PO_strength) for mapped COs
+        # weighted by CO_PO_strength, per NBA/NAAC standard formula
+        po_attainment_vals = []
         for idx, pid in enumerate(po_ids_att):
-            vals, weights = [], []
+            numerator, denominator = 0.0, 0.0
             for co, row_vals in zip(cos_list, po_att_rows):
-                co_id = co.get("co_id","")
-                pct   = co_attainment.get(co_id)
-                m_val = row_vals[idx]
-                if m_val and pct:
+                co_id  = co.get("co_id","")
+                level  = _co_level(co_id)
+                m_str  = row_vals[idx]
+                if m_str and level is not None:
                     try:
-                        vals.append(float(m_val) * pct / 100)
-                        weights.append(float(m_val))
+                        strength = float(m_str)
+                        if strength > 0:
+                            numerator   += level * strength
+                            denominator += strength
                     except (ValueError, TypeError):
                         pass
-            po_weighted.append(f"{sum(vals)/max(sum(weights),1):.2f}" if weights else "-")
+            po_attainment_vals.append(f"{numerator/denominator:.2f}" if denominator > 0 else "-")
 
-        att2_headers = [""] + po_ids_att
+        # Row 1: CO-PO mapping strengths (from database / AI / standard)
+        att2_headers = ["CO"] + po_ids_att
         att2_rows    = [[co.get("co_id","")] + row_vals for co, row_vals in zip(cos_list, po_att_rows)]
-        att2_rows.append(["Weighted Avg"] + po_weighted)
+
+        # Row 2: CO attainment levels
+        level_row = ["CO Att. Level"]
+        for co in cos_list:
+            lv = _co_level(co.get("co_id",""))
+            level_row.append(str(lv) if lv else "-")
+        # pad level row to match columns (one value per CO, not per PO — different shape)
+        # Instead: show CO attainment % in a separate summary row
+        co_pct_row = ["CO Att %"]
+        for co in cos_list:
+            pct = co_attainment.get(co.get("co_id",""))
+            co_pct_row.append(f"{pct:.1f}%" if pct else "-")
+
+        att2_rows.append(["PO Attainment"] + po_attainment_vals)
+
         n_po     = len(po_ids_att)
         col_w_po = [1.5] + [round(14.5/max(n_po,1), 2)]*n_po
         _make_table(doc, att2_headers, att2_rows, col_w_po)
+
+        # CO attainment summary table
+        doc.add_paragraph()
+        _heading2(doc, "CO Attainment Summary")
+        co_summary_headers = ["CO"] + [co.get("co_id","") for co in cos_list]
+        pct_vals = [f"{co_attainment.get(co.get('co_id',''), 0):.1f}%" if co_attainment.get(co.get('co_id','')) else "-"
+                    for co in cos_list]
+        level_vals = [str(_co_level(co.get("co_id",""))) if _co_level(co.get("co_id","")) else "-"
+                      for co in cos_list]
+        co_sum_rows = [["Attainment %"] + pct_vals, ["Level (1/2/3)"] + level_vals]
+        col_w_sum = [2.5] + [round(12.5/max(len(cos_list),1), 2)]*len(cos_list)
+        _make_table(doc, co_summary_headers, co_sum_rows, col_w_sum)
 
     # ── 10. Activity Reports ──────────────────────────────────────────────────
     _section_title(doc, 10, "The reports of the activities planned and conducted")

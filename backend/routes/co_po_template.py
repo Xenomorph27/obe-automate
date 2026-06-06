@@ -237,3 +237,95 @@ async def upload_question_paper(
         "message":   f"Parsed {len(questions)} questions from {file.filename}. "
                      f"Re-generate the template with qp_source='question_bank' to include them.",
     }
+
+
+class AICOPORequest(BaseModel):
+    cos: list  # list of {co_id, co_statement}
+    pos: list  # list of {po_id, po_statement}
+    psos: list = []  # list of {pso_id, pso_statement}
+
+
+@router.post("/ai-mapping/{course_id}", status_code=200)
+async def ai_co_po_mapping(
+    course_id: int,
+    body: AICOPORequest,
+    current_user: User = Depends(require_auth),
+):
+    """
+    Use Claude AI to generate CO-PO mapping values (0, 1, 2, or 3) based on
+    CO statements and PO/PSO descriptions.
+    Returns {co_id: {po_id: strength}} for each CO.
+    Strength: 0=no mapping, 1=low, 2=medium, 3=high.
+    """
+    import httpx
+
+    co_text = "\n".join(
+        f"- {c['co_id']}: {c.get('co_statement','')}" for c in body.cos
+    )
+    po_text = "\n".join(
+        f"- {p['po_id']}: {p.get('po_statement', p.get('description',''))}" for p in body.pos
+    )
+    pso_text = "\n".join(
+        f"- {p['pso_id']}: {p.get('pso_statement', p.get('description',''))}" for p in body.psos
+    ) if body.psos else ""
+
+    prompt = f"""You are an expert in NBA/NAAC accreditation for engineering courses.
+Given the Course Outcomes (COs) and Program Outcomes (POs/PSOs) below, determine the mapping strength for each CO-PO pair.
+
+Mapping strength:
+- 3 = High (CO directly addresses and strongly contributes to PO)
+- 2 = Medium (CO moderately contributes to PO)
+- 1 = Low (CO slightly relates to PO)
+- 0 = No mapping (CO has no relation to PO)
+
+Course Outcomes:
+{co_text}
+
+Program Outcomes (POs):
+{po_text}
+{"Program Specific Outcomes (PSOs):" + chr(10) + pso_text if pso_text else ""}
+
+Return ONLY a valid JSON object. No explanation, no markdown, no code fences.
+Format exactly:
+{{
+  "CO1": {{"PO1": 3, "PO2": 2, "PO3": 0, ..., "PSO1": 3, "PSO2": 2}},
+  "CO2": {{"PO1": 2, ...}},
+  ...
+}}
+
+Include ALL POs (PO1 through PO12) and all PSOs in every CO row, even if the value is 0.
+Only use integers 0, 1, 2, or 3."""
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": os.environ.get("ANTHROPIC_API_KEY", ""),
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 2000,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+        resp.raise_for_status()
+        result = resp.json()
+        text = result["content"][0]["text"].strip()
+
+        # Strip any accidental markdown fences
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        text = text.strip()
+
+        mapping = __import__("json").loads(text)
+        logger.info(f"AI CO-PO mapping generated for course_id={course_id}: {list(mapping.keys())}")
+        return {"status": "success", "data": mapping}
+
+    except Exception as e:
+        logger.exception(f"AI CO-PO mapping failed for course_id={course_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"AI mapping failed: {str(e)}")

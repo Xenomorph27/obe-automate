@@ -126,17 +126,21 @@ async def get_department_dashboard(db: AsyncSession = Depends(get_db), current_u
 @router.post("/timetable/upload", status_code=201)
 async def upload_timetable(
     file: UploadFile = File(..., description="Individual timetable .docx file"),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Upload faculty individual timetable (.docx). Parses and stores it."""
+    """Upload faculty individual timetable (.docx). Parses and stores it in the DB (persists across sessions)."""
     if not file.filename.endswith('.docx'):
         raise HTTPException(status_code=400, detail="Only .docx files are supported.")
     try:
         file_bytes = await file.read()
         timetable = parse_timetable_docx(file_bytes)
-        storage = get_storage()
-        storage.save("timetables", "current_timetable.json", json.dumps(timetable, ensure_ascii=False, indent=2).encode())
-        logger.info(f"Timetable uploaded: {timetable.get('faculty_name','Unknown')}")
+        timetable_str = json.dumps(timetable, ensure_ascii=False, indent=2)
+        # Persist in user row — survives redeploys, no external storage needed
+        current_user.timetable_json = timetable_str
+        await db.commit()
+        await db.refresh(current_user)
+        logger.info(f"Timetable uploaded for user_id={current_user.id}: {timetable.get('faculty_name','Unknown')}")
         return {"status": "success", "data": timetable}
     except HTTPException:
         raise
@@ -148,14 +152,15 @@ async def upload_timetable(
 
 
 @router.get("/timetable")
-async def get_timetable(current_user: User = Depends(require_auth)):
-    """Get the currently uploaded timetable. Returns null if none uploaded."""
+async def get_timetable(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Get the currently uploaded timetable for this user. Returns null if none uploaded."""
     try:
-        storage = get_storage()
-        path = storage.get_path("timetables", "current_timetable.json")
-        if not path:
-            return {"status": "success", "data": None}
-        return {"status": "success", "data": json.loads(path.read_text(encoding="utf-8"))}
+        if current_user.timetable_json:
+            return {"status": "success", "data": json.loads(current_user.timetable_json)}
+        return {"status": "success", "data": None}
     except Exception:
         logger.exception("Error reading timetable")
         return {"status": "success", "data": None}
