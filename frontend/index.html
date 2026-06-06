@@ -1049,7 +1049,7 @@ function CourseDetailPage({course,go,setCourse}){
 
     {/* ── Delete Confirmation Modal ── */}
     {showDeleteConfirm&&<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowDeleteConfirm(false)}>
-      <div style={{background:'var(--bg1)',borderRadius:16,padding:'2rem',maxWidth:420,width:'90%',border:'2px solid #ef4444'}} onClick={e=>e.stopPropagation()}>
+      <div style={{background:'#1a1a1a',borderRadius:16,padding:'2rem',maxWidth:420,width:'90%',border:'2px solid #ef4444',boxShadow:'0 25px 60px rgba(0,0,0,.8)'}} onClick={e=>e.stopPropagation()}>
         <div style={{fontSize:'1.2rem',fontWeight:700,color:'#ef4444',marginBottom:'.75rem'}}>⚠️ Delete Course</div>
         <div style={{fontSize:'.9rem',color:'var(--text1)',marginBottom:'1.2rem',lineHeight:1.6}}>
           This will <strong>permanently delete</strong> the course <strong>{course.course_name}</strong> and all associated data including session plan, evaluation plan, marks, question bank, generated docx and all uploaded files.<br/><br/>
