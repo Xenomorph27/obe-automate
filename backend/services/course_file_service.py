@@ -1513,19 +1513,83 @@ def _build_docx(data: dict) -> bytes:
 
     # ── 11. Learning Material ─────────────────────────────────────────────────
     _section_title(doc, 11, "Learning Material.")
-    mat11      = data.get("study_materials") or {}
-    tb11       = mat11.get("textbooks") or []
-    ref11      = mat11.get("reference_books") or mat11.get("references") or []
-    web11      = mat11.get("web_links") or mat11.get("web") or []
-    jour11     = mat11.get("journals") or []
-    mooc11     = mat11.get("moocs") or []
-    art11      = mat11.get("research_articles") or []
-    has_any11  = any([tb11, ref11, web11, jour11, mooc11, art11])
+
+    # Parse the raw learning_material_links text into structured categories
+    def _parse_learning_materials(raw: str):
+        """
+        Parse newline-separated learning material entries into typed buckets.
+        Detects: Textbook, Journal, MOOC/Coursera/NPTEL platform, research articles, web links.
+        """
+        import re as _re
+        tb, web, jour, mooc, art = [], [], [], [], []
+        for line in raw.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            lo = line.lower()
+            # Extract URL if present inline
+            url_match = _re.search(r"https?://\S+", line)
+            url  = url_match.group(0) if url_match else ""
+            text = line.replace(url, "").strip(" —:-") if url else line
+
+            if lo.startswith("textbook"):
+                # "Textbook: Title — Author, Publisher"  or  "Textbook: Title"
+                body = _re.sub(r"^textbook\s*[:\-]?\s*", "", line, flags=_re.IGNORECASE).strip()
+                parts = _re.split(r"\s*[—–-]{1,2}\s*", body, maxsplit=1)
+                title = parts[0].strip()
+                rest  = parts[1].strip() if len(parts) > 1 else ""
+                # Try to split author, publisher by last comma
+                if "," in rest:
+                    idx = rest.rfind(",")
+                    author    = rest[:idx].strip()
+                    publisher = rest[idx+1:].strip()
+                else:
+                    author, publisher = rest, ""
+                tb.append({"title": title, "author": author, "publisher": publisher})
+
+            elif any(k in lo for k in ["journal:", "journal of ", "ieee ", "transactions on", "pattern recognition"]):
+                title = _re.sub(r"^journal\s*[:\-]?\s*", "", line, flags=_re.IGNORECASE).strip()
+                jour.append({"title": title})
+
+            elif any(k in lo for k in ["coursera", "nptel", "edx", "udemy", "swayam", "mit-ocw", "mooc"]):
+                platform = ("Coursera" if "coursera" in lo else
+                            "NPTEL"    if "nptel"    in lo else
+                            "edX"      if "edx"      in lo else
+                            "Udemy"    if "udemy"    in lo else
+                            "SWAYAM"   if "swayam"   in lo else "Online")
+                mooc.append({"title": text or line, "platform": platform, "duration": "", "certificate": "Y", "url": url})
+
+            elif any(k in lo for k in ["arxiv", "et al", "generative", "variational", "tutorial on", "review"]):
+                art.append({"title": text or line, "url": url})
+
+            else:
+                # Generic web link or reference
+                web.append({"title": text or line, "url": url, "unit": ""})
+
+        return tb, web, jour, mooc, art
+
+    # Prefer structured study_materials; fall back to parsing raw text
+    mat11  = data.get("study_materials") or {}
+    tb11   = mat11.get("textbooks") or []
+    ref11  = mat11.get("reference_books") or mat11.get("references") or []
+    web11  = mat11.get("web_links") or mat11.get("web") or []
+    jour11 = mat11.get("journals") or []
+    mooc11 = mat11.get("moocs") or []
+    art11  = mat11.get("research_articles") or []
+
+    raw_links = (data.get("learning_material_links") or "").strip()
+    if raw_links and not any([tb11, ref11, web11, jour11, mooc11, art11]):
+        _ptb, _pweb, _pjour, _pmooc, _part = _parse_learning_materials(raw_links)
+        tb11   = _ptb
+        web11  = _pweb
+        jour11 = _pjour
+        mooc11 = _pmooc
+        art11  = _part
 
     if tb11 or ref11:
         _heading2(doc, "Textbooks & Reference books/ Beyond Gaps")
         _make_table(doc, ["Book", "Author", "Publisher"],
-                    [[b.get("title", b.get("book","") if isinstance(b,dict) else str(b)),
+                    [[b.get("title", str(b) if not isinstance(b,dict) else ""),
                       b.get("author","") if isinstance(b,dict) else "",
                       b.get("publisher","") if isinstance(b,dict) else ""]
                      for b in (tb11 + ref11)],
@@ -1569,19 +1633,7 @@ def _build_docx(data: dict) -> bytes:
                      for i, a in enumerate(art11)],
                     [1.0, 9.0, 6.0])
 
-    # Fallback: raw links if no structured data available
-    if not has_any11 and data.get("learning_material_links"):
-        for link in data["learning_material_links"].split("\n"):
-            link = link.strip()
-            if link:
-                p = doc.add_paragraph()
-                p.paragraph_format.space_before = Pt(2)
-                p.paragraph_format.space_after  = Pt(2)
-                run = p.add_run(link)
-                run.font.color.rgb = _rgb((5, 99, 193))
-                run.underline = True
-                run.font.size = Pt(10)
-    elif not has_any11:
+    if not any([tb11, ref11, web11, jour11, mooc11, art11]):
         _add_para(doc, "[Learning material not yet entered.]", color=(136, 136, 136))
 
     # ── 12. Question Bank ─────────────────────────────────────────────────────
