@@ -309,7 +309,7 @@ async def ai_co_po_mapping(
         co_analysis_lines.append("")
     co_analysis = "\n".join(co_analysis_lines)
 
-    prompt = f"""You are a senior NBA/NAAC accreditation expert. Your job is to produce a justified, academically rigorous CO-PO mapping for an engineering course.
+    prompt = f"""You are a senior NBA/NAAC accreditation expert producing a CO-PO mapping for an engineering course.
 
 === COURSE OUTCOMES ===
 {co_text}
@@ -318,55 +318,62 @@ async def ai_co_po_mapping(
 {po_text}
 {pso_block}
 
-=== YOUR TASK ===
-For every CO, assign a mapping strength (0/1/2/3) to every PO by following this exact reasoning process:
+=== MAPPING RULES (follow exactly) ===
 
-STEP 1 — Read each CO statement carefully. Identify the ACTION VERB and SUBJECT MATTER.
-  - "Explain" = knowledge recall and comprehension → strong PO1, moderate PO2
-  - "Describe" = conceptual understanding → strong PO1, moderate PO2
-  - "Discuss" = analysis and evaluation → strong PO1, strong PO2
-  - "Design/Implement/Develop" = solution building → strong PO1, PO2, PO3
-  - "Investigate/Analyze/Compare" = research skills → PO1, PO2, PO4
-  - "Apply/Use tools/software" = modern tools → PO5
-  - "Understand deep learning/neural networks" = tools + design → PO1, PO3, PO5
+STRENGTH SCALE:
+  3 = High   — CO directly and substantially develops this PO
+  2 = Medium — CO moderately contributes to this PO
+  1 = Low    — CO peripherally touches this PO
+  0 = None   — CO has no meaningful relationship → leave as 0 (shown as blank)
 
-STEP 2 — For each PO, ask: "Does THIS CO's content require THIS skill to achieve it?"
-  PO1 (Engineering Knowledge): Is domain knowledge required? → Yes for almost all technical COs = 3
-  PO2 (Problem Analysis): Does the CO involve analyzing, comparing, or reasoning about systems? → 2-3 if yes
-  PO3 (Design Solutions): Does the CO involve building, designing, or implementing something? → 2-3 if yes
-  PO4 (Investigation): Does the CO involve experiments, data analysis, or research methods? → 1-2 if yes
-  PO5 (Modern Tool Usage): Does achieving this CO require using software, frameworks, or computational tools? → 1-3 if yes
-  PO6 (Engineer & Society): Does the CO explicitly address societal impact? → 0 unless stated
-  PO7 (Environment): Does the CO address sustainability or environmental concerns? → 0 unless stated
-  PO8 (Ethics): Does the CO involve ethical decision-making? → 0 unless stated
-  PO9 (Individual/Team Work): Does the CO involve collaborative work explicitly? → 0 unless stated
-  PO10 (Communication): Does the CO require producing reports, presentations, or documentation? → 0 unless stated
-  PO11 (Project Management): Does the CO involve managing resources or a project? → 0 unless stated
-  PO12 (Life-long Learning): All COs support ongoing learning = 1 universally
+STEP 1 — Identify the Bloom's verb in each CO and set base strengths:
+  Remember/Define/List      → PO1=2, PO2=1
+  Explain/Describe/Discuss  → PO1=3, PO2=2
+  Apply/Implement/Solve     → PO1=3, PO2=2, PO3=2, PO5=1
+  Analyze/Compare/Examine   → PO1=3, PO2=3, PO4=2
+  Evaluate/Justify/Validate → PO1=3, PO2=3, PO4=3
+  Design/Develop/Build      → PO1=3, PO2=2, PO3=3, PO5=2
+  Investigate/Experiment    → PO1=3, PO2=2, PO4=3, PO5=2
 
-STEP 3 — MANDATORY COVERAGE CHECK before finalizing:
-  - Every CO must map to AT LEAST 2-3 POs with value > 0
-  - PO1 should be 3 for almost every technical CO
-  - PO12 must be 1 for every CO
-  - PO2 should be ≥1 for any CO with analytical verbs (explain, describe, discuss, analyze)
-  - PO5 should be ≥1 for any CO involving algorithms, deep learning, or computational methods
-  - PO6, PO7, PO8, PO9, PO10, PO11 = 0 unless the CO statement explicitly mentions those domains
+STEP 2 — Boost based on subject matter (add to base, cap at 3):
+  Algorithms/methods/theory  → +1 PO1
+  Analysis/reasoning tasks   → +1 PO2
+  System/architecture/design → +1 PO3
+  Data/experiments/metrics   → +1 PO4
+  Tools/software/frameworks  → +1 PO5
+  ML/DL/neural networks      → +1 PO5, +1 PO3
+  Optimization/tuning        → +1 PO2, +1 PO3
 
-STEP 4 — ANTI-PATTERN CHECK:
-  WRONG: CO1→PO1 only, CO2→PO2 only, CO3→PO3 only (diagonal — forbidden)
-  WRONG: All COs identical mapping (copy-paste — forbidden)
-  RIGHT: Each CO has a unique profile based on its verb and subject matter
+STEP 3 — PO12 (Lifelong Learning):
+  Assign 1 if CO involves emerging/current topics, self-directed learning, or research.
+  Assign 0 if CO is purely a technical skill with no learning-how-to-learn element.
+  DO NOT assign PO12=1 universally to every CO.
+
+STEP 4 — HARD RULE for PO6, PO7, PO8, PO9, PO10, PO11 (CRITICAL):
+  These MUST be 0 UNLESS the CO statement contains an explicit keyword:
+  PO6 → only if CO mentions: society, social impact, health, safety, legal, public welfare
+  PO7 → only if CO mentions: environment, sustainability, green, carbon, renewable, emission
+  PO8 → only if CO mentions: ethics, moral, bias, fairness, privacy, security, cryptography
+  PO9 → only if CO mentions: team, collaboration, group, cooperative, peer work
+  PO10 → only if CO mentions: report, document, present, communicate, write, publication
+  PO11 → only if CO mentions: project, manage, schedule, budget, resource, planning
+  DO NOT infer or assume these from technical content alone.
+
+STEP 5 — ANTI-PATTERN CHECK:
+  WRONG: Every CO has the same mapping (copy-paste pattern)
+  WRONG: Every CO maps to every PO (inflation)
+  WRONG: PO6–PO11 assigned without explicit CO keyword evidence
+  RIGHT: 3–6 POs per CO get non-zero values; each CO has a unique profile
 
 === ANALYSIS FOR THIS COURSE ===
 {co_analysis}
 
-=== OUTPUT ===
-Return ONLY a valid JSON object. No markdown, no explanation, no code fences.
-Every CO must list every PO. Values must be 0, 1, 2, or 3.
-{{
-  "CO1": {{"PO1": 3, "PO2": 2, "PO3": 0, "PO4": 0, "PO5": 1, "PO6": 0, "PO7": 0, "PO8": 0, "PO9": 0, "PO10": 0, "PO11": 0, "PO12": 1}},
-  ...
-}}
+=== OUTPUT FORMAT ===
+Return ONLY valid JSON. No markdown, no explanation, no code fences.
+List every CO and every PO. Use 0 for no relationship.
+Example of a well-formed row (for an "explain neural networks" CO):
+  "CO1": {{"PO1": 3, "PO2": 2, "PO3": 1, "PO4": 0, "PO5": 1, "PO6": 0, "PO7": 0, "PO8": 0, "PO9": 0, "PO10": 0, "PO11": 0, "PO12": 1}}
+
 COs required: {co_ids_str}
 POs required: {po_ids_str}"""
 
