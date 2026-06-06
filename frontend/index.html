@@ -7527,6 +7527,7 @@ function MasterAttainmentPage({course}){
     setCoList((course.cos||[]).map(c=>({...c,target:60,bloom_level:normBloom(c.bloom_level)})));
     setPoList(course.pos||[]);
     setCoPoMatrix(course.co_po_matrix||{});
+    coPoMatrixInitialized.current=false;
     setAiMappingMsg('');
     // Load CA names from evaluation plan (matches real component names like "Quiz 1", "Unit Test 1", etc.)
     const loadCaNamesAndSheets=async()=>{
@@ -7608,6 +7609,32 @@ function MasterAttainmentPage({course}){
     });
   },[caSheets,course?.id]);
 
+  // Auto-save coPoMatrix to course record whenever it changes (debounced 1.5s)
+  const coPoMatrixInitialized=React.useRef(false);
+  React.useEffect(()=>{
+    // Skip the very first render (initialization from course.co_po_matrix)
+    if(!course||!Object.keys(coPoMatrix).length){coPoMatrixInitialized.current=false;return;}
+    if(!coPoMatrixInitialized.current){coPoMatrixInitialized.current=true;return;}
+    if(coPoMatrixSaveTimer.current) clearTimeout(coPoMatrixSaveTimer.current);
+    coPoMatrixSaveTimer.current=setTimeout(async()=>{
+      try{
+        await fetch(API+'/courses/'+course.id,{method:'PUT',
+          headers:{...hdrForm(),'Content-Type':'application/json'},
+          body:JSON.stringify({
+            cos:course.cos,pos:course.pos,co_po_matrix:coPoMatrix,
+            course_name:course.course_name,course_code:course.course_code,
+            department:course.department,semester:course.semester,
+            academic_year:course.academic_year,faculty_name:course.faculty_name,
+            credits:course.credits||3,total_hours:course.total_hours||45,
+            evaluation_config:course.evaluation_config||{}
+          })
+        });
+        // Keep course object in sync so Course File tab reads the latest matrix
+        course.co_po_matrix=coPoMatrix;
+      }catch(e){console.warn('CO-PO matrix auto-save failed',e);}
+    },1500);
+  },[coPoMatrix]);
+
   const generate=async()=>{
     if(!course){setErr('Select a course first.');return;}
     setGenerating(true);setErr('');setOk('');
@@ -7658,6 +7685,7 @@ function MasterAttainmentPage({course}){
   const eseQpRef=React.useRef(null);
   const eseMarksRef=React.useRef(null);
   const autoSaveTimers=React.useRef({});
+  const coPoMatrixSaveTimer=React.useRef(null);
   // Ensure a ref exists for each CA
   caNames.forEach(ca=>{
     if(!caQpRefs.current[ca]) caQpRefs.current[ca]=React.createRef();
@@ -8659,18 +8687,8 @@ function MasterAttainmentPage({course}){
         });
         return next;
       });
-      // Auto-save to course record
-      try{
-        const updated={...course,co_po_matrix:{...course.co_po_matrix,...mapping}};
-        await fetch(API+'/courses/'+course.id,{method:'PUT',
-          headers:{...hdrForm(),'Content-Type':'application/json'},
-          body:JSON.stringify({cos:course.cos,pos:course.pos,co_po_matrix:{...course.co_po_matrix,...mapping},
-            course_name:course.course_name,course_code:course.course_code,
-            department:course.department,semester:course.semester,
-            academic_year:course.academic_year,faculty_name:course.faculty_name,
-            credits:course.credits||3,total_hours:course.total_hours||45,
-            evaluation_config:course.evaluation_config||{}})});
-      }catch(e){console.warn('Auto-save failed',e);}
+      // Auto-save to course record (merged matrix is already set in state; useEffect will persist it)
+      course.co_po_matrix={...coPoMatrix,...mapping};
       setAiMappingMsg('✅ AI mapping applied! Review and adjust as needed.');
     }catch(e){
       setAiMappingMsg('❌ '+e.message);
