@@ -1513,7 +1513,64 @@ def _build_docx(data: dict) -> bytes:
 
     # ── 11. Learning Material ─────────────────────────────────────────────────
     _section_title(doc, 11, "Learning Material.")
-    if data.get("learning_material_links"):
+    mat11      = data.get("study_materials") or {}
+    tb11       = mat11.get("textbooks") or []
+    ref11      = mat11.get("reference_books") or mat11.get("references") or []
+    web11      = mat11.get("web_links") or mat11.get("web") or []
+    jour11     = mat11.get("journals") or []
+    mooc11     = mat11.get("moocs") or []
+    art11      = mat11.get("research_articles") or []
+    has_any11  = any([tb11, ref11, web11, jour11, mooc11, art11])
+
+    if tb11 or ref11:
+        _heading2(doc, "Textbooks & Reference books/ Beyond Gaps")
+        _make_table(doc, ["Book", "Author", "Publisher"],
+                    [[b.get("title", b.get("book","") if isinstance(b,dict) else str(b)),
+                      b.get("author","") if isinstance(b,dict) else "",
+                      b.get("publisher","") if isinstance(b,dict) else ""]
+                     for b in (tb11 + ref11)],
+                    [7.0, 4.0, 5.0])
+
+    if web11:
+        _heading2(doc, "Web-Links for Online Notes/ YouTube/NPTEL Videos/Blogs etc")
+        _make_table(doc, ["Sr. No.", "Web Link", "Module"],
+                    [[str(i+1),
+                      w.get("title", w.get("url","") if isinstance(w,dict) else str(w)),
+                      w.get("unit", w.get("module","")) if isinstance(w,dict) else ""]
+                     for i, w in enumerate(web11)],
+                    [1.0, 10.0, 5.0])
+
+    if jour11:
+        _heading2(doc, "Names of Magazines, Journals, E-journals")
+        _make_table(doc, ["Sr.No.", "Journal"],
+                    [[str(i+1),
+                      j.get("title","") if isinstance(j,dict) else str(j)]
+                     for i, j in enumerate(jour11)],
+                    [1.0, 15.0])
+
+    if mooc11:
+        _heading2(doc, "Recommended MOOC Courses like Coursera / NPTEL / MIT-OCW / edX etc")
+        _make_table(doc,
+                    ["S.No.", "MOOC Course Link", "Course conducted by", "Course Duration", "Certificate (Y / N)"],
+                    [[str(i+1),
+                      m.get("title", m.get("url","") if isinstance(m,dict) else str(m)),
+                      m.get("platform", m.get("conducted_by","")) if isinstance(m,dict) else "",
+                      m.get("duration","") if isinstance(m,dict) else "",
+                      m.get("certificate","Y") if isinstance(m,dict) else "Y"]
+                     for i, m in enumerate(mooc11)],
+                    [1.0, 6.0, 3.0, 2.5, 2.0])
+
+    if art11:
+        _heading2(doc, "List of Research Articles")
+        _make_table(doc, ["S.No.", "Research Article Title", "Web Link"],
+                    [[str(i+1),
+                      a.get("title","") if isinstance(a,dict) else str(a),
+                      a.get("url","") if isinstance(a,dict) else ""]
+                     for i, a in enumerate(art11)],
+                    [1.0, 9.0, 6.0])
+
+    # Fallback: raw links if no structured data available
+    if not has_any11 and data.get("learning_material_links"):
         for link in data["learning_material_links"].split("\n"):
             link = link.strip()
             if link:
@@ -1524,9 +1581,8 @@ def _build_docx(data: dict) -> bytes:
                 run.font.color.rgb = _rgb((5, 99, 193))
                 run.underline = True
                 run.font.size = Pt(10)
-    else:
-        _add_para(doc, "[Learning material links not yet entered. Add them in the Course File section.]",
-                  color=(136, 136, 136))
+    elif not has_any11:
+        _add_para(doc, "[Learning material not yet entered.]", color=(136, 136, 136))
 
     # ── 12. Question Bank ─────────────────────────────────────────────────────
     _section_title(doc, 12, "Question Bank")
