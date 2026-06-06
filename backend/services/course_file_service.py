@@ -35,6 +35,12 @@ _GREEN  = (226, 239, 218)
 _ORANGE = (252, 228, 214)
 _WHITE  = (255, 255, 255)
 _LGRAY  = (245, 245, 245)
+_TEAL   = (0,  112, 130)   # section accent — teal
+_AMBER  = (255, 192,  0)   # highlight amber
+_STEEL  = (68, 114, 196)   # steel blue accent
+_MINT   = (198, 239, 206)  # mint green for CO rows
+_PEACH  = (255, 235, 215)  # peach for alternating
+_PURPLE = (112,  48, 160)  # purple accent
 
 
 # ── Low-level XML helpers ─────────────────────────────────────────────────────
@@ -94,21 +100,42 @@ def _add_para(doc_or_cell, text="", bold=False, size=10, color=None,
 
 def _section_title(doc, num, title):
     p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    p.paragraph_format.space_before = Pt(14)
-    p.paragraph_format.space_after  = Pt(6)
     if num > 1:
         run = p.add_run()
         run.add_break(__import__("docx.enum.text", fromlist=["WD_BREAK"]).WD_BREAK.PAGE)
-    _run(p, f"{num}. {title}", bold=True, size=14, color=_NAVY)
-    return p
+    # Coloured two-tone banner: teal strip | navy body
+    tbl = doc.add_table(rows=1, cols=2)
+    tbl.allow_autofit = False
+    left = tbl.rows[0].cells[0]
+    left.width = Cm(0.35)
+    _set_cell_bg(left, _TEAL)
+    left.paragraphs[0].paragraph_format.space_before = Pt(5)
+    left.paragraphs[0].paragraph_format.space_after  = Pt(5)
+    left.paragraphs[0].add_run(" ")
+    right = tbl.rows[0].cells[1]
+    right.width = Cm(15.65)
+    _set_cell_bg(right, _NAVY)
+    rp = right.paragraphs[0]
+    rp.paragraph_format.space_before = Pt(5)
+    rp.paragraph_format.space_after  = Pt(5)
+    _run(rp, f"  {num}.  {title}", bold=True, size=13, color=_WHITE)
+    from docx.oxml import OxmlElement as _OE2
+    tbl_pr2 = tbl._tbl.get_or_add_tblPr()
+    brd2 = _OE2("w:tblBorders")
+    for side in ("top","left","bottom","right","insideH","insideV"):
+        b = _OE2(f"w:{side}"); b.set(qn("w:val"), "none"); brd2.append(b)
+    tbl_pr2.append(brd2)
+    doc.add_paragraph()
 
 
 def _heading2(doc, text):
     p = doc.add_paragraph()
     p.paragraph_format.space_before = Pt(8)
-    p.paragraph_format.space_after  = Pt(4)
-    _run(p, text, bold=True, size=12)
+    p.paragraph_format.space_after  = Pt(2)
+    run = p.add_run(text)
+    run.bold = True
+    run.font.size = Pt(12)
+    run.font.color.rgb = _rgb(_TEAL)
     return p
 
 
@@ -123,7 +150,7 @@ def _make_table(doc, headers, rows, col_widths_cm):
     for i, hdr in enumerate(headers):
         cell = hdr_row.cells[i]
         cell.width = Cm(col_widths_cm[i])
-        _set_cell_bg(cell, _NAVY)
+        _set_cell_bg(cell, _STEEL)
         _set_cell_margins(cell)
         p = cell.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1638,25 +1665,96 @@ def _build_docx(data: dict) -> bytes:
 
     # ── 12. Question Bank ─────────────────────────────────────────────────────
     _section_title(doc, 12, "Question Bank")
-    questions = data.get("questions") or []
+
+    # Merge DB questions + all CA/ESE sheet questions so bank is never empty
+    questions = list(data.get("questions") or [])
+    seen_qtexts = {q.get("question_text","").strip().lower() for q in questions}
+    for ca in (data.get("ca_sheets") or []):
+        ca_label = ca.get("ca_label", "")
+        for q in (ca.get("qp") or []):
+            qt = (q.get("question_text") or "").strip()
+            if qt and qt.lower() not in seen_qtexts:
+                questions.append({
+                    "question_text": qt,
+                    "co_id":         q.get("co_id", ""),
+                    "bloom_level":   q.get("bloom_level", ""),
+                    "marks":         q.get("marks", ""),
+                    "unit_no":       q.get("unit_no", ""),
+                    "source":        ca_label,
+                })
+                seen_qtexts.add(qt.lower())
+
     if questions:
         from collections import defaultdict as _dd2
-        by_unit = _dd2(list)
+        # Group by CO
+        by_co = _dd2(list)
         for q in questions:
-            unit_key = q.get("unit_no", q.get("unit", "General"))
-            by_unit[str(unit_key or "General")].append(q)
+            co_key = q.get("co_id") or "General"
+            by_co[co_key].append(q)
 
-        for unit_label in sorted(by_unit.keys()):
-            unit_qs   = by_unit[unit_label]
-            co_label  = unit_qs[0].get("co_id","") if unit_qs else ""
-            heading_text = f"Unit -{unit_label}"
-            if co_label:
-                heading_text += f"                                                                           {co_label}/"
-            _heading2(doc, heading_text)
-            for i, q in enumerate(unit_qs):
-                _add_para(doc, f"{i+1}. {q.get('question_text','')}", space_before=2, space_after=1)
+        for co_label in sorted(by_co.keys()):
+            co_qs = by_co[co_label]
+            # CO sub-heading — teal banner
+            doc.add_paragraph()
+            tbl_co = doc.add_table(rows=1, cols=1)
+            tbl_co.allow_autofit = False
+            hcell = tbl_co.rows[0].cells[0]
+            hcell.width = Cm(16)
+            _set_cell_bg(hcell, _TEAL)
+            hp = hcell.paragraphs[0]
+            hp.paragraph_format.space_before = Pt(3)
+            hp.paragraph_format.space_after  = Pt(3)
+            _run(hp, f"  {co_label}", bold=True, size=11, color=_WHITE)
+
+            # Question table: Q.No | Question | Bloom's | Marks | Source
+            q_rows = []
+            for i, q in enumerate(co_qs):
+                bloom = q.get("bloom_level") or ""
+                marks = str(q.get("marks") or "")
+                src   = q.get("source") or ""
+                q_rows.append([
+                    str(i + 1),
+                    q.get("question_text", ""),
+                    bloom,
+                    marks,
+                    src,
+                ])
+
+            tbl = doc.add_table(rows=1 + len(q_rows), cols=5)
+            tbl.allow_autofit = False
+            tbl.style = "Table Grid"
+            col_widths = [Cm(0.8), Cm(10.0), Cm(2.2), Cm(1.4), Cm(1.6)]
+            headers = ["#", "Question", "Bloom's Level", "Marks", "Source"]
+
+            # Header row
+            for ci, (hdr, cw) in enumerate(zip(headers, col_widths)):
+                cell = tbl.rows[0].cells[ci]
+                cell.width = cw
+                _set_cell_bg(cell, _NAVY)
+                p = cell.paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                _run(p, hdr, bold=True, size=9, color=_WHITE)
+
+            # Data rows — alternating mint / white, generous padding
+            for ri, row_vals in enumerate(q_rows):
+                bg = _MINT if ri % 2 == 0 else _WHITE
+                tr = tbl.rows[ri + 1]
+                for ci, (val, cw) in enumerate(zip(row_vals, col_widths)):
+                    cell = tr.cells[ci]
+                    cell.width = cw
+                    _set_cell_bg(cell, bg)
+                    p = cell.paragraphs[0]
+                    p.paragraph_format.space_before = Pt(4)
+                    p.paragraph_format.space_after  = Pt(4)
+                    p.alignment = (WD_ALIGN_PARAGRAPH.CENTER
+                                   if ci != 1 else WD_ALIGN_PARAGRAPH.LEFT)
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                    _run(p, str(val), bold=(ci == 0), size=9)
+
+            doc.add_paragraph()
     else:
-        _add_para(doc, "[Question bank is empty. Use the Question Bank page to generate questions.]",
+        _add_para(doc, "[Question bank is empty — add questions via the Question Bank page or upload CA sheets.]",
                   color=(136, 136, 136))
 
     # ── 13. Attendance ────────────────────────────────────────────────────────
