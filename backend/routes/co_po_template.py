@@ -252,80 +252,87 @@ async def ai_co_po_mapping(
     current_user: User = Depends(require_auth),
 ):
     """
-    Use Claude AI to generate CO-PO mapping values (0, 1, 2, or 3) based on
-    CO statements and PO/PSO descriptions.
+    Generate CO-PO mapping values (0/1/2/3) using the existing LLM fallback chain
+    (Gemini → Groq → OpenAI — whichever key is configured).
     Returns {co_id: {po_id: strength}} for each CO.
-    Strength: 0=no mapping, 1=low, 2=medium, 3=high.
     """
-    import httpx
+    import json as _json
+    from backend.core.llm import get_llm_response
+    from backend.core.exceptions import LLMError
 
     co_text = "\n".join(
-        f"- {c['co_id']}: {c.get('co_statement','')}" for c in body.cos
+        f"- {c['co_id']}: {c.get('co_statement', c.get('description', c['co_id']))}"
+        for c in body.cos
     )
     po_text = "\n".join(
-        f"- {p['po_id']}: {p.get('po_statement', p.get('description',''))}" for p in body.pos
+        f"- {p['po_id']}: {p.get('po_statement', p.get('description', p.get('po_id', '')))}"
+        for p in body.pos
     )
     pso_text = "\n".join(
-        f"- {p['pso_id']}: {p.get('pso_statement', p.get('description',''))}" for p in body.psos
+        f"- {p['pso_id']}: {p.get('pso_statement', p.get('description', ''))}"
+        for p in body.psos
     ) if body.psos else ""
 
-    prompt = f"""You are an expert in NBA/NAAC accreditation for engineering courses.
-Given the Course Outcomes (COs) and Program Outcomes (POs/PSOs) below, determine the mapping strength for each CO-PO pair.
+    po_ids = [p["po_id"] for p in body.pos]
+    pso_ids = [p["pso_id"] for p in body.psos] if body.psos else []
+    all_po_ids = po_ids + pso_ids
+    co_ids = [c["co_id"] for c in body.cos]
 
-Mapping strength:
-- 3 = High (CO directly addresses and strongly contributes to PO)
-- 2 = Medium (CO moderately contributes to PO)
-- 1 = Low (CO slightly relates to PO)
-- 0 = No mapping (CO has no relation to PO)
+    prompt = f"""You are an NBA/NAAC accreditation expert for engineering courses.
+Assign a mapping strength (0, 1, 2, or 3) for every CO-PO pair below.
 
-Course Outcomes:
+Strength scale:
+3 = High: CO directly and strongly addresses this PO
+2 = Medium: CO moderately contributes to this PO
+1 = Low: CO has minor relevance to this PO
+0 = None: CO has no relation to this PO
+
+Course Outcomes (COs):
 {co_text}
 
 Program Outcomes (POs):
 {po_text}
-{"Program Specific Outcomes (PSOs):" + chr(10) + pso_text if pso_text else ""}
+{("Program Specific Outcomes (PSOs):\n" + pso_text) if pso_text else ""}
 
-Return ONLY a valid JSON object. No explanation, no markdown, no code fences.
-Format exactly:
+IMPORTANT: Return ONLY a raw JSON object — no markdown, no code fences, no explanation.
+Every CO must have every PO/PSO listed (use 0 if no mapping).
+Exact format:
 {{
-  "CO1": {{"PO1": 3, "PO2": 2, "PO3": 0, ..., "PSO1": 3, "PSO2": 2}},
-  "CO2": {{"PO1": 2, ...}},
+  "{co_ids[0] if co_ids else 'CO1'}": {{"{all_po_ids[0] if all_po_ids else 'PO1'}": 3, "{all_po_ids[1] if len(all_po_ids)>1 else 'PO2'}": 2, ...}},
   ...
 }}
-
-Include ALL POs (PO1 through PO12) and all PSOs in every CO row, even if the value is 0.
-Only use integers 0, 1, 2, or 3."""
+COs to include: {', '.join(co_ids)}
+POs to include: {', '.join(all_po_ids)}"""
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": os.environ.get("ANTHROPIC_API_KEY", ""),
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 2000,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-            )
-        resp.raise_for_status()
-        result = resp.json()
-        text = result["content"][0]["text"].strip()
+        text = await get_llm_response(prompt)
 
-        # Strip any accidental markdown fences
+        # Strip accidental markdown fences
+        text = text.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
+            if text.lstrip().startswith("json"):
+                text = text.lstrip()[4:]
         text = text.strip()
 
-        mapping = __import__("json").loads(text)
-        logger.info(f"AI CO-PO mapping generated for course_id={course_id}: {list(mapping.keys())}")
-        return {"status": "success", "data": mapping}
+        # Find the JSON object in the response
+        start = text.find("{")
+        end   = text.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError("No JSON object found in LLM response")
+        mapping = _json.loads(text[start:end])
 
+        # Ensure all values are integers and all CO/PO keys present
+        clean = {}
+        for co_id in co_ids:
+            co_map = mapping.get(co_id, {})
+            clean[co_id] = {po: int(co_map.get(po, 0)) for po in all_po_ids}
+
+        logger.info(f"AI CO-PO mapping generated for course_id={course_id}: {list(clean.keys())}")
+        return {"status": "success", "data": clean}
+
+    except LLMError as e:
+        raise HTTPException(status_code=503, detail=f"No LLM provider available: {str(e)}. Configure GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY.")
     except Exception as e:
         logger.exception(f"AI CO-PO mapping failed for course_id={course_id}: {e}")
         raise HTTPException(status_code=500, detail=f"AI mapping failed: {str(e)}")
