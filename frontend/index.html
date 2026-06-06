@@ -2999,7 +2999,7 @@ function StudyMaterialsPage({course}){
           // Last resort: generate session plan to get materials
           const sp2=await api(`/session-plan/generate/${course.id}`,{method:'POST'});
           const plan2=sp2.data||sp2;
-          setData(plan2?.study_materials||plan2?.materials||null);
+          setData(plan2?.study_materials||plan2?.materials||{});
         }
       }catch{setErr('Generate the session plan first to see AI recommendations.');}
     }
@@ -3015,7 +3015,7 @@ function StudyMaterialsPage({course}){
   const aiJournals=data?.journals||data?.research_papers||data?.papers||[];
   const aiMoocs=data?.mooc_courses||data?.moocs||[];
 
-  const total=(a,k)=>a.length+(userMats[k]||[]).length;
+  const total=(a,k)=>(a||[]).length+(userMats[k]||[]).length;
 
   // docx/txt/csv file upload state
   const [pendingImport,setPendingImport]=useState(null); // {items:[{title,raw}], fileName}
