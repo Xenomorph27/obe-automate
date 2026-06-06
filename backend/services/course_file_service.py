@@ -119,12 +119,17 @@ def _section_title(doc, num, title):
     rp.paragraph_format.space_before = Pt(5)
     rp.paragraph_format.space_after  = Pt(5)
     _run(rp, f"  {num}.  {title}", bold=True, size=13, color=_WHITE)
+    # Remove borders using tblPr (compatible with all python-docx versions)
     from docx.oxml import OxmlElement as _OE2
-    tbl_pr2 = tbl._tbl.get_or_add_tblPr()
-    brd2 = _OE2("w:tblBorders")
-    for side in ("top","left","bottom","right","insideH","insideV"):
-        b = _OE2(f"w:{side}"); b.set(qn("w:val"), "none"); brd2.append(b)
-    tbl_pr2.append(brd2)
+    _tbl_xml = tbl._tbl
+    _tbl_pr = _tbl_xml.find(qn("w:tblPr"))
+    if _tbl_pr is None:
+        _tbl_pr = _OE2("w:tblPr")
+        _tbl_xml.insert(0, _tbl_pr)
+    _brd = _OE2("w:tblBorders")
+    for _side in ("top","left","bottom","right","insideH","insideV"):
+        _b = _OE2(f"w:{_side}"); _b.set(qn("w:val"), "none"); _brd.append(_b)
+    _tbl_pr.append(_brd)
     doc.add_paragraph()
 
 
