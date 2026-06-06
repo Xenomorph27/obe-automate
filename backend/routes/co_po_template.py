@@ -278,6 +278,13 @@ async def ai_co_po_mapping(
     all_po_ids = po_ids + pso_ids
     co_ids = [c["co_id"] for c in body.cos]
 
+    first_co  = co_ids[0] if co_ids else "CO1"
+    first_po  = all_po_ids[0] if all_po_ids else "PO1"
+    second_po = all_po_ids[1] if len(all_po_ids) > 1 else "PO2"
+    co_ids_str  = ", ".join(co_ids)
+    po_ids_str  = ", ".join(all_po_ids)
+    pso_block   = ("Program Specific Outcomes (PSOs):\n" + pso_text) if pso_text else ""
+
     prompt = f"""You are an NBA/NAAC accreditation expert for engineering courses.
 Assign a mapping strength (0, 1, 2, or 3) for every CO-PO pair below.
 
@@ -292,17 +299,17 @@ Course Outcomes (COs):
 
 Program Outcomes (POs):
 {po_text}
-{("Program Specific Outcomes (PSOs):\n" + pso_text) if pso_text else ""}
+{pso_block}
 
 IMPORTANT: Return ONLY a raw JSON object — no markdown, no code fences, no explanation.
 Every CO must have every PO/PSO listed (use 0 if no mapping).
 Exact format:
 {{
-  "{co_ids[0] if co_ids else 'CO1'}": {{"{all_po_ids[0] if all_po_ids else 'PO1'}": 3, "{all_po_ids[1] if len(all_po_ids)>1 else 'PO2'}": 2, ...}},
+  "{first_co}": {{"{first_po}": 3, "{second_po}": 2, ...}},
   ...
 }}
-COs to include: {', '.join(co_ids)}
-POs to include: {', '.join(all_po_ids)}"""
+COs to include: {co_ids_str}
+POs to include: {po_ids_str}"""
 
     try:
         text = await get_llm_response(prompt)
