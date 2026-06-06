@@ -7479,7 +7479,7 @@ function CourseFilePage({course}){
     </div>
   );
 }
-function MasterAttainmentPage({course}){
+function MasterAttainmentPage({course, saveCourse}){
   const API=window.API||'https://obe-automate.onrender.com';
   const tok=()=>sessionStorage.getItem('obe_token');
   const hdr=()=>({Authorization:'Bearer '+tok(),'Content-Type':'application/json'});
@@ -7631,6 +7631,7 @@ function MasterAttainmentPage({course}){
         });
         // Keep course object in sync so Course File tab reads the latest matrix
         course.co_po_matrix=coPoMatrix;
+        if(saveCourse) saveCourse({...course, co_po_matrix:coPoMatrix});
       }catch(e){console.warn('CO-PO matrix auto-save failed',e);}
     },1500);
   },[coPoMatrix]);
@@ -9619,7 +9620,7 @@ function App(){
     qmanipulate:<ManipulatePage course={course}/>,
     usermgmt:<UserMgmtPage currentUser={user}/>,
     profile:<ProfilePage user={user} logout={()=>{setToken('');setUser(null);setPage('home');saveCourse(null);}}/>,
-    master_attainment:<MasterAttainmentPage course={course}/>,
+    master_attainment:<MasterAttainmentPage course={course} saveCourse={saveCourse}/>,
     course_file:<CourseFilePage course={course}/>,
   };
 
