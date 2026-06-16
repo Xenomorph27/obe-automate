@@ -7,7 +7,6 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet"/>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script>window.babelConfig={compact:true,comments:false};</script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
@@ -488,6 +487,24 @@ tbody tr:hover{background:var(--bg)}
 </script>
 
 <div id="root"></div>
-<script type="text/babel" data-presets="react" src="app.js"></script>
+<script>
+(function(){
+  fetch('app.js')
+    .then(function(r){ return r.text(); })
+    .then(function(code){
+      var transformed = Babel.transform(code, {
+        presets: ['react'],
+        compact: false,
+        comments: false
+      }).code;
+      var script = document.createElement('script');
+      script.textContent = transformed;
+      document.body.appendChild(script);
+    })
+    .catch(function(err){
+      console.error('Failed to load app.js:', err);
+    });
+})();
+</script>
 </body>
 </html>
