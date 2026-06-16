@@ -493,8 +493,10 @@ tbody tr:hover{background:var(--bg)}
     .then(function(r){ return r.text(); })
     .then(function(code){
       var transformed = Babel.transform(code, {
-        presets: ['react'],
-        sourceType: 'script',
+        presets: [
+          ['env', { targets: { browsers: ['last 2 versions'] }, modules: false }],
+          'react'
+        ],
         compact: false,
         comments: false
       }).code;
