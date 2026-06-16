@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet"/>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>window.babelConfig={compact:true,comments:false};</script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
@@ -487,18 +488,7 @@ tbody tr:hover{background:var(--bg)}
 </script>
 
 <div id="root"></div>
-<script>
-// Increase Babel's internal code-generator compact threshold so the
-// "deoptimised styling" warning (and subsequent appendChild crash) never fires.
-if(typeof Babel !== 'undefined'){
-  var _orig = Babel.transform.bind(Babel);
-  Babel.transform = function(code, opts){
-    opts = Object.assign({compact: true, sourceMaps: false}, opts || {});
-    return _orig(code, opts);
-  };
-}
-</script>
-<script type="text/babel">
+<script type="text/babel" data-presets="react">
 const {useState,useEffect,useRef,useCallback,useMemo}=React;
 const API='https://obe-automate.onrender.com';
 
