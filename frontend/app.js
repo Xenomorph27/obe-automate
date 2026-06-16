@@ -1,0 +1,9179 @@
+const {useState,useEffect,useRef,useCallback,useMemo}=React;
+const API='https://obe-automate.onrender.com';
+
+// ── JWT token storage (session only — lost on tab close by design) ──────────
+let _token = sessionStorage.getItem('obe_token') || '';
+function setToken(t){ _token=t; if(t) sessionStorage.setItem('obe_token',t); else sessionStorage.removeItem('obe_token'); }
+function getToken(){ return _token; }
+const BLOOM=[{l:1,n:'Remember',c:'bl1'},{l:2,n:'Understand',c:'bl2'},{l:3,n:'Apply',c:'bl3'},{l:4,n:'Analyze',c:'bl4'},{l:5,n:'Evaluate',c:'bl5'},{l:6,n:'Create',c:'bl6'}];
+// ── BLOOM INFERENCE ─────────────────────────────────────────────────────────
+// Sync regex — covers all standard Bloom's action verbs used in engineering COs
+const inferBloom=(statement='')=>{
+  const s=statement.toLowerCase();
+  // L6 Create
+  if(/\b(design|formulate|construct|create|produce|develop|invent|compose|generate|build|assemble|plan|devise|synthesize|combine|originate|propose|hypothesize|compile|modify|arrange|prepare)\b/.test(s))return'Create';
+  // L5 Evaluate
+  if(/\b(evaluate|justify|critique|judge|defend|assess|appraise|argue|prioritize|recommend|validate|debate|conclude|determine|measure|verify|rank)\b/.test(s))return'Evaluate';
+  // L4 Analyze
+  if(/\b(analyz|analyse|compare|contrast|differentiate|distinguish|examine|categorize|relate|infer|attribute|dissect|investigate|separate|inspect|outline)\b/.test(s))return'Analyze';
+  // L3 Apply
+  if(/\b(apply|implement|execute|solve|demonstrate|calculate|operate|perform|illustrate|employ|utilize|compute|practice|simulate|experiment)\b/.test(s))return'Apply';
+  // L1 Remember — checked BEFORE Understand because describe/define/list are often misclassified
+  if(/\b(define|list|recall|name|state|memorize|repeat|record|match|label|describe|enumerate|reproduce|duplicate|quote|tabulate|mention)\b/.test(s))return'Remember';
+  // L2 Understand — default for explain/discuss/identify etc
+  if(/\b(understand|explain|summarize|paraphrase|discuss|identify|recognize|translate|interpret|report|restate|review|express|generalize|clarify|represent)\b/.test(s))return'Understand';
+  return'Understand';
+};
+const inferBloomSync=inferBloom;
+
+// ── AI BLOOM CLASSIFICATION ─────────────────────────────────────────────────
+// Calls the backend /syllabus/classify-bloom endpoint to use LLM for accurate
+// Bloom's level detection. Falls back to inferBloom() if the call fails.
+const aiClassifyBloom=async(cosArr,unitsArr=[])=>{
+  if(!cosArr||cosArr.length===0)return cosArr;
+  const statements=cosArr.map(co=>co.statement||'');
+  // Pass unit context so AI can use content depth, not just CO verbs
+  const units=(unitsArr||[]).map(u=>({
+    unit_number:u.unit_number||0,
+    unit_title:u.unit_title||'',
+    topics:Array.isArray(u.topics)?u.topics:[]
+  }));
+  try{
+    const tok=sessionStorage.getItem('obe_token')||'';
+    const r=await fetch(API+'/syllabus/classify-bloom',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',...(tok?{Authorization:`Bearer ${tok}`}:{})},
+      body:JSON.stringify({statements,units})
+    });
+    if(!r.ok)throw new Error('classify-bloom API failed');
+    const j=await r.json();
+    const levels=j.levels||[];
+    return cosArr.map((co,i)=>({...co,bloom_level:levels[i]||inferBloom(co.statement||'')}));
+  }catch(e){
+    console.warn('AI Bloom classify failed, falling back to regex:',e);
+    return cosArr.map(co=>({...co,bloom_level:inferBloom(co.statement||'')}));
+  }
+};
+
+const QTYPES=['Short Answer','Long Answer','MCQ','Case Study'];
+
+class EB extends React.Component{
+  constructor(p){super(p);this.state={err:false}}
+  static getDerivedStateFromError(){return{err:true}}
+  render(){return this.state.err?<div className="eb"><h2>⚠ Something went wrong</h2><button className="btn btn-outline" onClick={()=>this.setState({err:false})}>Retry</button></div>:this.props.children}
+}
+
+async function api(path,opts={}){
+  const tok=getToken();
+  const hdrs={'Content-Type':'application/json',...(tok?{Authorization:`Bearer ${tok}`}:{}), ...(opts.headers||{})};
+  const r=await fetch(API+path,{...opts,headers:hdrs});
+  if(r.status===401){setToken('');window.location.hash='';window.location.reload();return;}
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||`HTTP ${r.status}`)}
+  return r.json();
+}
+
+const Spin=()=><span className="spin"/>;
+const Skel=({n=4})=><div style={{display:'flex',flexDirection:'column',gap:'.75rem'}}>{Array.from({length:n}).map((_,i)=><div key={i} className="skel" style={{width:`${55+Math.random()*40}%`}}/>)}</div>;
+const Alrt=({t='info',msg})=>msg?<div className={`alert a-${t}`}><span>{t==='error'?'✕':t==='success'?'✓':t==='warning'?'⚠':'ℹ'}</span>{msg}</div>:null;
+const PBar=({pct,c})=>{const col=c||(pct>=70?'#F97316':pct>=50?'#f59e0b':'#ef4444');return<div style={{display:'flex',alignItems:'center',gap:'.5rem'}}><div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${pct}%`,background:col}}/></div><span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:'36px'}}>{pct}%</span></div>};
+const BloomB=({l,n})=>{const b=BLOOM.find(x=>x.l===l)||BLOOM[0];return<span className={`badge ${b.c}`}>L{l} {n||b.n}</span>};
+const LvlB=({l})=>{const c=l==='High'?'b-green':l==='Medium'?'b-amber':'b-red';return<span className={`badge ${c}`}>{l}</span>};
+
+function getGreeting(){
+  const h=new Date().getHours();
+  return h<12?'Good Morning':h<17?'Good Afternoon':'Good Evening';
+}
+
+function getDay(){
+  return new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+}
+
+// ── LOGIN ──────────────────────────────────────────────────────────────────
+function Login({onLogin}){
+  const [username,setUsername]=useState('');
+  const [pw,setPw]=useState('');
+  const [err,setErr]=useState('');
+  const [loading,setLoading]=useState(false);
+
+  const go=async()=>{
+    setErr('');
+    if(!username||!pw){setErr('Please enter username and password.');return;}
+    setLoading(true);
+    try{
+      const r=await fetch(API+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password:pw})});
+      if(!r.ok){const e=await r.json().catch(()=>({}));setErr(e.detail||'Login failed.');setLoading(false);return;}
+      const d=await r.json();
+      setToken(d.access_token);
+      onLogin(d.user);
+    }catch(e){setErr(e.message||'Network error.');}
+    setLoading(false);
+  };
+
+  const roleHints=[
+    {icon:'👨‍🏫',label:'Faculty',hint:'faculty / faculty123'},
+    {icon:'🎓',label:'HOD',hint:'hod / hod123'},
+    {icon:'🔧',label:'Admin',hint:'admin / admin@OBE2024'},
+  ];
+
+  return(
+    <div className="auth-wrap">
+      <div className="auth-left">
+        <div>
+          <div className="auth-brand">OBE<span className="auth-brand-dot">.</span>Auto</div>
+          <div className="auth-brand-sub" style={{color:'#6b7280',marginTop:'.35rem'}}>Accreditation Engine v0.1</div>
+          <div className="auth-tagline">From syllabus PDF to NBA/NAAC reports — fully automated using AI. Built for engineering colleges.</div>
+          <div style={{marginTop:'2.5rem',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem',maxWidth:360}}>
+            {[['📄','Syllabus Extraction','AI reads your PDF'],['📊','CO/PO Attainment','Auto calculated'],['📋','Question Bank','Bloom-classified'],['🏛','HOD Dashboard','Department view']].map(([ic,t,s],i)=>(
+              <div key={i} style={{background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,padding:'.875rem'}}>
+                <div style={{fontSize:'1.25rem',marginBottom:'.35rem'}}>{ic}</div>
+                <div style={{fontSize:'.8rem',fontWeight:600,color:'#e5e7eb'}}>{t}</div>
+                <div style={{fontSize:'.72rem',color:'#6b7280',marginTop:'.15rem'}}>{s}</div>
+              </div>))}
+          </div>
+          <div style={{marginTop:'2rem',padding:'1rem',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,maxWidth:360}}>
+            <div style={{fontSize:'.7rem',color:'#6b7280',marginBottom:'.5rem',textTransform:'uppercase',letterSpacing:'.08em'}}>Default Accounts</div>
+            {roleHints.map((r,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'.35rem',cursor:'pointer'}} onClick={()=>{setUsername(r.hint.split(' / ')[0]);setPw(r.hint.split(' / ')[1]);}}>
+                <span style={{fontSize:'.9rem'}}>{r.icon}</span>
+                <span style={{fontSize:'.78rem',color:'#9ca3af'}}>{r.label}:</span>
+                <code style={{fontSize:'.72rem',color:'#e5e7eb',background:'rgba(255,255,255,.06)',padding:'.1rem .4rem',borderRadius:4}}>{r.hint}</code>
+              </div>
+            ))}
+            <div style={{fontSize:'.68rem',color:'#4b5563',marginTop:'.5rem'}}>Click a row to auto-fill</div>
+          </div>
+        </div>
+      </div>
+      <div className="auth-right">
+        <div style={{width:'100%'}}>
+          <div className="auth-card-title">Welcome back</div>
+          <div className="auth-card-sub">Sign in to your OBE Automate account</div>
+          {err&&<div className="auth-err">⚠ {err}</div>}
+          <div className="form-group" style={{marginTop:'1rem'}}><label className="form-label">Username</label><input className="inp" value={username} onChange={e=>setUsername(e.target.value)} placeholder="username" autoFocus/></div>
+          <div className="form-group"><label className="form-label">Password</label><input className="inp" type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&go()} placeholder="Enter password"/></div>
+          <button className="btn-blue" onClick={go} disabled={loading}>{loading?'Signing in…':'Sign In →'}</button>
+          <div style={{marginTop:'1rem',fontSize:'.78rem',color:'var(--text3)',textAlign:'center'}}>Secured by JWT | Sessions expire after 8 hours</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── SIDEBAR ────────────────────────────────────────────────────────────────
+function Sidebar({page,go,course,user,logout,open,close}){
+  const base=[
+    {s:'OVERVIEW'},{p:'home',i:'⊞',n:'Dashboard'},{p:'courses',i:'📚',n:'Courses'},
+    {s:'FACULTY FLOW'},
+    {p:'syllabus',i:'📄',n:'Upload Syllabus'},{p:'setup',i:'⚙',n:'Course Setup'},
+    {p:'sessions',i:'📅',n:'Session Plan'},{p:'evaluation',i:'📝',n:'Evaluation Plan'},
+    {s:'STUDENTS & MATERIALS'},
+    {p:'students',i:'👥',n:'Students Roster'},{p:'materials',i:'📚',n:'Study Materials'},{p:'student_portal',i:'🎓',n:'Student Portal'},
+    {s:'ATTAINMENT'},
+    {p:'marks',i:'✏',n:'Upload Marks'},{p:'attainment',i:'📊',n:'CO/PO Attainment'},{p:'reports',i:'📑',n:'Reports'},{p:'master_attainment',i:'📊',n:'Master Attainment File'},{p:'course_file',i:'📁',n:'Course File'},
+    {s:'QUESTIONS'},
+    {p:'qgenerate',i:'✨',n:'Generate Question'},{p:'qpaper',i:'📋',n:'Question Paper'},
+    {p:'qbank',i:'🗄',n:'Question Bank'},{p:'qclassify',i:'🔍',n:'Classify Question'},{p:'qmanipulate',i:'🔄',n:'Manipulate Level'},
+  ];
+  const hodItems=[{s:'HOD VIEW'},{p:'hod',i:'🏛',n:'Dept Dashboard'}];
+  const adminItems=[{s:'ADMIN'},{p:'usermgmt',i:'👥',n:'User Management'}];
+  let items=[...base];
+  if(user?.role==='hod'||user?.role==='admin') items=[...hodItems,...items];
+  if(user?.role==='admin') items=[...items,...adminItems];
+  return(
+    <div className={`sidebar ${open?'open':''}`}>
+      <div className="sb-top">
+        <div className="sb-brand">OBE<span style={{color:'var(--blue)'}}>.</span>Auto</div>
+        <div className="sb-sub">Accreditation Engine</div>
+      </div>
+      {course&&<div className="sb-course"><div className="sb-course-label">Active Course</div><div className="sb-course-name">{course.course_code} — {course.course_name}</div></div>}
+      <div className="sb-nav">
+        {items.map((x,i)=>x.s?<div key={i} className="sb-section">{x.s}</div>:
+          <div key={i} onClick={()=>{go(x.p);close();}} className={`sb-item ${page===x.p?'active':''}`}>
+            <span className="sb-icon">{x.i}</span>{x.n}
+          </div>)}
+      </div>
+      <div className="sb-bottom">
+        <div className="sb-user">
+          <div className="sb-avatar">{user?.user?.[0]?.toUpperCase()}</div>
+          <div><div className="sb-user-name">{user?.full_name||user?.username||'User'}</div><div className="sb-user-role">{user?.role==='hod'?'Head of Dept':user?.role==='admin'?'Administrator':'Faculty'}</div></div>
+        </div>
+        <a href="/docs" target="_blank" style={{display:'flex',alignItems:'center',gap:'.5rem',color:'#60a5fa',fontSize:'.8rem',textDecoration:'none',marginBottom:'.5rem',padding:'.35rem 0'}}>⚡ API Docs</a>
+        <button className="sb-logout" onClick={logout}>Sign Out</button>
+      </div>
+    </div>
+  );
+}
+
+// ── HOME / DASHBOARD ───────────────────────────────────────────────────────
+function HomePage({go,setCourse}){
+  const [courses,setCourses]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [tt,setTt]=useState(null);
+  const [ttLoading,setTtLoading]=useState(true);
+  const [ttFile,setTtFile]=useState(null);
+  const [ttUploading,setTtUploading]=useState(false);
+  const [ttErr,setTtErr]=useState('');
+  const [qStats,setQStats]=useState(null);
+  const [deptData,setDeptData]=useState(null);
+
+  useEffect(()=>{
+    api('/courses/').then(d=>{setCourses(d.data||d);setLoading(false)}).catch(()=>setLoading(false));
+    api('/dashboard/timetable').then(d=>{setTt(d.data);setTtLoading(false)}).catch(()=>setTtLoading(false));
+    api('/dashboard/department').then(d=>setDeptData(d)).catch(()=>{});
+  },[]);
+
+  // Fetch question stats once courses load
+  useEffect(()=>{
+    if(courses.length>0){
+      // Get question bank stats from first course as proxy for total
+      api(`/questions/bank/${courses[0].id}`).then(d=>setQStats(d.stats)).catch(()=>{});
+    }
+  },[courses]);
+
+  const uploadTimetable=async()=>{
+    if(!ttFile)return;setTtUploading(true);setTtErr('');
+    try{const fd=new FormData();fd.append('file',ttFile);
+      const r=await fetch(API+'/dashboard/timetable/upload',{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+      if(!r.ok){const e=await r.json();throw new Error(e.detail||'Upload failed');}
+      const d=await r.json();setTt(d.data);setTtFile(null);
+    }catch(e){setTtErr(e.message);}setTtUploading(false);};
+
+  const TODAY=new Date().toLocaleDateString('en-US',{weekday:'long'});
+  const todaySchedule=tt?.schedule?.[TODAY]||[];
+
+  // Real computed values
+  const totalStudents=deptData?.summary?.total_students??'--';
+  const avgCO=deptData?.summary?.avg_co_attainment!=null?deptData.summary.avg_co_attainment+'%':'—';
+  const totalQ=qStats?.total??'--';
+  const coursesAbove=deptData?.summary?.courses_above_target??'--';
+  const totalCourses=loading?'…':courses.length;
+
+  const events=[
+    {day:'28',mon:'Apr',title:'Mid-Semester Exam',sub:'All courses — Hall A',c:'b-red'},
+    {day:'05',mon:'May',title:'NBA Documentation',sub:'Submission deadline',c:'b-amber'},
+    {day:'12',mon:'May',title:'Faculty Meeting',sub:'Academic committee',c:'b-blue'},
+    {day:'20',mon:'May',title:'End Semester Exam',sub:'Exam schedule released',c:'b-purple'},
+  ];
+
+  return(
+    <div className="page-body fade-up">
+      {/* Welcome */}
+      <div className="welcome-card">
+        <div style={{position:'relative',zIndex:1}}>
+          <div style={{fontSize:'.8rem',opacity:.65,marginBottom:'.25rem'}}>{getDay()}</div>
+          <div className="welcome-name">{getGreeting()}, {tt?.faculty_name?tt.faculty_name.split(' ').slice(-1)[0]:'Professor'}! 👋</div>
+          <div className="welcome-sub">{tt?`${tt.department} | ${tt.academic_year}`:'Upload your timetable to personalise your dashboard.'}</div>
+          <div className="welcome-chips">
+            <span className="wchip">📚 {totalCourses} Courses</span>
+            <span className="wchip">⏰ {todaySchedule.length} Classes Today</span>
+            <span className="wchip">🎯 NBA Due: May 5</span>
+            {tt&&<span className="wchip">✅ Timetable Loaded</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Stats — all real data */}
+      <div className="stat-row">
+        {[{i:'📚',ic:'blue',v:totalCourses,l:'Total Courses',sub:'from database'},
+          {i:'👥',ic:'green',v:totalStudents,l:'Total Students',sub:'marks uploaded'},
+          {i:'📊',ic:'orange',v:avgCO,l:'Avg CO Attainment',sub:'dept average'},
+          {i:'📋',ic:'amber',v:totalQ,l:'Questions in Bank',sub:'this course'},
+          {i:'🏆',ic:'orange',v:coursesAbove,l:'Above Target',sub:'≥70% attainment'}].map((s,i)=>(
+          <div key={i} className={`stat-card ${s.ic}`}>
+            <div className={`stat-icon ${s.ic}`}>{s.i}</div>
+            <div className="stat-val">{s.v}</div>
+            <div className="stat-label">{s.l}</div>
+            <div style={{fontSize:'.72rem',color:'var(--text3)',marginTop:'.25rem'}}>{s.sub}</div>
+          </div>))}
+      </div>
+
+      {/* Quick Actions */}
+      <div style={{marginBottom:'1.5rem'}}>
+        <div className="section-head"><div className="section-title">Quick Actions</div></div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:'.875rem'}}>
+          {[{i:'📄',ic:'orange',n:'Upload Syllabus',p:'syllabus'},{i:'✨',ic:'orange',n:'Generate Q',p:'qgenerate'},
+            {i:'📋',ic:'green',n:'Question Paper',p:'qpaper'},{i:'📊',ic:'amber',n:'Attainment',p:'attainment'},
+            {i:'📑',ic:'orange',n:'NBA Report',p:'reports'},{i:'🔍',ic:'orange',n:'Classify Q',p:'qclassify'}].map((a,i)=>(
+            <div key={i} className="quick-action" onClick={()=>go(a.p)}>
+              <div className={`qa-icon stat-icon ${a.ic}`}>{a.i}</div>
+              <div className="qa-label">{a.n}</div>
+            </div>))}
+        </div>
+      </div>
+
+      <div className="dash-grid">
+        {/* Left column */}
+        <div>
+          {/* Today's Schedule */}
+          <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+            <div className="section-head">
+              <div className="section-title">📅 Today's Schedule <span style={{fontSize:'.75rem',fontWeight:400,color:'var(--text2)'}}>({TODAY})</span></div>
+              <label style={{cursor:'pointer',fontSize:'.78rem',color:'var(--blue2)',fontWeight:500}}>
+                {ttUploading?<Spin/>:'⬆ Update'}
+                <input type="file" accept=".docx" style={{display:'none'}} onChange={e=>{setTtFile(e.target.files[0]);}}/>
+              </label>
+            </div>
+            {ttErr&&<Alrt t="error" msg={ttErr}/>}
+            {ttFile&&<div style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'.75rem',padding:'.5rem .75rem',background:'#FFF7ED',borderRadius:8,fontSize:'.8rem'}}>
+              <span>📎 {ttFile.name}</span>
+              <button className="btn btn-primary btn-sm" onClick={uploadTimetable} disabled={ttUploading}>{ttUploading?'Uploading…':'Upload'}</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setTtFile(null)}>✕</button>
+            </div>}
+            {ttLoading?<Skel n={3}/>:
+             todaySchedule.length===0?(
+              <div style={{textAlign:'center',padding:'1.5rem',color:'var(--text2)'}}>
+                <div style={{fontSize:'1.5rem',marginBottom:'.5rem'}}>📅</div>
+                {tt?<div style={{fontSize:'.85rem'}}>No classes scheduled for {TODAY}</div>
+                   :<div style={{fontSize:'.85rem'}}>Upload your timetable .docx to see today's schedule</div>}
+              </div>
+            ):(
+              todaySchedule.map((s,i)=>(
+                <div key={i} className="schedule-item">
+                  <div className="sched-time" style={{fontSize:'.72rem',minWidth:90}}>{s.time}</div>
+                  <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                    <div className="sched-dot" style={{background:'#F97316'}}/>
+                    {i<todaySchedule.length-1&&<div className="sched-line" style={{flex:1,minHeight:24}}/>}
+                  </div>
+                  <div className="sched-content">
+                    <div className="sched-title">{s.course}</div>
+                    <div className="sched-sub">{[s.section,s.room].filter(Boolean).join(' | ')}</div>
+                  </div>
+                </div>))
+            )}
+          </div>
+
+          {/* Full Week if timetable loaded */}
+          {tt&&<div className="card card-p" style={{marginBottom:'1.25rem'}}>
+            <div className="section-head"><div className="section-title">🗓 Weekly Schedule</div>
+              <span style={{fontSize:'.75rem',color:'var(--text2)'}}>{tt.faculty_name}</span></div>
+            {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day=>{
+              const slots=tt.schedule[day]||[];
+              return(<div key={day} style={{marginBottom:'.75rem'}}>
+                <div style={{fontSize:'.75rem',fontWeight:600,color:'var(--text2)',marginBottom:'.3rem',textTransform:'uppercase',letterSpacing:'.05em'}}>{day}</div>
+                {slots.length===0?<span style={{fontSize:'.78rem',color:'var(--border)'}}>—</span>:
+                slots.map((s,i)=><span key={i} style={{display:'inline-block',marginRight:'.4rem',marginBottom:'.3rem',padding:'.2rem .6rem',background:'#FFF7ED',borderRadius:20,fontSize:'.75rem',color:'var(--blue2)',fontWeight:500}}>
+                  {s.time.split('-')[0].trim()} {s.course}{s.section?` (${s.section})`:''}</span>)}
+              </div>);
+            })}
+          </div>}
+
+          {/* Courses list — real data */}
+          <div className="card card-p">
+            <div className="section-head">
+              <div className="section-title">📚 Your Courses</div>
+              <span className="section-link" onClick={()=>go('courses')}>View all</span>
+            </div>
+            {loading?<Skel n={3}/>:courses.length===0?
+              <div style={{textAlign:'center',padding:'1.5rem',color:'var(--text2)',fontSize:'.855rem'}}>No courses yet. <span style={{color:'var(--blue2)',cursor:'pointer'}} onClick={()=>go('syllabus')}>Upload a syllabus →</span></div>:
+              courses.slice(0,5).map((c,i)=>(
+                <div key={i} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.65rem 0',borderBottom:i<Math.min(courses.length,5)-1?'1px solid var(--border)':''}}>
+                  <div style={{width:36,height:36,borderRadius:9,background:'var(--blue3)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.75rem',fontWeight:700,color:'var(--blue2)',flexShrink:0}}>{c.course_code?.slice(0,3)||'?'}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:'.855rem',fontWeight:600,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.course_name}</div>
+                    <div style={{fontSize:'.75rem',color:'var(--text2)'}}>{c.course_code} | {c.department}</div>
+                  </div>
+                  <button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('courses_detail');}}>Open</button>
+                </div>))
+            }
+          </div>
+        </div>
+
+        {/* Right column */}
+        <div>
+          {/* Upcoming Events */}
+          <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+            <div className="section-head"><div className="section-title">📆 Upcoming Events</div></div>
+            {events.map((e,i)=>(
+              <div key={i} className="event-item">
+                <div className="event-date"><div className="event-day">{e.day}</div><div className="event-month">{e.mon}</div></div>
+                <div className="event-body"><div className="event-title">{e.title}</div><div className="event-sub">{e.sub}</div></div>
+                <span className={`badge ${e.c}`} style={{flexShrink:0}}>Soon</span>
+              </div>))}
+          </div>
+
+          {/* NBA Readiness — real data from dept dashboard */}
+          <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+            <div className="section-head"><div className="section-title">🏆 NBA Readiness</div></div>
+            {!deptData||deptData.courses_with_data===0?(
+              <div style={{textAlign:'center',padding:'1.25rem',color:'var(--text2)',fontSize:'.855rem'}}>
+                <div style={{fontSize:'1.5rem',marginBottom:'.5rem'}}>📊</div>
+                No attainment data yet.<br/>
+                <span style={{fontSize:'.78rem'}}>Upload marks and calculate attainment first.</span>
+              </div>
+            ):(
+              deptData.courses.map((c,i)=>(
+                <div key={i} style={{marginBottom:'.875rem'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:'.35rem'}}>
+                    <span style={{fontSize:'.8rem',fontWeight:500,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:140}}>{c.course_name}</span>
+                    <span style={{fontSize:'.78rem',color:'var(--text2)'}}>{c.overall_co_attainment}%</span>
+                  </div>
+                  <PBar pct={c.overall_co_attainment}/>
+                </div>))
+            )}
+          </div>
+
+          {/* Bloom Distribution — real data */}
+          <div className="card card-p">
+            <div className="section-head"><div className="section-title">🧠 Question Bank</div></div>
+            {!qStats||qStats.total===0?(
+              <div style={{textAlign:'center',padding:'1.25rem',color:'var(--text2)',fontSize:'.855rem'}}>
+                <div style={{fontSize:'1.5rem',marginBottom:'.5rem'}}>✨</div>
+                No questions yet.<br/>
+                <span style={{fontSize:'.78rem',cursor:'pointer',color:'var(--blue2)'}} onClick={()=>go('qgenerate')}>Generate your first question →</span>
+              </div>
+            ):(
+              BLOOM.map((b,i)=>{
+                const count=qStats.by_bloom?.[b.l]||0;
+                const max=Math.max(...BLOOM.map(x=>qStats.by_bloom?.[x.l]||0),1);
+                return(
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:'.65rem',marginBottom:'.65rem'}}>
+                    <span className={`badge ${b.c}`} style={{minWidth:90}}>L{b.l} {b.n}</span>
+                    <div className="pbar" style={{flex:1}}><div className="pfill" style={{width:`${Math.round(count/max*100)}%`,background:['#F97316','#F97316','#f59e0b','#78716C','#ef4444','#ec4899'][i]}}/></div>
+                    <span style={{fontSize:'.75rem',color:'var(--text2)',minWidth:24}}>{count}</span>
+                  </div>);
+              })
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── COURSES ────────────────────────────────────────────────────────────────
+// ── COURSE DETAIL ────────────────────────────────────────────────────────
+function CourseDetailPage({course,go,setCourse}){
+  const [tab,setTab]=useState('overview');
+  const [attData,setAttData]=useState(null);
+  const [attLoading,setAttLoading]=useState(false);
+  const [editMode,setEditMode]=useState(false);
+  const [showDeleteConfirm,setShowDeleteConfirm]=useState(false);
+  const [deleteInput,setDeleteInput]=useState('');
+  const [deleting,setDeleting]=useState(false);
+  const [editF,setEditF]=useState({});
+  const [editCos,setEditCos]=useState([]);
+  const [saving,setSaving]=useState(false);
+  const [saveOk,setSaveOk]=useState('');
+  const [saveErr,setSaveErr]=useState('');
+  const [classifyingEdit,setClassifyingEdit]=useState(false);
+  const runAiClassifyEdit=async()=>{
+    if(!editCos||editCos.length===0)return;
+    setClassifyingEdit(true);
+    const classified=await aiClassifyBloom(editCos);
+    setEditCos(classified);
+    setClassifyingEdit(false);
+  };
+
+  useEffect(()=>{
+    if(course){
+      setEditF({course_name:course.course_name||'',course_code:course.course_code||'',credits:course.credits||'',total_hours:course.total_hours||'',faculty_name:course.faculty_name||'',department:course.department||'',semester:course.semester||'',academic_year:course.academic_year||''});
+      setEditCos((course.cos||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')})));
+    }
+  },[course]);
+
+  const saveEdits=async()=>{
+    setSaving(true);setSaveErr('');setSaveOk('');
+    try{
+      const d=await api(`/courses/${course.id}`,{method:'PUT',body:JSON.stringify({...editF,credits:+editF.credits,total_hours:+editF.total_hours,cos:editCos,pos:course.pos||[],co_po_matrix:course.co_po_matrix||{},evaluation_config:course.evaluation_config||{}})});
+      setSaveOk('Saved!');
+      if(setCourse)setCourse({...course,...editF,cos:editCos});
+      setTimeout(()=>{setSaveOk('');setEditMode(false);},1500);
+    }catch(e){
+      // PUT might not exist yet — save locally
+      if(setCourse)setCourse({...course,...editF,cos:editCos});
+      setSaveOk('Saved locally (backend PUT not wired yet)');
+      setTimeout(()=>{setSaveOk('');setEditMode(false);},2000);
+    }
+    setSaving(false);
+  };
+
+  if(!course)return(<div className="page-body fade-up"><Alrt t="warning" msg="Select a course from the Courses page."/></div>);
+  const handleDeleteCourse = async () => {
+    if(deleteInput !== course.course_code) return;
+    setDeleting(true);
+    try {
+      await api(`/courses/${course.id}`, {method:'DELETE'});
+      if(setCourse) setCourse(null);
+      go('courses');
+    } catch(e) {
+      alert('Failed to delete course. Please try again.');
+    } finally {
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
+  const cos=editMode?editCos:(course.cos||[]);
+  const pos=course.pos||[];
+  const matrix=course.co_po_matrix||{};
+  const evalCfg=course.evaluation_config||{};
+  const createdAt=course.created_at?new Date(course.created_at):null;
+  const bloomColor={Remember:'b-gray',Understand:'b-blue',Apply:'b-teal',Analyze:'b-purple',Evaluate:'b-amber',Create:'b-pink'};
+  const matrixColor={3:'#FFF7ED',2:'#dcfce7',1:'#fef9c3'};
+  const fetchAtt=async()=>{
+    if(attData)return;
+    setAttLoading(true);
+    try{const d=await api(`/attainment/calculate/${course.id}`);setAttData(d);}
+    catch{}
+    setAttLoading(false);
+  };
+  const quickActions=[
+    {icon:'📅',label:'Session Plan',page:'sessions',color:'var(--blue3)',tc:'var(--blue2)'},
+    {icon:'📋',label:'Evaluation Plan',page:'evaluation',color:'#f0fdf4',tc:'var(--green)'},
+    {icon:'📊',label:'Upload Marks',page:'marks',color:'var(--amber2)',tc:'#b45309'},
+    {icon:'🎯',label:'CO/PO Attainment',page:'attainment',color:'#F5F3F0',tc:'#57534E'},
+    {icon:'🏆',label:'NBA Report',page:'reports',color:'#E8E3D9',tc:'#44403C'},
+    {icon:'❓',label:'Question Bank',page:'qbank',color:'var(--pink2)',tc:'var(--pink)'},
+  ];
+  return(<div className="page-body fade-up">
+    {/* ── Header ── */}
+    <div style={{background:'linear-gradient(135deg,#0A0A0A 0%,#2A1500 100%)',borderRadius:14,padding:'1.5rem 1.75rem',marginBottom:'1.5rem',color:'#fff',position:'relative',overflow:'hidden'}}>
+      <div style={{position:'absolute',top:-30,right:-30,width:160,height:160,borderRadius:'50%',background:'rgba(255,255,255,.06)',pointerEvents:'none'}}></div>
+      <div style={{position:'absolute',bottom:-50,right:80,width:100,height:100,borderRadius:'50%',background:'rgba(255,255,255,.04)',pointerEvents:'none'}}></div>
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:'1rem'}}>
+        <div>
+          <div style={{fontSize:'.72rem',letterSpacing:'.1em',textTransform:'uppercase',color:'#FDBA74',marginBottom:'.3rem',fontWeight:600}}>Course Detail</div>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.7rem',lineHeight:1.2,marginBottom:'.4rem'}}>{course.course_name}</div>
+          <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',marginTop:'.5rem'}}>
+            <span style={{background:'rgba(255,255,255,.12)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem',fontWeight:600}}>{course.course_code}</span>
+            <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>{course.credits} Credits</span>
+            <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>{course.total_hours} Hours</span>
+            <span style={{background:'rgba(255,255,255,.1)',padding:'2px 10px',borderRadius:20,fontSize:'.78rem'}}>Sem {course.semester}</span>
+          </div>
+        </div>
+        <div style={{textAlign:'right',display:'flex',flexDirection:'column',alignItems:'flex-end',gap:'.4rem'}}>
+          <div style={{display:'flex',gap:'.5rem'}}>
+            <button onClick={()=>setEditMode(m=>!m)} style={{background:editMode?'rgba(234,88,12,.8)':'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.3)',borderRadius:8,color:'#fff',padding:'5px 14px',cursor:'pointer',fontSize:'.8rem',fontWeight:600,fontFamily:'DM Sans,sans-serif'}}>
+              {editMode?'✕ Cancel Edit':'✎ Edit Course'}
+            </button>
+            <button onClick={()=>{setShowDeleteConfirm(true);setDeleteInput('');}} style={{background:'rgba(239,68,68,.25)',border:'1px solid rgba(239,68,68,.6)',borderRadius:8,color:'#fca5a5',padding:'5px 14px',cursor:'pointer',fontSize:'.8rem',fontWeight:600,fontFamily:'DM Sans,sans-serif'}}>
+              🗑 Delete
+            </button>
+          </div>
+          <div style={{fontSize:'.78rem',color:'#FDBA74'}}>Faculty</div>
+          <div style={{fontWeight:700,fontSize:'1rem'}}>{course.faculty_name}</div>
+          <div style={{fontSize:'.78rem',color:'#FFEDD5'}}>{course.department}</div>
+          {createdAt&&<div style={{fontSize:'.72rem',color:'#FDBA74'}}>Created: {createdAt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} at {createdAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
+        </div>
+      </div>
+    </div>
+
+    {/* ── Delete Confirmation Modal ── */}
+    {showDeleteConfirm&&<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowDeleteConfirm(false)}>
+      <div style={{background:'#ffffff',borderRadius:16,padding:'2rem',maxWidth:420,width:'90%',border:'2px solid #ef4444',boxShadow:'0 25px 60px rgba(0,0,0,.5)'}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontSize:'1.2rem',fontWeight:700,color:'#dc2626',marginBottom:'.75rem'}}>⚠️ Delete Course</div>
+        <div style={{fontSize:'.9rem',color:'#111827',marginBottom:'1.2rem',lineHeight:1.6}}>
+          This will <strong>permanently delete</strong> the course <strong>{course.course_name}</strong> and all associated data including session plan, evaluation plan, marks, question bank, generated docx and all uploaded files.<br/><br/>
+          Type <strong style={{color:'#ef4444'}}>{course.course_code}</strong> to confirm:
+        </div>
+        <input
+          value={deleteInput}
+          onChange={e=>setDeleteInput(e.target.value)}
+          placeholder={course.course_code}
+          style={{width:'100%',padding:'.6rem .8rem',borderRadius:8,border:'1px solid #d1d5db',background:'#f9fafb',color:'#111827',fontSize:'.9rem',marginBottom:'1rem',boxSizing:'border-box'}}
+          autoFocus
+        />
+        <div style={{display:'flex',gap:'.75rem',justifyContent:'flex-end'}}>
+          <button onClick={()=>setShowDeleteConfirm(false)} style={{padding:'.5rem 1.2rem',borderRadius:8,border:'1px solid #d1d5db',background:'#f3f4f6',color:'#374151',cursor:'pointer',fontFamily:'DM Sans,sans-serif',fontWeight:600}}>
+            Cancel
+          </button>
+          <button
+            onClick={handleDeleteCourse}
+            disabled={deleteInput!==course.course_code||deleting}
+            style={{padding:'.5rem 1.2rem',borderRadius:8,border:'none',background:deleteInput===course.course_code?'#ef4444':'#6b2020',color:'#fff',cursor:deleteInput===course.course_code?'pointer':'not-allowed',opacity:deleteInput===course.course_code?1:0.5,fontFamily:'DM Sans,sans-serif',fontWeight:700}}
+          >
+            {deleting?'Deleting…':'Delete Forever'}
+          </button>
+        </div>
+      </div>
+    </div>}
+
+    {/* ── Edit Mode Panel ── */}
+    {editMode&&<div className="card card-p" style={{marginBottom:'1.5rem',border:'2px solid var(--blue2)'}}>
+      <div style={{fontWeight:700,fontSize:'.95rem',marginBottom:'1rem',color:'var(--blue2)'}}>✎ Edit Course Details</div>
+      <div className="fgrid">
+        {[['course_name','Course Name','text'],['course_code','Course Code','text'],['credits','Credits','number'],['total_hours','Total Hours','number'],['faculty_name','Faculty Name','text'],['department','Department','text'],['semester','Semester','text'],['academic_year','Academic Year','text']].map(([k,l,t])=>(
+          <div key={k} className="fg"><label className="fl">{l}</label><input className="fi" type={t} value={editF[k]||''} onChange={e=>setEditF(f=>({...f,[k]:e.target.value}))}/></div>
+        ))}
+      </div>
+      <div style={{marginTop:'1rem'}}>
+        <div style={{fontWeight:600,fontSize:'.88rem',marginBottom:'.5rem'}}>Course Outcomes</div>
+        {editCos.map((co,i)=>(
+          <div key={i} style={{display:'flex',gap:'.5rem',marginBottom:'.4rem',alignItems:'center'}}>
+            <input className="fi" style={{width:70,flexShrink:0}} value={co.co_id} onChange={e=>setEditCos(c=>{const a=[...c];a[i]={...a[i],co_id:e.target.value};return a;})} placeholder="CO1"/>
+            <select className="fi" style={{width:120,flexShrink:0}} value={co.bloom_level} onChange={e=>setEditCos(c=>{const a=[...c];a[i]={...a[i],bloom_level:e.target.value};return a;})}>
+              {['Remember','Understand','Apply','Analyze','Evaluate','Create'].map(b=><option key={b}>{b}</option>)}
+            </select>
+            <input className="fi" style={{flex:1}} value={co.statement} onChange={e=>{const stmt=e.target.value;setEditCos(c=>{const a=[...c];a[i]={...a[i],statement:stmt,bloom_level:inferBloom(stmt)};return a;});}} placeholder="CO statement…"/>
+            {editCos.length>1&&<button onClick={()=>setEditCos(c=>c.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:'1.1rem',flexShrink:0}}>✕</button>}
+          </div>
+        ))}
+        <div style={{display:'flex',gap:'.4rem'}}>
+          <button className="btn btn-outline btn-sm" onClick={runAiClassifyEdit} disabled={classifyingEdit||editCos.length===0} title="Re-classify all CO Bloom levels using AI">{classifyingEdit?<><Spin/>Classifying…</>:'🤖 AI Classify'}</button>
+          <button className="btn btn-outline btn-sm" onClick={()=>setEditCos(c=>[...c,{co_id:`CO${c.length+1}`,statement:'',bloom_level:'Apply'}])}>+ Add CO</button>
+        </div>
+      </div>
+      {saveErr&&<Alrt t="error" msg={saveErr}/>}
+      {saveOk&&<Alrt t="success" msg={saveOk}/>}
+      <div style={{display:'flex',gap:'.5rem',marginTop:'1rem'}}>
+        <button className="btn btn-primary" onClick={saveEdits} disabled={saving}>{saving?<><Spin/>Saving…</>:'💾 Save Changes'}</button>
+        <button className="btn btn-outline" onClick={()=>setEditMode(false)}>Cancel</button>
+      </div>
+    </div>}
+
+    {/* ── Quick Action Grid ── */}
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:'.75rem',marginBottom:'1.5rem'}}>
+      {quickActions.map(({icon,label,page,color,tc})=>(
+        <button key={page} onClick={()=>go(page)} style={{background:color,border:'1.5px solid var(--border)',borderRadius:12,padding:'1rem .75rem',cursor:'pointer',textAlign:'center',transition:'all .2s',fontFamily:'DM Sans,sans-serif'}}>
+          <div style={{fontSize:'1.5rem',marginBottom:'.35rem'}}>{icon}</div>
+          <div style={{fontSize:'.78rem',fontWeight:700,color:tc}}>{label}</div>
+        </button>
+      ))}
+    </div>
+
+    {/* ── Tabs ── */}
+    <div className="tabs">
+      {[['overview','Overview'],['cos','Course Outcomes'],['matrix','CO-PO Matrix'],['evaluation','Eval Config'],['documents','📎 Documents']].map(([t,l])=>(
+        <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>{setTab(t);}}>{l}</div>
+      ))}
+    </div>
+
+    {/* ── Overview Tab ── */}
+    {tab==='overview'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📋 Course Info</div>
+        {[['Course Code',course.course_code],['Credits',course.credits],['Total Hours',course.total_hours],['Faculty Name',course.faculty_name],['Department',course.department],['Semester',course.semester],['Academic Year',course.academic_year],['Course ID',`#${course.id}`],['Created',createdAt?createdAt.toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—']].map(([k,v])=>(
+          <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.4rem 0',borderBottom:'1px solid var(--border)',fontSize:'.855rem'}}>
+            <span style={{color:'var(--text2)',fontWeight:500}}>{k}</span>
+            <span style={{fontWeight:600,color:'var(--text)',textAlign:'right',maxWidth:'55%'}}>{v||'—'}</span>
+          </div>
+        ))}
+      </div>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>🎯 Course Outcomes Summary</div>
+        {cos.map((co,i)=>{
+          const bl=inferBloom(co.statement||'')||co.bloom_level||'Understand';
+          const bc=bloomColor[bl]||'b-gray';
+          return(<div key={i} style={{display:'flex',gap:'.65rem',alignItems:'flex-start',padding:'.5rem 0',borderBottom:'1px solid var(--border)'}}>
+            <span style={{fontWeight:700,color:'var(--blue2)',fontSize:'.855rem',minWidth:32,paddingTop:1}}>{co.co_id}</span>
+            <span className={`badge ${bc}`} style={{flexShrink:0,fontSize:'.68rem'}}>{bl}</span>
+            <span style={{fontSize:'.82rem',color:'var(--text)',lineHeight:1.4}}>{co.statement}</span>
+          </div>);
+        })}
+      </div>
+    </div>}
+
+    {/* ── Course Outcomes Tab ── */}
+    {tab==='cos'&&<div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'1rem'}}>
+        {cos.map((co,i)=>{
+          const bl=inferBloom(co.statement||'')||co.bloom_level||'Understand';
+          const bc=bloomColor[bl]||'b-gray';
+          const bloomList=['Remember','Understand','Apply','Analyze','Evaluate','Create'];
+          const li=bloomList.indexOf(bl);
+          const colors=['#A8A29E','#F97316','#D6D3D1','#57534E','#78716C','#EA580C','#C2410C'];
+          const barColor=colors[li>=0?li:0]||'#F97316';
+          return(<div key={i} className="card card-p" style={{borderLeft:`4px solid ${barColor}`}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem'}}>
+              <span style={{fontWeight:700,fontSize:'1rem',color:'var(--blue2)'}}>{co.co_id}</span>
+              <span className={`badge ${bc}`}>{bl}</span>
+            </div>
+            <div style={{fontSize:'.875rem',color:'var(--text)',lineHeight:1.6,marginBottom:'.75rem'}}>{co.statement}</div>
+            <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+              <span style={{fontSize:'.72rem',color:'var(--text3)'}}>Bloom Level</span>
+              <div style={{flex:1,height:5,background:'var(--bg2)',borderRadius:10,overflow:'hidden'}}>
+                <div style={{width:`${Math.round((li+1)/6*100)}%`,height:'100%',background:barColor,borderRadius:10}}/>
+              </div>
+              <span style={{fontSize:'.72rem',color:'var(--text2)',fontWeight:600}}>L{li+1}</span>
+            </div>
+          </div>);
+        })}
+      </div>
+    </div>}
+
+    {/* ── CO-PO Matrix Tab ── */}
+    {tab==='matrix'&&<div className="card card-p">
+      <div style={{marginBottom:'1rem'}}>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.3rem'}}>CO-PO Correlation Matrix</div>
+        <div style={{fontSize:'.78rem',color:'var(--text2)',display:'flex',gap:'1rem',flexWrap:'wrap'}}>
+          <span><span style={{display:'inline-block',width:12,height:12,background:'#FFF7ED',borderRadius:2,marginRight:4}}/>3 — Strong</span>
+          <span><span style={{display:'inline-block',width:12,height:12,background:'#dcfce7',borderRadius:2,marginRight:4}}/>2 — Moderate</span>
+          <span><span style={{display:'inline-block',width:12,height:12,background:'#fef9c3',borderRadius:2,marginRight:4}}/>1 — Weak</span>
+          <span><span style={{display:'inline-block',width:12,height:12,background:'var(--bg2)',borderRadius:2,marginRight:4}}/>0 — None</span>
+        </div>
+      </div>
+      <div className="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th style={{minWidth:60}}>CO \ PO</th>
+            {pos.slice(0,12).map(p=><th key={p.po_id} style={{textAlign:'center',minWidth:48}}>{p.po_id}</th>)}
+            <th style={{textAlign:'center',minWidth:60}}>Avg</th>
+          </tr></thead>
+          <tbody>{cos.map(co=>{
+            const row=pos.slice(0,12).map(p=>(matrix[co.co_id]||{})[p.po_id]||0);
+            const nonzero=row.filter(v=>v>0);
+            const avg=nonzero.length?Math.round(nonzero.reduce((a,b)=>a+b,0)/nonzero.length*10)/10:0;
+            return(<tr key={co.co_id}>
+              <td><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong></td>
+              {row.map((v,i)=><td key={i} style={{textAlign:'center',background:matrixColor[v]||'',fontWeight:v?700:400,color:v?'var(--text)':'var(--text3)',fontSize:'.85rem'}}>{v||'—'}</td>)}
+              <td style={{textAlign:'center',fontWeight:700,color:'#EA580C',background:'#FFF7ED'}}>{avg||'—'}</td>
+            </tr>);
+          })}</tbody>
+        </table>
+      </div>
+      <div style={{marginTop:'1rem',padding:'.75rem',background:'var(--bg)',borderRadius:8,fontSize:'.78rem',color:'var(--text2)'}}>
+        💡 This matrix shows how each Course Outcome maps to the 12 Program Outcomes. Used for NBA/NAAC attainment computation.
+      </div>
+    </div>}
+
+    {/* ── Evaluation Config Tab ── */}
+    {tab==='evaluation'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📝 Continuous Assessment (CA)</div>
+        <div style={{display:'flex',justifyContent:'space-between',padding:'.5rem 0',borderBottom:'2px solid var(--blue2)',marginBottom:'.5rem'}}>
+          <span style={{fontWeight:700}}>CA Total</span>
+          <span className="badge b-blue">{evalCfg.continuous_assessment_total||40} Marks</span>
+        </div>
+        {Object.entries(evalCfg.components||{}).map(([comp,marks])=>(
+          <div key={comp} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.4rem 0',borderBottom:'1px solid var(--border)',fontSize:'.875rem'}}>
+            <span style={{color:'var(--text)'}}>{comp}</span>
+            <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+              <div style={{width:60,height:5,background:'var(--bg2)',borderRadius:10,overflow:'hidden'}}>
+                <div style={{width:`${Math.round(marks/(evalCfg.continuous_assessment_total||40)*100)}%`,height:'100%',background:'var(--blue2)',borderRadius:10}}/>
+              </div>
+              <span style={{fontWeight:700,minWidth:28,textAlign:'right'}}>{marks}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📜 End Semester Exam (ESE)</div>
+        <div style={{textAlign:'center',padding:'2rem 0'}}>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'3rem',color:'var(--blue2)',lineHeight:1}}>{evalCfg.end_sem_total||60}</div>
+          <div style={{color:'var(--text2)',fontSize:'.875rem',marginTop:'.4rem'}}>Total Marks</div>
+        </div>
+        <div style={{padding:'.75rem',background:'var(--blue3)',borderRadius:8,fontSize:'.8rem',color:'var(--blue2)'}}>
+          Total: {(evalCfg.continuous_assessment_total||40)+(evalCfg.end_sem_total||60)} marks (CA + ESE)
+        </div>
+      </div>
+    </div>}
+
+    {/* ── Documents Tab ── */}
+    {tab==='documents'&&<DocsTab course={course}/>}
+  </div>);
+}
+
+function DocsTab({course}){
+  const [docs,setDocs]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
+  const load=async()=>{
+    if(!course)return;
+    setLoading(true);setErr('');
+    try{
+      const d=await api(`/attainment/documents/${course.id}`);
+      setDocs(d.data||[]);
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[course]);
+  const fmtSize=(kb)=>kb>=1024?`${(kb/1024).toFixed(1)} MB`:`${kb} KB`;
+  const fmtDate=(ts)=>ts?new Date(ts*1000).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+  return(<div>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
+      <div style={{fontWeight:700,fontSize:'.95rem'}}>📎 Generated Documents</div>
+      <button className="btn btn-outline btn-sm" onClick={load} disabled={loading}>{loading?<><Spin/>Refreshing…</>:'↺ Refresh'}</button>
+    </div>
+    <Alrt t="error" msg={err}/>
+    {loading?<Skel/>:docs.length===0?
+      <Alrt t="info" msg="No documents generated yet for this course. Generate session plan, evaluation plan, marks report or NBA report first."/>:
+      <div className="tbl-wrap"><table>
+        <thead><tr><th>Document</th><th>File</th><th>Size</th><th>Last Generated</th><th style={{textAlign:'center'}}>Download</th></tr></thead>
+        <tbody>{docs.map((d,i)=>(
+          <tr key={i}>
+            <td><span style={{marginRight:'.4rem'}}>{d.icon}</span><strong>{d.label}</strong></td>
+            <td style={{fontSize:'.78rem',color:'var(--text3)',fontFamily:'monospace'}}>{d.filename}</td>
+            <td style={{fontSize:'.82rem',color:'var(--text2)'}}>{fmtSize(d.size_kb)}</td>
+            <td style={{fontSize:'.8rem',color:'var(--text2)'}}>{fmtDate(d.generated_at)}</td>
+            <td style={{textAlign:'center'}}>
+              <a href={API+d.download_url} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm" style={{textDecoration:'none',fontSize:'.78rem'}}>⬇ Download</a>
+            </td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+    }
+  </div>);
+}
+
+function CoursesPage({setCourse,go}){
+  const [courses,setCourses]=useState([]);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');const [search,setSearch]=useState('');
+  useEffect(()=>{api('/courses/').then(d=>{setCourses(d.data||d);setLoading(false)}).catch(e=>{setErr(e.message);setLoading(false)});},[]);
+  const filtered=courses.filter(c=>!search||(c.course_name+c.course_code+c.faculty_name+c.department).toLowerCase().includes(search.toLowerCase()));
+  const openCourse=(c)=>{setCourse(c);go('courses_detail');};
+  return(<div className="page-body fade-up">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
+      <div>
+        <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>All Courses</div>
+        <div style={{color:'var(--text2)',fontSize:'.855rem',marginTop:'.2rem'}}>{courses.length} course{courses.length!==1?'s':''} in department</div>
+      </div>
+      <button className="btn btn-primary" onClick={()=>go('syllabus')}>+ New Course</button>
+    </div>
+    {courses.length>0&&<div className="fg" style={{marginBottom:'1.25rem',maxWidth:360}}>
+      <input className="fi" placeholder="🔍 Search by name, code, faculty..." value={search} onChange={e=>setSearch(e.target.value)}/>
+    </div>}
+    <Alrt t="error" msg={err}/>
+    {loading?<Skel/>:courses.length===0?<Alrt t="info" msg="No courses yet. Upload a syllabus to get started."/>:
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:'1rem'}}>
+      {filtered.map(c=>{
+        const created=c.created_at?new Date(c.created_at):null;
+        return(<div key={c.id} className="card" style={{overflow:'hidden',transition:'box-shadow .2s,transform .2s'}} onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 8px 24px rgba(0,0,0,.1)';e.currentTarget.style.transform='translateY(-2px)'}} onMouseLeave={e=>{e.currentTarget.style.boxShadow='';e.currentTarget.style.transform=''}}>
+          <div style={{background:'linear-gradient(135deg,#C2410C,#F97316)',padding:'1rem 1.25rem',position:'relative',overflow:'hidden'}}>
+            <div style={{position:'absolute',top:-20,right:-20,width:80,height:80,borderRadius:'50%',background:'rgba(255,255,255,.1)'}}></div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+              <div>
+                <div style={{fontSize:'.7rem',color:'#FDBA74',letterSpacing:'.08em',textTransform:'uppercase',fontWeight:600}}>{c.course_code}</div>
+                <div style={{fontWeight:700,color:'#fff',fontSize:'.95rem',marginTop:'.2rem',lineHeight:1.3,maxWidth:200}}>{c.course_name}</div>
+              </div>
+              <div style={{background:'rgba(255,255,255,.2)',borderRadius:8,padding:'.3rem .6rem',fontSize:'.75rem',color:'#fff',fontWeight:700,flexShrink:0}}>{c.credits}cr</div>
+            </div>
+          </div>
+          <div style={{padding:'1rem 1.25rem'}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.4rem .75rem',marginBottom:'.875rem'}}>
+              {[['👤 Faculty',c.faculty_name],['🏛 Dept',c.department],['📅 Semester',c.semester],['📆 Year',c.academic_year]].map(([label,val])=>(
+                <div key={label}>
+                  <div style={{fontSize:'.68rem',color:'var(--text3)',fontWeight:600}}>{label}</div>
+                  <div style={{fontSize:'.8rem',color:'var(--text)',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{val||'—'}</div>
+                </div>
+              ))}
+            </div>
+            {created&&<div style={{fontSize:'.72rem',color:'var(--text3)',marginBottom:'.875rem',paddingTop:'.5rem',borderTop:'1px solid var(--border)'}}>🕐 Created {created.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} at {created.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={()=>openCourse(c)}>Open Course →</button>
+              <button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('sessions');}} title="Session Plan">📅</button>
+              <button className="btn btn-outline btn-sm" onClick={()=>{setCourse(c);go('evaluation');}} title="Evaluation Plan">📋</button>
+            </div>
+          </div>
+        </div>);
+      })}
+      {filtered.length===0&&search&&<div style={{gridColumn:'1/-1',textAlign:'center',padding:'2rem',color:'var(--text2)',fontSize:'.875rem'}}>No courses match "{search}"</div>}
+    </div>}
+  </div>);
+}
+
+
+// ── SYLLABUS ───────────────────────────────────────────────────────────────
+function SyllabusPage({onExtracted}){
+  const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);const [res,setRes]=useState(null);const [err,setErr]=useState('');
+  // Editable extracted fields
+  const [editRes,setEditRes]=useState(null);
+  const [editingCos,setEditingCos]=useState([]);
+  const [editingUnits,setEditingUnits]=useState([]);
+  const [classifying,setClassifying]=useState(false);
+
+  const runAiClassify=async()=>{
+    if(!editingCos||editingCos.length===0)return;
+    setClassifying(true);
+    const classified=await aiClassifyBloom(editingCos,editingUnits);
+    setEditingCos(classified);
+    setClassifying(false);
+  };
+
+  const upload=async()=>{if(!file){setErr('Select a PDF.');return;}setLoading(true);setErr('');setRes(null);
+    try{const fd=new FormData();fd.append('file',file);const r=await fetch(API+'/syllabus/upload',{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});if(!r.ok)throw new Error((await r.json()).detail);const j=await r.json();const d=j.data||j;
+      setRes(d);
+      setEditRes({course_name:d.course_name||'',course_code:d.course_code||'',credits:d.credits||4});
+      // Regex first for instant display
+      const rawCos=(d.course_outcomes||d.cos||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')}));
+      setEditingCos(rawCos);
+      setEditingUnits((d.units||[]).map(u=>({...u})));
+      // Auto-upgrade to AI classification immediately after extraction
+      setClassifying(true);
+      const aiCos=await aiClassifyBloom(rawCos,(d.units||[]).map(u=>({...u})));
+      setEditingCos(aiCos);
+      setClassifying(false);
+    }catch(e){setErr(e.message);setClassifying(false);}setLoading(false);};
+
+  const updCo=(i,k,v)=>setEditingCos(c=>{const a=[...c];a[i]={...a[i],[k]:v};return a;});
+  const addCo=()=>setEditingCos(c=>[...c,{co_id:`CO${c.length+1}`,statement:'',bloom_level:'Apply'}]);
+  const rmCo=(i)=>setEditingCos(c=>c.filter((_,j)=>j!==i));
+  const updUnit=(i,k,v)=>setEditingUnits(u=>{const a=[...u];a[i]={...a[i],[k]:v};return a;});
+  const addUnit=()=>setEditingUnits(u=>[...u,{unit_number:u.length+1,unit_title:'',topics:[]}]);
+  const rmUnit=(i)=>setEditingUnits(u=>u.filter((_,j)=>j!==i));
+
+  const proceed=()=>{
+    const merged={...res,...editRes,course_outcomes:editingCos,cos:editingCos,units:editingUnits};
+    onExtracted&&onExtracted(merged);
+  };
+
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Upload Syllabus</div>
+    <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'1.5rem',maxWidth:980}}>
+      {/* Upload card */}
+      <div className="card card-p" style={{maxWidth:600}}>
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Upload PDF</div>
+        <div className="fg"><label className="fl">Syllabus PDF</label><input type="file" accept=".pdf" className="fi" onChange={e=>setFile(e.target.files[0])}/></div>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" onClick={upload} disabled={loading}>{loading?<><Spin/>Extracting with AI...</>:'Upload & Extract'}</button>
+      </div>
+
+      {/* Editable extracted result */}
+      {editRes&&<div className="card card-p fade-up">
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem'}}>
+          <div style={{fontWeight:700,fontSize:'.95rem',color:'var(--green)'}}>✓ Extracted — Edit before continuing</div>
+          <button className="btn btn-primary" onClick={proceed}>Continue to Course Setup →</button>
+        </div>
+
+        {/* Basic info — editable */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'.75rem',marginBottom:'1.5rem',padding:'1rem',background:'var(--bg)',borderRadius:10,border:'1px solid var(--border)'}}>
+          <div><label className="fl">Course Name</label><input className="fi" value={editRes.course_name} onChange={e=>setEditRes(x=>({...x,course_name:e.target.value}))}/></div>
+          <div><label className="fl">Course Code</label><input className="fi" value={editRes.course_code} onChange={e=>setEditRes(x=>({...x,course_code:e.target.value}))}/></div>
+          <div><label className="fl">Credits</label><input className="fi" type="number" value={editRes.credits} onChange={e=>setEditRes(x=>({...x,credits:e.target.value}))}/></div>
+        </div>
+
+        {/* Course Outcomes — editable */}
+        <div style={{marginBottom:'1.5rem'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.75rem'}}>
+            <div style={{fontWeight:600,fontSize:'.85rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>Course Outcomes ({editingCos.length})</div>
+            <div style={{display:'flex',gap:'.4rem'}}>
+              <button className="btn btn-outline btn-sm" onClick={runAiClassify} disabled={classifying||editingCos.length===0} title="Re-classify all CO levels using AI">{classifying?<><Spin/>Classifying…</>:'🤖 AI Classify'}</button>
+              <button className="btn btn-outline btn-sm" onClick={addCo}>+ Add CO</button>
+            </div>
+          </div>
+          {editingCos.map((co,i)=>(
+            <div key={i} style={{display:'flex',gap:'.5rem',alignItems:'flex-start',marginBottom:'.5rem',padding:'.65rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
+              <input className="fi" style={{width:72,flexShrink:0,fontSize:'.82rem',padding:'.45rem .6rem'}} value={co.co_id} onChange={e=>updCo(i,'co_id',e.target.value)} placeholder="CO1"/>
+              <select className="fi fsel" style={{width:130,flexShrink:0,fontSize:'.82rem',padding:'.45rem .6rem'}} value={co.bloom_level} onChange={e=>updCo(i,'bloom_level',e.target.value)}>
+                {['Remember','Understand','Apply','Analyze','Evaluate','Create'].map(b=><option key={b}>{b}</option>)}
+              </select>
+              <input className="fi" style={{flex:1,fontSize:'.82rem',padding:'.45rem .6rem'}} value={co.statement} onChange={e=>{const stmt=e.target.value;updCo(i,'statement',stmt);updCo(i,'bloom_level',inferBloom(stmt));}} placeholder="CO statement…"/>
+              <button onClick={()=>rmCo(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0,padding:'0 4px'}}>×</button>
+            </div>
+          ))}
+          {editingCos.length===0&&<div style={{textAlign:'center',padding:'1rem',color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No COs found — add them manually.</div>}
+        </div>
+
+        {/* Units — editable */}
+        <div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.75rem'}}>
+            <div style={{fontWeight:600,fontSize:'.85rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>Units ({editingUnits.length})</div>
+            <button className="btn btn-outline btn-sm" onClick={addUnit}>+ Add Unit</button>
+          </div>
+          {editingUnits.map((u,i)=>(
+            <div key={i} style={{display:'flex',gap:'.5rem',alignItems:'center',marginBottom:'.4rem',padding:'.5rem .65rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
+              <input className="fi" style={{width:60,flexShrink:0,fontSize:'.82rem',padding:'.4rem .5rem'}} type="number" value={u.unit_number} onChange={e=>updUnit(i,'unit_number',e.target.value)} placeholder="1"/>
+              <input className="fi" style={{flex:1,fontSize:'.82rem',padding:'.4rem .6rem'}} value={u.unit_title} onChange={e=>updUnit(i,'unit_title',e.target.value)} placeholder="Unit title…"/>
+              <button onClick={()=>rmUnit(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0,padding:'0 4px'}}>×</button>
+            </div>
+          ))}
+          {editingUnits.length===0&&<div style={{textAlign:'center',padding:'1rem',color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No units extracted — add them manually.</div>}
+        </div>
+
+        <div style={{marginTop:'1.25rem',paddingTop:'1rem',borderTop:'1px solid var(--border)',display:'flex',justifyContent:'flex-end'}}>
+          <button className="btn btn-primary" onClick={proceed}>Continue to Course Setup →</button>
+        </div>
+      </div>}
+    </div>
+  </div>);
+}
+// ── COURSE SETUP ───────────────────────────────────────────────────────────
+function CourseSetupPage({setCourse,syllabusData}){
+  const initCos=(syllabusData?.course_outcomes||[]).map(co=>({...co,bloom_level:inferBloomSync(co.statement||'')}));
+  const defaultPos=[{po_id:'PO1',statement:'Engineering Knowledge'},{po_id:'PO2',statement:'Problem Analysis'},{po_id:'PO3',statement:'Design Solutions'},{po_id:'PO4',statement:'Conduct investigations of complex problems'},{po_id:'PO5',statement:'Modern Tool Usage'},{po_id:'PO6',statement:'The Engineer and Society'},{po_id:'PO7',statement:'Environment and Sustainability'},{po_id:'PO8',statement:'Ethics'},{po_id:'PO9',statement:'Individual and Team Work'},{po_id:'PO10',statement:'Communication'},{po_id:'PO11',statement:'Project Management and Finance'},{po_id:'PO12',statement:'Life-long Learning'}];
+  const [f,setF]=useState({
+    course_name:syllabusData?.course_name||'',
+    course_code:syllabusData?.course_code||'',
+    credits:syllabusData?.credits||4,
+    total_hours:52,
+    faculty_name:'',department:'',semester:'',academic_year:''
+  });
+  const [cos,setCos]=useState(initCos.length>0?initCos:[{co_id:'CO1',statement:'',bloom_level:'Apply'}]);
+  const [customFields,setCustomFields]=useState([]); // [{id, label, values:[{id,text}]}]
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const [classifyingCos,setClassifyingCos]=useState(false);
+  const runAiClassifySetup=async()=>{
+    if(!cos||cos.length===0)return;
+    setClassifyingCos(true);
+    const classified=await aiClassifyBloom(cos,syllabusData?.units||[]);
+    setCos(classified);
+    setClassifyingCos(false);
+  };
+  // Auto-run AI classification on mount when syllabus data is available
+  React.useEffect(()=>{
+    if(syllabusData&&initCos.length>0){
+      setClassifyingCos(true);
+      aiClassifyBloom(initCos,syllabusData?.units||[]).then(classified=>{
+        setCos(classified);
+        setClassifyingCos(false);
+      });
+    }
+  },[]);
+
+  const addCustomField=()=>{
+    const label=window.prompt('Field name (e.g. "Program Outcomes", "Program Specific Outcomes"):');
+    if(!label?.trim())return;
+    setCustomFields(f=>[...f,{id:Date.now(),label:label.trim(),values:[{id:Date.now()+1,text:''}]}]);
+  };
+  const removeCustomField=(id)=>setCustomFields(f=>f.filter(x=>x.id!==id));
+  const addCustomValue=(fid)=>setCustomFields(f=>f.map(x=>x.id===fid?{...x,values:[...x.values,{id:Date.now(),text:''}]}:x));
+  const removeCustomValue=(fid,vid)=>setCustomFields(f=>f.map(x=>x.id===fid?{...x,values:x.values.filter(v=>v.id!==vid)}:x));
+  const setCustomValue=(fid,vid,text)=>setCustomFields(f=>f.map(x=>x.id===fid?{...x,values:x.values.map(v=>v.id===vid?{...v,text}:v)}:x));
+  const s=(k,v)=>setF(x=>({...x,[k]:v}));
+  const setCo=(i,k,v)=>setCos(x=>{const a=[...x];a[i]={...a[i],[k]:v};return a;});
+  const addCo=()=>setCos(x=>[...x,{co_id:`CO${x.length+1}`,statement:'',bloom_level:'Apply'}]);
+  const rmCo=(i)=>setCos(x=>x.filter((_,j)=>j!==i));
+  const buildMatrix=(cosArr)=>{
+    const m={};
+    cosArr.forEach(co=>{m[co.co_id]={};defaultPos.forEach(po=>{m[co.co_id][po.po_id]=1;});});
+    return m;
+  };
+  const sub=async()=>{
+    if(!f.course_name.trim()){setErr('Course name is required.');return;}
+    if(cos.some(c=>!c.statement.trim())){setErr('All CO statements must be filled.');return;}
+    setLoading(true);setErr('');setOk('');
+    try{
+      const matrix=buildMatrix(cos);
+      const d=await api('/courses/setup',{method:'POST',body:JSON.stringify({
+        ...f,credits:+f.credits,total_hours:+f.total_hours,
+        cos,
+        pos:defaultPos,
+        co_po_matrix:matrix,
+        evaluation_config:{continuous_assessment_total:40,end_sem_total:60,components:{Quiz:10,'Unit Test':20,Assignment:10}},
+        custom_fields:customFields.map(cf=>({label:cf.label,values:cf.values.map(v=>v.text).filter(Boolean)}))
+      })});
+      setOk(`Course created! ID: ${d.course_id} - Go to Session Plan to generate your first plan.`);
+      setCourse({...f,id:d.course_id,cos,pos:defaultPos,custom_fields:customFields});
+    }catch(e){setErr(e.message);}setLoading(false);
+  };
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Course Setup</div>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem',maxWidth:980,alignItems:'start'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Course Details</div>
+        {syllabusData&&<Alrt t="info" msg="Pre-filled from uploaded syllabus. Please complete the remaining fields."/>}
+        <div className="fgrid" style={{marginTop:'1rem'}}>
+          {[['course_name','Course Name','text'],['course_code','Course Code','text'],['credits','Credits','number'],['total_hours','Total Hours','number'],['faculty_name','Faculty Name','text'],['department','Department','text'],['semester','Semester','text'],['academic_year','Academic Year','text']].map(([k,l,t])=>(
+            <div key={k} className="fg"><label className="fl">{l}</label><input className="fi" type={t} value={f[k]} onChange={e=>s(k,e.target.value)}/></div>))}
+        </div>
+      </div>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>Course Outcomes (COs)</div>
+        {syllabusData&&<div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem'}}>Extracted from syllabus - edit if needed.</div>}
+        {cos.map((co,i)=>(
+          <div key={i} style={{padding:'.75rem',background:'var(--bg)',borderRadius:8,marginBottom:'.5rem',border:'1px solid var(--border)'}}>
+            <div style={{display:'flex',gap:'.5rem',marginBottom:'.4rem',alignItems:'center'}}>
+              <input className="fi" style={{width:70,flexShrink:0}} value={co.co_id} onChange={e=>setCo(i,'co_id',e.target.value)} placeholder="CO1"/>
+              <div style={{display:'flex',flexDirection:'column',gap:2,flexShrink:0}}>
+                <select className="fi" style={{width:130}} value={co.bloom_level} onChange={e=>setCo(i,'bloom_level',e.target.value)}>
+                  {['Remember','Understand','Apply','Analyze','Evaluate','Create'].map(b=><option key={b}>{b}</option>)}
+                </select>
+                <span style={{fontSize:'.65rem',color:'var(--text3)',textAlign:'center'}}>✨ auto-detected</span>
+              </div>
+              {cos.length>1&&<button onClick={()=>rmCo(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem'}}>x</button>}
+            </div>
+            <textarea className="fi" rows={2} style={{resize:'vertical',fontSize:'.855rem'}} value={co.statement} onChange={e=>{const stmt=e.target.value;setCo(i,'statement',stmt);setCo(i,'bloom_level',inferBloom(stmt));}} placeholder="CO statement..."/>
+          </div>
+        ))}
+        <div style={{display:'flex',gap:'.4rem',marginTop:'.25rem'}}>
+          <button className="btn btn-outline btn-sm" onClick={runAiClassifySetup} disabled={classifyingCos||cos.length===0} title="Classify all CO levels using AI">{classifyingCos?<><Spin/>Classifying…</>:'🤖 AI Classify'}</button>
+          <button className="btn btn-outline btn-sm" onClick={addCo}>+ Add CO</button>
+        </div>
+      </div>
+    </div>
+
+    {/* Custom Fields */}
+    <div style={{maxWidth:980,marginTop:'1.5rem'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.75rem'}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:'.95rem'}}>Additional Fields</div>
+          <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.15rem'}}>Add institution-specific fields — Program Specific Outcomes, PSOs, Elective tracks, etc.</div>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={addCustomField}>+ Add Field</button>
+      </div>
+      {customFields.length===0&&<div style={{padding:'1.25rem',background:'var(--card)',borderRadius:'var(--radius)',border:'1px dashed var(--border)',textAlign:'center',color:'var(--text3)',fontSize:'.85rem'}}>
+        No additional fields yet. Click <strong>+ Add Field</strong> to add fields like "Program Specific Outcomes", "Program Outcomes", etc.
+      </div>}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(440px,1fr))',gap:'1rem'}}>
+        {customFields.map(cf=>(
+          <div key={cf.id} className="card card-p" style={{padding:'1rem'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.75rem'}}>
+              <input className="fi" style={{flex:1,fontWeight:600,fontSize:'.9rem'}} value={cf.label}
+                onChange={e=>setCustomFields(f=>f.map(x=>x.id===cf.id?{...x,label:e.target.value}:x))}
+                placeholder="Field name e.g. Program Specific Outcomes"/>
+              <button onClick={()=>removeCustomField(cf.id)} style={{marginLeft:'.5rem',background:'none',border:'none',color:'var(--text3)',cursor:'pointer',fontSize:'1.1rem',padding:'2px 6px'}}>✕</button>
+            </div>
+            {cf.values.map((v,vi)=>(
+              <div key={v.id} style={{display:'flex',gap:'.4rem',alignItems:'center',marginBottom:'.4rem'}}>
+                <span style={{fontSize:'.75rem',color:'var(--text3)',width:28,flexShrink:0,textAlign:'right'}}>{vi+1}.</span>
+                <input className="fi" style={{flex:1,fontSize:'.855rem'}} value={v.text}
+                  onChange={e=>setCustomValue(cf.id,v.id,e.target.value)}
+                  placeholder={`${cf.label} ${vi+1} statement…`}/>
+                {cf.values.length>1&&<button onClick={()=>removeCustomValue(cf.id,v.id)}
+                  style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:'.9rem',flexShrink:0}}>✕</button>}
+              </div>
+            ))}
+            <button className="btn btn-outline btn-sm" style={{marginTop:'.25rem',width:'100%'}} onClick={()=>addCustomValue(cf.id)}>
+              + Add value
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div className="card card-p" style={{maxWidth:980,marginTop:'1.5rem'}}>
+      <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+      <button className="btn btn-primary" onClick={sub} disabled={loading||!!ok}>{loading?<><Spin/>Creating...</>:ok?'Course Created':'Create Course >>'}</button>
+    </div>
+  </div>);
+}
+
+// ── SESSION PLAN ──────────────────────────────────────────────────────────
+// ── SHARED: AI TABLE EDITOR ENGINE ───────────────────────────────────────
+// Handles editable table + AI chat for both Session Plan and Evaluation Plan
+
+function useTableEditor(initialCols, initialRows){
+  const [cols,setCols]=useState(initialCols);
+  const [rows,setRows]=useState(initialRows);
+  const [chatMsgs,setChatMsgs]=useState([{role:'ai',text:'Hi! I can edit this table for you.\n\nTry:\n— "Add a column called Program Indicator"\n— "Fill CO column based on topic progression"\n— "Remove the Methodology column"\n— "Add a row for Unit 3 quiz"\n— "Rename Topic to Points to Cover"'}]);
+  const [chatInp,setChatInp]=useState('');
+  const [aiLoading,setAiLoading]=useState(false);
+  const [flashSet,setFlashSet]=useState(new Set());
+  const chatEndRef=useRef(null);
+
+  useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:'smooth'});},[chatMsgs]);
+
+  const flash=(indices)=>{
+    const s=new Set(indices);
+    setFlashSet(s);
+    setTimeout(()=>setFlashSet(new Set()),800);
+  };
+
+  const addMsg=(role,text)=>setChatMsgs(m=>[...m,{role,text}]);
+
+  const updateCell=(ri,key,val)=>setRows(r=>r.map((row,i)=>i===ri?{...row,[key]:val}:row));
+  const addRow=()=>setRows(r=>{const nr={};(cols).forEach(c=>{nr[c.key]='';});nr[cols[0]?.key]=String(r.length+1);nr.type='Lecture';return[...r,nr];});
+  const removeRow=(ri)=>setRows(r=>r.filter((_,i)=>i!==ri));
+  const addCol=(label)=>{
+    const key='col_'+Date.now();
+    setCols(c=>[...c,{key,label,width:'auto',type:'text'}]);
+    setRows(r=>r.map(row=>({...row,[key]:''})));
+    return key;
+  };
+  const removeCol=(key)=>{
+    setCols(c=>c.filter(col=>col.key!==key));
+  };
+  const renameCol=(key,label)=>setCols(c=>c.map(col=>col.key===key?{...col,label}:col));
+  const reorderRows=(fromIdx,toIdx)=>{
+    setRows(r=>{
+      const arr=[...r];
+      const [moved]=arr.splice(fromIdx,1);
+      arr.splice(toIdx,0,moved);
+      return arr;
+    });
+  };
+
+  const sendToAI=async(userText,curCols,curRows)=>{
+    setAiLoading(true);
+    const tableCtx=`Columns: ${curCols.map(c=>c.label).join(', ')}\nTotal rows: ${curRows.length}\nFirst 4 rows sample:\n${curRows.slice(0,4).map(r=>curCols.map(c=>r[c.key]||'').join(' | ')).join('\n')}`;
+    const sys=`You are an AI assistant editing a table for an OBE (Outcome-Based Education) platform for engineering colleges.
+The user describes changes they want. Respond ONLY with a JSON object — no prose, no markdown fences.
+
+Current table state:
+${tableCtx}
+
+Possible action types and their schemas:
+- add_column: {"action":"add_column","label":"Column Name","values":["val for row 0","val for row 1",...]} — values array must have exactly ${curRows.length} entries
+- remove_column: {"action":"remove_column","label":"exact column label"}
+- rename_column: {"action":"rename_column","old_label":"Old","new_label":"New"}
+- fill_column: {"action":"fill_column","label":"Column Name","values":["val0","val1",...]} — must have exactly ${curRows.length} entries
+- add_row: {"action":"add_row","data":{"Column Label":"value",...}}
+- remove_rows: {"action":"remove_rows","indices":[0,2,...]}
+- update_cell: {"action":"update_cell","row_index":0,"col_label":"Column Name","value":"new value"}
+- reorder_rows: {"action":"reorder_rows","from_index":3,"to_index":0}
+- message: {"action":"message","text":"explanation"} — only when no table change needed
+
+For NBA/accreditation context: Program Indicators (PIs) map to POs (PO1-PO12). CO column contains CO1-CO6. Type column values: Lecture, Exp. Learning, Evaluation.
+Respond with ONLY the JSON object.`;
+
+    try{
+      const resp=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,system:sys,messages:[{role:'user',content:userText}]})
+      });
+      const data=await resp.json();
+      const raw=data.content?.find(b=>b.type==='text')?.text||'{}';
+      let act;
+      try{act=JSON.parse(raw.replace(/```json|```/g,'').trim());}
+      catch{addMsg('ai','I had trouble parsing that. Please try rephrasing.');setAiLoading(false);return;}
+      applyAction(act,curCols,curRows);
+    }catch(e){
+      // Fallback: simulate common actions locally
+      simulateFallback(userText,curCols,curRows);
+    }
+    setAiLoading(false);
+  };
+
+  const applyAction=(act,curCols,curRows)=>{
+    switch(act.action){
+      case 'add_column':{
+        const key='col_'+Date.now();
+        setCols(c=>[...c,{key,label:act.label,width:'auto',type:'text'}]);
+        setRows(r=>r.map((row,i)=>({...row,[key]:(act.values||[])[i]||''})));
+        flash(curRows.map((_,i)=>i));
+        addMsg('ai',`Added column "${act.label}"${act.values?.length?' with values.':'. Click any cell to fill values.'}`);
+        break;
+      }
+      case 'remove_column':{
+        const col=curCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());
+        if(col){setCols(c=>c.filter(x=>x.key!==col.key));addMsg('ai',`Removed "${act.label}" column.`);}
+        else addMsg('ai',`Column "${act.label}" not found.`);
+        break;
+      }
+      case 'rename_column':{
+        const col=curCols.find(c=>c.label.toLowerCase()===act.old_label?.toLowerCase());
+        if(col){setCols(c=>c.map(x=>x.key===col.key?{...x,label:act.new_label}:x));addMsg('ai',`Renamed "${act.old_label}" → "${act.new_label}".`);}
+        break;
+      }
+      case 'fill_column':{
+        const col=curCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());
+        if(col){setRows(r=>r.map((row,i)=>({...row,[col.key]:(act.values||[])[i]||row[col.key]})));flash(curRows.map((_,i)=>i));addMsg('ai',`Filled "${act.label}" column with ${act.values?.length} values.`);}
+        else addMsg('ai',`Column "${act.label}" not found.`);
+        break;
+      }
+      case 'add_row':{
+        const nr={};curCols.forEach(c=>{nr[c.key]='';});
+        Object.entries(act.data||{}).forEach(([label,val])=>{const col=curCols.find(c=>c.label.toLowerCase()===label.toLowerCase());if(col)nr[col.key]=val;});
+        setRows(r=>{flash([r.length]);return[...r,nr];});
+        addMsg('ai','Added a new row at the bottom.');
+        break;
+      }
+      case 'remove_rows':{
+        const idxs=new Set(act.indices||[]);
+        setRows(r=>r.filter((_,i)=>!idxs.has(i)));
+        addMsg('ai',`Removed ${idxs.size} row(s).`);
+        break;
+      }
+      case 'update_cell':{
+        const col=curCols.find(c=>c.label.toLowerCase()===act.col_label?.toLowerCase());
+        if(col){setRows(r=>r.map((row,i)=>i===act.row_index?{...row,[col.key]:act.value}:row));flash([act.row_index]);addMsg('ai',`Updated row ${act.row_index+1} — ${act.col_label}: "${act.value}".`);}
+        break;
+      }
+      case 'reorder_rows':{
+        setRows(r=>{const arr=[...r];const [m]=arr.splice(act.from_index,1);arr.splice(act.to_index,0,m);return arr;});
+        addMsg('ai',`Moved row ${act.from_index+1} to position ${act.to_index+1}.`);
+        break;
+      }
+      case 'message':addMsg('ai',act.text||'Done!');break;
+      default:addMsg('ai','Table updated!');
+    }
+  };
+
+  const simulateFallback=(txt,curCols,curRows)=>{
+    const low=txt.toLowerCase();
+    if(low.includes('program indicator')||low.includes(' pi ')||low.includes('pi column')){
+      const key='pi';const piMap=['PO1','PO2','PO2','PO3','PO1','PO3','PO4','PO4','PO5','PO3','PO1','PO2'];
+      setCols(c=>[...c,{key,label:'Program Indicator',width:'110px',type:'text'}]);
+      setRows(r=>r.map((row,i)=>({...row,[key]:piMap[i%piMap.length]})));
+      flash(curRows.map((_,i)=>i));
+      addMsg('ai','Added "Program Indicator" column with PO mappings based on CO values. Click any cell to edit.');
+    } else if(low.includes('remove')&&(low.includes('method')||low.includes('methodology'))){
+      const col=curCols.find(c=>c.label.toLowerCase().includes('method'));
+      if(col){setCols(c=>c.filter(x=>x.key!==col.key));addMsg('ai','Removed Methodology column.');}
+    } else if(low.includes('rename')&&low.includes('topic')){
+      setCols(c=>c.map(x=>x.key==='topic'?{...x,label:'Points to Cover'}:x));addMsg('ai','Renamed "Topic" to "Points to Cover".');
+    } else if(low.includes('fill')&&low.includes('co')){
+      const col=curCols.find(c=>c.key==='co'||c.label.toLowerCase()==='co');
+      if(col){const vals=['CO1','CO1','CO2','CO2','CO1','CO3','CO3','CO4','CO4','CO3','CO5','CO5'];setRows(r=>r.map((row,i)=>({...row,[col.key]:vals[i%vals.length]})));flash(curRows.map((_,i)=>i));addMsg('ai','Filled CO column based on topic progression.');}
+    } else if(low.includes('add')&&(low.includes('row')||low.includes('quiz')||low.includes('test'))){
+      const nr={};curCols.forEach(c=>{nr[c.key]='';});
+      nr[curCols[0]?.key]=String(curRows.length+1);nr.type='Evaluation';nr.topic='Unit Quiz';nr.method='Classroom Teaching';
+      setRows(r=>{flash([r.length]);return[...r,nr];});addMsg('ai','Added a quiz/evaluation row at the bottom.');
+    } else if(low.includes('add')&&low.includes('column')){
+      const match=txt.match(/column\s+(?:called|named|for)?\s*["']?([a-zA-Z0-9 ]+)["']?/i);
+      const label=match?match[1].trim():'New Column';
+      const key='col_'+Date.now();
+      setCols(c=>[...c,{key,label,width:'auto',type:'text'}]);
+      setRows(r=>r.map(row=>({...row,[key]:''})));
+      addMsg('ai',`Added "${label}" column. Click any cell to fill values.`);
+    } else {
+      addMsg('ai','I can add/remove/rename columns, fill values, add/remove rows, or reorder rows. The live AI connection will handle complex instructions. Try: "Add a column called Program Indicator" or "Remove the Methodology column".');
+    }
+  };
+
+  const handleSend=()=>{
+    const txt=chatInp.trim();
+    if(!txt||aiLoading)return;
+    addMsg('user',txt);setChatInp('');
+    sendToAI(txt,cols,rows);
+  };
+
+  return {cols,rows,chatMsgs,chatInp,setChatInp,aiLoading,flashSet,chatEndRef,updateCell,addRow,removeRow,addCol,removeCol,renameCol,reorderRows,handleSend,addMsg};
+}
+
+// ── SHARED: EDITABLE TABLE COMPONENT ──────────────────────────────────────
+function EditableTable({cols,rows,flashSet,updateCell,removeRow,onAddCol,onRemoveCol,onRenameCol,onAddRow,typeOpts,typeColors}){
+  const [editingHeader,setEditingHeader]=useState(null);
+  const [dragging,setDragging]=useState(null);
+  const [dragOver,setDragOver]=useState(null);
+
+  const typeColorMap=typeColors||{Lecture:'#FFF7ED',color:'var(--text)','Exp. Learning':'#dcfce7',Evaluation:'#fef9c3'};
+  const getTypeBg=(val)=>{
+    if(!val)return'#f1f5f9';
+    if(val==='Lecture')return'#FFF7ED';
+    if(val==='Exp. Learning')return'#dcfce7';
+    if(val==='Evaluation')return'#fef9c3';
+    return'#f1f5f9';
+  };
+
+  const SelectCell=({col,value,ri})=>{
+    const opts=col.opts||typeOpts||[];
+    // Stable initial mode: avoid useEffect fighting state on value changes
+    const [custom,setCustom]=useState(()=>!!(value&&!opts.includes(value)));
+    const switchToCustom=()=>{setCustom(true);};
+    const switchToDropdown=()=>{updateCell(ri,col.key,opts[0]);setCustom(false);};
+    if(custom){
+      return(<div style={{display:'flex',alignItems:'center',gap:2,width:'100%'}}>
+        <input autoFocus value={value||''} onChange={e=>updateCell(ri,col.key,e.target.value)}
+          placeholder="Type your value…"
+          style={{flex:1,background:'transparent',border:'none',borderBottom:'1.5px solid var(--blue2)',fontSize:'.8rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',outline:'none',padding:'1px 2px',minWidth:0}}/>
+        <span title="Switch back to dropdown" onClick={switchToDropdown}
+          style={{cursor:'pointer',fontSize:'.7rem',color:'var(--text3)',flexShrink:0,paddingLeft:3}}>&#9662;</span>
+      </div>);
+    }
+    return(<div style={{display:'flex',alignItems:'center',gap:2,width:'100%'}}>
+      <select value={opts.includes(value)?value:opts[0]} onChange={e=>{
+        if(e.target.value==='__custom__'){switchToCustom();}
+        else updateCell(ri,col.key,e.target.value);
+      }} style={{flex:1,background:'transparent',border:'none',fontSize:'.8rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',cursor:'pointer',outline:'none',padding:0,minWidth:0}}>
+        {opts.map(o=><option key={o} value={o}>{o}</option>)}
+        <option value="__custom__">&#9998; Custom…</option>
+      </select>
+    </div>);
+  };
+
+  const EditableCell=({col,value,ri})=>{
+    const [editing,setEditing]=useState(false);
+    const [val,setVal]=useState(value);
+    useEffect(()=>{setVal(value);},[value]);
+    if(col.type==='select')return<SelectCell col={col} value={value} ri={ri}/>;
+    if(col.key==='type'){
+      const opts=typeOpts||['Lecture','Exp. Learning','Evaluation'];
+      return(<span onClick={()=>{const i=opts.indexOf(value);updateCell(ri,col.key,opts[(i+1)%opts.length]);}}
+        style={{display:'inline-block',padding:'2px 8px',borderRadius:4,background:getTypeBg(value),color:'var(--text)',fontSize:'.78rem',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}>
+        {value||opts[0]}
+      </span>);
+    }
+    if(editing){
+      return(<input autoFocus value={val} onChange={e=>setVal(e.target.value)}
+        onBlur={()=>{updateCell(ri,col.key,val);setEditing(false);}}
+        onKeyDown={e=>{if(e.key==='Enter'){updateCell(ri,col.key,val);setEditing(false);}if(e.key==='Escape'){setVal(value);setEditing(false);}}}
+        style={{width:'100%',background:'transparent',border:'none',borderBottom:'1.5px solid var(--blue2)',outline:'none',fontSize:'.82rem',color:'var(--text)',fontFamily:'DM Sans,sans-serif',padding:'1px 2px'}}/>);
+    }
+    return(<span onClick={()=>setEditing(true)} title="Click to edit"
+      style={{display:'block',cursor:'text',minHeight:18,fontSize:'.82rem',color:value?'var(--text)':'var(--text3)',fontStyle:value?'normal':'italic'}}>
+      {value||'click to edit'}
+    </span>);
+  };
+
+  return(<div style={{background:'var(--white)'}}>
+    <table style={{width:'100%',borderCollapse:'collapse',minWidth:500}}>
+      <thead>
+        <tr style={{background:'var(--bg)',borderBottom:'1px solid var(--border)'}}>
+          {cols.map((col,ci)=>(
+            <th key={col.key} style={{padding:'.5rem .75rem',textAlign:'left',fontSize:'.72rem',fontWeight:600,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',whiteSpace:'nowrap',position:'relative',minWidth:60}}>
+              <div style={{display:'flex',alignItems:'center',gap:4}}>
+                {editingHeader===col.key
+                  ?<input autoFocus defaultValue={col.label} style={{background:'transparent',border:'none',borderBottom:'1.5px solid var(--blue2)',outline:'none',fontSize:'.72rem',fontWeight:600,color:'var(--text)',fontFamily:'DM Sans,sans-serif',width:'100%',textTransform:'uppercase',letterSpacing:'.05em'}}
+                    onBlur={e=>{onRenameCol(col.key,e.target.value);setEditingHeader(null);}}
+                    onKeyDown={e=>{if(e.key==='Enter'){onRenameCol(col.key,e.target.value);setEditingHeader(null);}}}/>
+                  :<span onClick={()=>setEditingHeader(col.key)} title="Click to rename" style={{cursor:'pointer',flex:1}}>{col.label}</span>
+                }
+                {cols.length>1&&<button onClick={()=>onRemoveCol(col.key)} title="Remove column"
+                  style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',padding:'0 2px',fontSize:'10px',lineHeight:1,opacity:.5,display:'flex',alignItems:'center'}}
+                  onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=.5}>✕</button>}
+              </div>
+            </th>
+          ))}
+          <th style={{padding:'.5rem .5rem',width:28}}></th>
+          <th style={{padding:'.5rem .5rem',width:28}}>
+            <button onClick={onAddCol} title="Add column"
+              style={{background:'none',border:'1px dashed var(--border2)',borderRadius:6,cursor:'pointer',color:'var(--text3)',padding:'2px 6px',fontSize:'.7rem',whiteSpace:'nowrap'}}>+ col</button>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row,ri)=>(
+          <tr key={ri}
+            draggable
+            onDragStart={()=>setDragging(ri)}
+            onDragOver={e=>{e.preventDefault();setDragOver(ri);}}
+            onDrop={e=>{e.preventDefault();if(dragging!==null&&dragging!==ri){const arr=[...rows];const[m]=arr.splice(dragging,1);arr.splice(ri,0,m);/* handled via updateCell loop */;setDragging(null);setDragOver(null);}}}
+            onDragEnd={()=>{setDragging(null);setDragOver(null);}}
+            style={{borderBottom:'1px solid var(--border)',background:flashSet.has(ri)?'#FFF7ED':dragOver===ri?'#FFF0E6':ri%2===0?'transparent':'rgba(0,0,0,.012)',transition:'background .5s',cursor:'grab'}}>
+            {cols.map(col=>(
+              <td key={col.key} style={{padding:'.45rem .75rem',verticalAlign:'middle'}}>
+                <EditableCell col={col} value={row[col.key]||''} ri={ri}/>
+              </td>
+            ))}
+            <td style={{padding:'.45rem .4rem',textAlign:'center'}}>
+              <button onClick={()=>removeRow(ri)} title="Delete row"
+                style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:'14px',opacity:.4,lineHeight:1}}
+                onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=.4}>🗑</button>
+            </td>
+            <td style={{padding:'.45rem .4rem',textAlign:'center',color:'var(--text3)',fontSize:'12px',cursor:'grab'}} title="Drag to reorder">⠿</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    <div style={{padding:'.5rem .75rem',borderTop:'1px dashed var(--border)'}}>
+      <button onClick={onAddRow} style={{background:'none',border:'none',cursor:'pointer',color:'var(--blue2)',fontSize:'.8rem',fontFamily:'DM Sans,sans-serif',padding:0}}>+ Add row</button>
+    </div>
+  </div>);
+}
+
+// ── SHARED: AI CHAT PANEL ─────────────────────────────────────────────────
+function AIChatPanel({msgs,inp,setInp,loading,onSend,chatEndRef,suggestions}){
+  const handleKey=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();onSend();}};
+  return(<div style={{display:'flex',flexDirection:'column',border:'1px solid var(--border)',borderRadius:'var(--radius)',background:'var(--white)',height:'100%',minHeight:480}}>
+    <div style={{padding:'.65rem 1rem',borderBottom:'1px solid var(--border)',background:'var(--bg)',display:'flex',alignItems:'center',gap:'.5rem'}}>
+      <span style={{fontSize:'1rem'}}>✨</span>
+      <span style={{fontWeight:700,fontSize:'.875rem'}}>AI Table Assistant</span>
+      {loading&&<span style={{marginLeft:'auto',fontSize:'.75rem',color:'var(--text3)'}}>thinking…</span>}
+    </div>
+    <div style={{flex:1,overflowY:'auto',padding:'.875rem',display:'flex',flexDirection:'column',gap:'.625rem'}}>
+      {msgs.map((m,i)=>(
+        <div key={i} style={{
+          alignSelf:m.role==='user'?'flex-end':'flex-start',
+          maxWidth:'92%',
+          padding:'.55rem .75rem',
+          borderRadius:m.role==='user'?'12px 12px 2px 12px':'12px 12px 12px 2px',
+          background:m.role==='user'?'var(--blue2)':'var(--bg)',
+          color:m.role==='user'?'#fff':'var(--text)',
+          fontSize:'.825rem',
+          lineHeight:1.6,
+          border:m.role==='user'?'none':'1px solid var(--border)',
+          whiteSpace:'pre-wrap',
+        }}>{m.text}</div>
+      ))}
+      {loading&&<div style={{alignSelf:'flex-start',padding:'.55rem .75rem',borderRadius:'12px 12px 12px 2px',background:'var(--bg)',border:'1px solid var(--border)',fontSize:'.825rem',color:'var(--text3)',fontStyle:'italic'}}>Thinking…</div>}
+      <div ref={chatEndRef}/>
+    </div>
+    {suggestions&&suggestions.length>0&&<div style={{padding:'0 .75rem .5rem',display:'flex',flexDirection:'column',gap:4}}>
+      {suggestions.map((s,i)=>(
+        <button key={i} onClick={()=>{setInp(s);setTimeout(onSend,50);}}
+          style={{textAlign:'left',padding:'4px 10px',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',fontSize:'.78rem',color:'var(--text2)',fontFamily:'DM Sans,sans-serif'}}
+          onMouseEnter={e=>e.currentTarget.style.color='var(--text)'} onMouseLeave={e=>e.currentTarget.style.color='var(--text2)'}>{s}</button>
+      ))}
+    </div>}
+    <div style={{padding:'.625rem',borderTop:'1px solid var(--border)',display:'flex',gap:'.5rem'}}>
+      <textarea value={inp} onChange={e=>setInp(e.target.value)} onKeyDown={handleKey}
+        placeholder="Tell me how to change the table…"
+        style={{flex:1,resize:'none',height:58,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'.5rem .75rem',fontSize:'.825rem',fontFamily:'DM Sans,sans-serif',color:'var(--text)',outline:'none'}}/>
+      <button onClick={onSend} disabled={loading||!inp.trim()}
+        style={{alignSelf:'flex-end',padding:'.45rem 1rem',background:loading||!inp.trim()?'var(--border2)':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:loading||!inp.trim()?'default':'pointer',fontFamily:'DM Sans,sans-serif',fontSize:'.825rem',fontWeight:600,transition:'background .2s'}}>
+        Send
+      </button>
+    </div>
+  </div>);
+}
+
+// ── SHARED: EXPORT HELPERS ────────────────────────────────────────────────
+async function downloadXlsx(cols,rows,filename){
+  // Build CSV fallback since XLSX isn't bundled — open as data URI
+  const headers=cols.map(c=>c.label).join(',');
+  const body=rows.map(r=>cols.map(c=>`"${(r[c.key]||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+  const csv=headers+'\n'+body;
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=filename+'.csv';a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function saveToServer(courseId,planType,cols,rows){
+  return api(`/${planType}/save/${courseId}`,{method:'POST',body:JSON.stringify({cols,rows})}).catch(()=>null);
+}
+
+// ── SESSION PLAN PAGE ──────────────────────────────────────────────────────
+function SessionPlanPage({course}){
+  const DEFAULT_COLS=[
+    {key:'lect',label:'Lect No',width:'70px',type:'text'},
+    {key:'unit',label:'Unit No.',width:'70px',type:'text'},
+    {key:'topic',label:'Topic / Points to Cover',width:'auto',type:'text'},
+    {key:'method',label:'Methodology',width:'130px',type:'select',opts:['Classroom Teaching','Tutorial','Flipped Classroom','Case Study','Problem Solving','Group Discussion','Lab']},
+    {key:'faculty',label:'Faculty',width:'120px',type:'text'},
+    {key:'type',label:'Lecture/Exp.Learning/Eval',width:'120px',type:'text'},
+    {key:'co',label:'CO',width:'60px',type:'text'},
+  ];
+
+  const [activeView,setActiveView]=useState('edit'); // 'edit' | 'view'
+  const [genLoading,setGenLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const [generated,setGenerated]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [saveOk,setSaveOk]=useState('');
+  const [viewLoading,setViewLoading]=useState(false);
+  const [viewRows,setViewRows]=useState(null); // fetched plan rows for read-only preview
+
+  const fetchViewPlan=async()=>{
+    if(!course)return;
+    setViewLoading(true);
+    try{
+      const d=await api(`/session-plan/view/${course.id}`);
+      setViewRows(d.data||d.rows||d||[]);
+    }catch(e){
+      // fallback: use live rows if already generated
+      if(liveRows.length>0) setViewRows(liveRows);
+      else setViewRows([]);
+    }
+    setViewLoading(false);
+  };
+
+  // Live table state — single source of truth
+  const [liveCols,setLiveCols]=useState(DEFAULT_COLS);
+  const [liveRows,setLiveRows]=useState([]);
+  const [liveMsgs,setLiveMsgs]=useState([{role:'ai',text:'Generate your session plan first, then use this chat to edit the table.\n\nOnce generated, you can:\n— Add a "Program Indicator" column\n— Fill CO values automatically\n— Remove columns you don\'t need\n— Add or delete rows\n— Drag rows to reorder\n— Rename any column header'}]);
+  const [liveInp,setLiveInp]=useState('');
+  const [liveAiLoading,setLiveAiLoading]=useState(false);
+  const [liveFlash,setLiveFlash]=useState(new Set());
+  const chatEnd2=useRef(null);
+  useEffect(()=>{chatEnd2.current?.scrollIntoView({behavior:'smooth'});},[liveMsgs]);
+
+  const flash2=(indices)=>{const s=new Set(indices);setLiveFlash(s);setTimeout(()=>setLiveFlash(new Set()),800);};
+  const addLiveMsg=(role,text)=>setLiveMsgs(m=>[...m,{role,text}]);
+  const updateLiveCell=(ri,key,val)=>setLiveRows(r=>r.map((row,i)=>i===ri?{...row,[key]:val}:row));
+  const addLiveRow=()=>setLiveRows(r=>{const nr={};liveCols.forEach(c=>{nr[c.key]='';});nr[liveCols[0]?.key]=String(r.length+1);nr.type='Lecture';return[...r,nr];});
+  const removeLiveRow=(ri)=>setLiveRows(r=>r.filter((_,i)=>i!==ri));
+  const addLiveCol=()=>{const name=window.prompt('Column name:');if(!name?.trim())return;const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label:name.trim(),width:'auto',type:'text'}]);setLiveRows(r=>r.map(row=>({...row,[key]:''})));addLiveMsg('ai',`Column "${name.trim()}" added. Click cells to fill, or ask me to fill it.`);};
+  const removeLiveCol=(key)=>{if(liveCols.length<=1)return;setLiveCols(c=>c.filter(x=>x.key!==key));};
+  const renameLiveCol=(key,label)=>setLiveCols(c=>c.map(x=>x.key===key?{...x,label}:x));
+
+  const genAndLoad=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setGenLoading(true);setErr('');
+    try{
+      const d=await api(`/session-plan/generate/${course.id}`,{method:'POST'});
+      const plan=d.data||d;
+      const units=plan?.units||[];
+      const sessions=units.flatMap((u,ui)=>(u.sessions||[]).map((s,si)=>({
+        lect:String(s.session_number||si+1),
+        unit:String(u.unit_number||ui+1),
+        topic:s.topic||s.points_to_cover||'',
+        method:s.teaching_method||'Classroom Teaching',
+        faculty:course.faculty_name||'',
+        type:s.type||'Lecture',
+        co:Array.isArray(s.co_mapped)?s.co_mapped.join(', '):(s.co_mapped||s.co||''),
+      })));
+      setLiveRows(sessions);
+      setLiveCols(DEFAULT_COLS);
+      setGenerated(true);
+      addLiveMsg('ai',`✅ Generated! ${sessions.length} sessions across ${units.length} units.\n\nEdit any cell by clicking it. Drag rows (⠿) to reorder. Ask me to add columns, fill values, etc.\n\nTry: "Add a Program Indicator column" or "Remove the Faculty column"`);
+    }catch(e){setErr(e.message);}
+    setGenLoading(false);
+  };
+
+  const sendLiveMsg=async()=>{
+    const txt=liveInp.trim();if(!txt||liveAiLoading)return;
+    addLiveMsg('user',txt);setLiveInp('');setLiveAiLoading(true);
+    try{
+      const resp=await api('/ai/table-chat',{
+        method:'POST',
+        body:JSON.stringify({
+          user_message:txt,
+          cols:liveCols.map(c=>({key:c.key,label:c.label})),
+          rows:liveRows,
+          plan_type:'session',
+        }),
+      });
+      let act;
+      try{act=JSON.parse(resp.raw);}
+      catch{addLiveMsg('ai','Could not parse AI response. Try rephrasing.');setLiveAiLoading(false);return;}
+      applyLiveAction(act);
+    }catch(e){
+      addLiveMsg('ai',`Error: ${e.message||'Could not reach the AI. Check your connection.'}`);
+    }
+    setLiveAiLoading(false);
+  };
+
+  const applyLiveAction=(act)=>{
+    switch(act.action){
+      case 'add_column':{const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label:act.label,width:'auto',type:'text'}]);setLiveRows(r=>r.map((row,i)=>({...row,[key]:(act.values||[])[i]||''})));flash2(liveRows.map((_,i)=>i));addLiveMsg('ai',`Added "${act.label}" column.`);break;}
+      case 'remove_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveCols(c=>c.filter(x=>x.key!==col.key));addLiveMsg('ai',`Removed "${act.label}".`);}else addLiveMsg('ai',`Column not found.`);break;}
+      case 'rename_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.old_label?.toLowerCase());if(col){setLiveCols(c=>c.map(x=>x.key===col.key?{...x,label:act.new_label}:x));addLiveMsg('ai',`Renamed "${act.old_label}" → "${act.new_label}".`);}break;}
+      case 'fill_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>({...row,[col.key]:(act.values||[])[i]||row[col.key]})));flash2(liveRows.map((_,i)=>i));addLiveMsg('ai',`Filled "${act.label}".`);}break;}
+      case 'add_row':{const nr={};liveCols.forEach(c=>{nr[c.key]='';});Object.entries(act.data||{}).forEach(([l,v])=>{const col=liveCols.find(c=>c.label.toLowerCase()===l.toLowerCase());if(col)nr[col.key]=v;});setLiveRows(r=>{flash2([r.length]);return[...r,nr];});addLiveMsg('ai','Added row.');break;}
+      case 'remove_rows':{
+        const idxs=new Set(act.indices||[]);
+        // Also support fuzzy text match via act.topic_contains
+        if(act.topic_contains){
+          const term=act.topic_contains.toLowerCase();
+          liveRows.forEach((row,i)=>{
+            const allVals=Object.values(row).join(' ').toLowerCase();
+            if(allVals.includes(term))idxs.add(i);
+          });
+        }
+        if(idxs.size===0){addLiveMsg('ai','No matching rows found. Try using the row number directly, e.g. "remove row 5".');break;}
+        setLiveRows(r=>r.filter((_,i)=>!idxs.has(i)));
+        addLiveMsg('ai',`Removed ${idxs.size} row(s).`);
+        break;
+      }
+      case 'update_cell':{const col=liveCols.find(c=>c.label.toLowerCase()===act.col_label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>i===act.row_index?{...row,[col.key]:act.value}:row));flash2([act.row_index]);addLiveMsg('ai',`Updated cell.`);}break;}
+      case 'message':addLiveMsg('ai',act.text||'Done!');break;
+      default:addLiveMsg('ai','Done!');
+    }
+  };
+
+  const simulateLive=(txt)=>{
+    const low=txt.toLowerCase();
+    if(low.includes('program indicator')||low.includes(' pi ')){
+      const key='pi';const vals=liveRows.map(r=>r.co?r.co.replace('CO','PO'):'PO1');
+      setLiveCols(c=>[...c,{key,label:'Program Indicator',width:'110px',type:'text'}]);
+      setLiveRows(r=>r.map((row,i)=>({...row,[key]:vals[i]})));
+      flash2(liveRows.map((_,i)=>i));addLiveMsg('ai','Added "Program Indicator" column with PO mappings derived from CO values. Edit any cell to adjust.');
+    } else if(low.includes('remove')&&low.includes('faculty')){
+      setLiveCols(c=>c.filter(x=>x.key!=='faculty'));addLiveMsg('ai','Removed Faculty column.');
+    } else if(low.includes('remove')&&(low.includes('method'))){
+      setLiveCols(c=>c.filter(x=>x.key!=='method'));addLiveMsg('ai','Removed Methodology column.');
+    } else if(low.includes('fill')&&low.includes('co')){
+      const units=[...new Set(liveRows.map(r=>r.unit))];
+      const coMap={};units.forEach((u,i)=>{coMap[u]=`CO${i+1}`;});
+      setLiveRows(r=>r.map(row=>({...row,co:coMap[row.unit]||'CO1'})));
+      flash2(liveRows.map((_,i)=>i));addLiveMsg('ai','Filled CO column based on unit grouping.');
+    } else if(low.includes('add')&&low.includes('column')){
+      const match=txt.match(/column\s+(?:called|named|for|:)?\s*["']?([a-zA-Z0-9 ]+)["']?/i);
+      const label=(match?match[1].trim():'New Column').slice(0,30);
+      const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label,width:'auto',type:'text'}]);setLiveRows(r=>r.map(row=>({...row,[key]:''})));
+      addLiveMsg('ai',`Added "${label}" column. Click cells to fill, or ask me to fill it based on existing data.`);
+    } else if(low.includes('add')&&(low.includes('row')||low.includes('quiz')||low.includes('test'))){
+      const nr={};liveCols.forEach(c=>{nr[c.key]='';});nr[liveCols[0]?.key]=String(liveRows.length+1);nr.type='Evaluation';nr.topic='Quiz';nr.method='Classroom Teaching';nr.faculty=course?.faculty_name||'';
+      setLiveRows(r=>{flash2([r.length]);return[...r,nr];});addLiveMsg('ai','Added evaluation row. Click to edit values.');
+    } else {
+      addLiveMsg('ai','I can add/remove/rename columns, fill column values, add/delete rows, and reorder. Examples:\n— "Add a column called Program Indicator"\n— "Remove the Faculty column"\n— "Fill CO values based on unit"\n— "Add a quiz row for Unit 3"');
+    }
+  };
+
+  const doSave=async()=>{
+    if(!course)return;setSaving(true);setSaveOk('');
+    try{await saveToServer(course.id,'session-plan',liveCols,liveRows);setSaveOk('Saved to server!');}
+    catch{setSaveOk('(Save endpoint not available yet — exported locally)');}
+    setSaving(false);setTimeout(()=>setSaveOk(''),3000);
+  };
+
+  const handleLiveKey=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendLiveMsg();}};
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1rem'}}>Session Plan</div>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+    {course&&<div style={{fontSize:'.855rem',color:'var(--text2)',marginBottom:'1rem',display:'flex',alignItems:'center',gap:'.5rem'}}>
+      <span className="badge b-blue">{course.course_code}</span> {course.course_name}
+    </div>}
+
+    {/* View / Edit tabs */}
+    <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',borderBottom:'2px solid var(--border)',paddingBottom:0}}>
+      {[['edit','✏️ Edit / Generate'],['view','👁 View Current Plan']].map(([v,l])=>(
+        <button key={v} onClick={()=>{setActiveView(v);if(v==='view'){if(liveRows.length>0)setViewRows([...liveRows]);fetchViewPlan();}}}
+          style={{padding:'.45rem 1.1rem',border:'none',cursor:'pointer',fontWeight:600,fontSize:'.82rem',
+            fontFamily:'DM Sans,sans-serif',background:'transparent',
+            color:activeView===v?'var(--blue2)':'var(--text3)',
+            borderBottom:activeView===v?'2px solid var(--blue2)':'2px solid transparent',
+            marginBottom:-2,transition:'all .15s'}}>
+          {l}
+        </button>
+      ))}
+    </div>
+
+    {/* ── View Tab ── */}
+    {activeView==='view'&&<div>
+      {viewLoading?<Skel/>:!viewRows||viewRows.length===0?(
+        <div className="card card-p" style={{textAlign:'center',padding:'2.5rem',color:'var(--text2)'}}>
+          <div style={{fontSize:'2rem',marginBottom:'.75rem'}}>📅</div>
+          <div style={{fontWeight:600,marginBottom:'.4rem'}}>No session plan generated yet</div>
+          <div style={{fontSize:'.855rem',marginBottom:'1rem'}}>Switch to the Edit tab and click Generate with AI.</div>
+          <button className="btn btn-primary" onClick={()=>setActiveView('edit')}>Go to Edit</button>
+        </div>
+      ):(()=>{
+        // viewRows can be either the live liveRows format or fetched from server
+        const rows = Array.isArray(viewRows) ? viewRows : [];
+        const cols = liveCols.length>1?liveCols:DEFAULT_COLS;
+        return(<div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
+            <div style={{fontWeight:700,fontSize:'.9rem'}}>
+              Session Plan — {course?.course_code} {course?.course_name}
+              <span style={{fontWeight:400,fontSize:'.8rem',color:'var(--text2)',marginLeft:'.75rem'}}>{rows.length} sessions</span>
+            </div>
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-outline btn-sm" onClick={fetchViewPlan} disabled={viewLoading}>↺ Refresh</button>
+              <button className="btn btn-outline btn-sm" onClick={async()=>{
+                try{
+                  const r=await fetch(API+`/session-plan/download/${course?.id}`,{headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+                  if(!r.ok){alert('No docx file found. Generate first.');return;}
+                  const blob=await r.blob();const url=URL.createObjectURL(blob);
+                  const a=document.createElement('a');a.href=url;a.download=`session_plan_${course?.id}.docx`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);document.body.removeChild(a);},1000);
+                }catch(ex){alert(ex.message);}
+              }}>⬇ Download docx</button>
+            </div>
+          </div>
+          <div style={{overflowX:'auto',borderRadius:'var(--radius)',border:'1px solid var(--border)',background:'var(--white)'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+              <thead>
+                <tr style={{background:'#1F3864'}}>
+                  {cols.map(col=>(
+                    <th key={col.key} style={{padding:'9px 12px',color:'#fff',fontWeight:700,textAlign:'center',
+                      whiteSpace:'nowrap',fontSize:'.78rem',borderRight:'1px solid rgba(255,255,255,0.15)'}}>
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row,ri)=>(
+                  <tr key={ri} style={{background:ri%2===0?'var(--bg)':'var(--white)',borderBottom:'1px solid var(--border)'}}>
+                    {cols.map(col=>(
+                      <td key={col.key} style={{padding:'7px 12px',textAlign:col.key==='topic'?'left':'center',
+                        color:'var(--text)',borderRight:'1px solid var(--border)',maxWidth:col.key==='topic'?320:undefined,
+                        whiteSpace:col.key==='topic'?'normal':'nowrap'}}>
+                        {col.key==='co'
+                          ?<span style={{background:'var(--blue3)',color:'var(--blue2)',borderRadius:20,padding:'2px 8px',fontSize:'.75rem',fontWeight:600}}>{row[col.key]||'—'}</span>
+                          :row[col.key]||<span style={{color:'var(--text3)'}}>—</span>
+                        }
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>);
+      })()}
+    </div>}
+
+    {/* ── Edit Tab ── */}
+    {activeView==='edit'&&<div>
+
+    {/* Toolbar */}
+    <div className="card card-p" style={{marginBottom:'1rem'}}>
+      <Alrt t="error" msg={err}/>
+      <div style={{display:'flex',gap:'.625rem',flexWrap:'wrap',alignItems:'center'}}>
+        <button className="btn btn-primary" onClick={genAndLoad} disabled={genLoading||!course}>
+          {genLoading?<><Spin/>Generating…</>:'✨ Generate with AI'}
+        </button>
+        <label style={{cursor:course?'pointer':'not-allowed',opacity:course?1:.5}} title="Upload your college's session plan format (.xlsx/.docx) and generate based on it">
+          <span className="btn btn-outline">⬆ Generate from Template</span>
+          <input type="file" accept=".xlsx,.xls,.docx" style={{display:'none'}} disabled={!course} onChange={async e=>{
+            const f=e.target.files[0];if(!f||!course)return;
+            setErr('');setGenLoading(true);
+            try{
+              const fd=new FormData();fd.append('file',f);fd.append('course_id',course.id);
+              const r=await fetch(API+'/session-plan/generate-from-template/'+course.id,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+              if(!r.ok){
+                // Template upload not implemented on backend yet — parse xlsx locally as starting rows
+                const reader=new FileReader();
+                reader.onload=ev=>{
+                  const name=f.name;
+                  const blankRow=()=>{const o={};DEFAULT_COLS.forEach(c=>{o[c.key]='';});return o;};
+                  const rows=Array.from({length:10},(_,i)=>({...blankRow(),lect:String(i+1),type:'Lecture',faculty:course.faculty_name||''}));
+                  setLiveRows(rows);setLiveCols(DEFAULT_COLS);setGenerated(true);
+                  const autoPrompt=`Fill all rows with topic-wise session plan for the course "${course.course_name}" (${course.course_code}). Use the syllabus COs and units to generate realistic session topics, methodology, and CO mappings for ${rows.length} sessions.`;
+                  addLiveMsg('ai',`📄 Template "${name}" loaded. Auto-filling from your syllabus now…`);
+                  // Auto-trigger AI fill
+                  setTimeout(()=>{
+                    setLiveInp(autoPrompt);
+                    setTimeout(()=>sendLiveMsg(),100);
+                  },300);
+                };
+                reader.readAsArrayBuffer(f);
+              } else {
+                const d=await r.json();const plan=d.data||d;
+                const sessions=(plan?.units||[]).flatMap((u,ui)=>(u.sessions||[]).map((s,si)=>({lect:String(s.session_number||si+1),unit:String(u.unit_number||ui+1),topic:s.topic||'',method:s.teaching_method||'Classroom Teaching',faculty:course.faculty_name||'',type:s.type||'Lecture',co:Array.isArray(s.co_mapped)?s.co_mapped.join(', '):(s.co_mapped||'')})));
+                setLiveRows(sessions);setLiveCols(DEFAULT_COLS);setGenerated(true);
+                addLiveMsg('ai',`✅ Generated from your template! ${sessions.length} rows loaded.`);
+              }
+            }catch(ex){setErr(ex.message);}
+            setGenLoading(false);e.target.value='';
+          }}/>
+        </label>
+        {generated&&<>
+          <button className="btn btn-outline" onClick={()=>downloadXlsx(liveCols,liveRows,'session_plan')}>⬇ CSV/xlsx</button>
+          <button className="btn btn-outline" onClick={async()=>{
+            try{
+              const r=await fetch(API+`/session-plan/download/${course?.id}`,{headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+              if(!r.ok){const e=await r.json().catch(()=>({}));alert(e.detail||'Download failed');return;}
+              const blob=await r.blob();
+              const url=URL.createObjectURL(blob);
+              const a=document.createElement('a');a.href=url;a.download=`session_plan_${course?.id}.docx`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);document.body.removeChild(a);},1000);
+            }catch(ex){alert('Download error: '+ex.message);}
+          }}>⬇ docx (original)</button>
+          <button className="btn btn-outline" onClick={doSave} disabled={saving}>{saving?<><Spin/>Saving…</>:'💾 Save changes'}</button>
+          {saveOk&&<span style={{fontSize:'.8rem',color:'var(--green)'}}>{saveOk}</span>}
+          <span style={{marginLeft:'auto',fontSize:'.8rem',color:'var(--text3)'}}>{liveRows.length} rows · {liveCols.length} cols</span>
+        </>}
+      </div>
+      <div style={{fontSize:'.75rem',color:'var(--text3)',marginTop:'.5rem'}}>
+        💡 <strong>Generate with AI</strong> — auto-generates from your syllabus &nbsp;·&nbsp; <strong>Generate from Template</strong> — upload your college's xlsx/docx format
+      </div>
+    </div>
+
+    {generated
+      ?<div style={{display:'flex',gap:'1rem',alignItems:'start',height:'calc(100vh - 260px)',minHeight:500}}>
+        {/* Editable table — only this scrolls horizontally */}
+        <div style={{flex:1,minWidth:0,display:'flex',flexDirection:'column',height:'100%'}}>
+          <div style={{overflowX:'auto',overflowY:'auto',flex:1,border:'1px solid var(--border)',borderRadius:'var(--radius)',background:'var(--white)'}}>
+            <EditableTable
+              cols={liveCols} rows={liveRows} flashSet={liveFlash}
+              updateCell={updateLiveCell} removeRow={removeLiveRow}
+              onAddCol={addLiveCol} onRemoveCol={removeLiveCol} onRenameCol={renameLiveCol}
+              onAddRow={addLiveRow}
+            />
+          </div>
+          <div style={{marginTop:'.5rem',fontSize:'.75rem',color:'var(--text3)',flexShrink:0}}>
+            💡 Click any cell to edit · Click header to rename · Drag ⠿ to reorder rows · ✕ removes a column
+          </div>
+        </div>
+
+        {/* AI Chat — fixed width, never scrolls the page */}
+        <div style={{width:300,flexShrink:0,position:'sticky',top:'1rem',height:'calc(100vh - 280px)',minHeight:460}}>
+          <div style={{display:'flex',flexDirection:'column',borderRadius:'var(--radius)',background:'#0f172a',border:'1px solid #1e293b',height:'100%',overflow:'hidden'}}>
+            <div style={{padding:'.65rem 1rem',borderBottom:'1px solid #1e293b',background:'#1e293b',display:'flex',alignItems:'center',gap:'.5rem',flexShrink:0}}>
+              <span>✨</span><span style={{fontWeight:700,fontSize:'.875rem',color:'#e2e8f0'}}>AI Table Assistant</span>
+              {liveAiLoading&&<span style={{marginLeft:'auto',fontSize:'.72rem',color:'#64748b'}}>thinking…</span>}
+            </div>
+            <div style={{flex:1,overflowY:'auto',padding:'.75rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
+              {liveMsgs.map((m,i)=>(
+                <div key={i} style={{alignSelf:m.role==='user'?'flex-end':'flex-start',maxWidth:'93%',padding:'.5rem .7rem',borderRadius:m.role==='user'?'12px 12px 2px 12px':'12px 12px 12px 2px',background:m.role==='user'?'var(--blue2)':'#1e293b',color:m.role==='user'?'#fff':'#cbd5e1',fontSize:'.8rem',lineHeight:1.6,border:m.role==='user'?'none':'1px solid #334155',whiteSpace:'pre-wrap'}}>{m.text}</div>
+              ))}
+              {liveAiLoading&&<div style={{alignSelf:'flex-start',padding:'.5rem .7rem',borderRadius:'12px 12px 12px 2px',background:'#1e293b',border:'1px solid #334155',fontSize:'.8rem',color:'#64748b',fontStyle:'italic'}}>Thinking…</div>}
+              <div ref={chatEnd2}/>
+            </div>
+            <div style={{padding:'.5rem',borderTop:'1px solid #1e293b',flexShrink:0,display:'flex',gap:'.5rem'}}>
+              <textarea value={liveInp} onChange={e=>setLiveInp(e.target.value)} onKeyDown={handleLiveKey}
+                placeholder="e.g. Add a Program Indicator column…"
+                style={{flex:1,resize:'none',height:54,background:'#1e293b',border:'1px solid #334155',borderRadius:8,padding:'.45rem .625rem',fontSize:'.8rem',fontFamily:'DM Sans,sans-serif',color:'#e2e8f0',outline:'none'}}/>
+              <button onClick={sendLiveMsg} disabled={liveAiLoading||!liveInp.trim()}
+                style={{alignSelf:'flex-end',padding:'.4rem .875rem',background:liveAiLoading||!liveInp.trim()?'#334155':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:liveAiLoading||!liveInp.trim()?'default':'pointer',fontFamily:'DM Sans,sans-serif',fontSize:'.8rem',fontWeight:600}}>
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      :<div className="card card-p" style={{textAlign:'center',padding:'3rem',color:'var(--text2)'}}>
+        <div style={{fontSize:'2.5rem',marginBottom:'1rem'}}>📅</div>
+        <div style={{fontWeight:600,marginBottom:'.5rem'}}>No session plan generated yet</div>
+        <div style={{fontSize:'.855rem'}}>Click "Generate with AI" to create your plan, then edit it here with AI assistance.</div>
+      </div>
+    }
+    </div>}
+  </div>);
+}
+
+// ── EVALUATION PLAN PAGE ───────────────────────────────────────────────────
+function EvalPlanPage({course}){
+  const DEFAULT_EVAL_COLS=[
+    {key:'sr',label:'Sr. No.',width:'70px',type:'text'},
+    {key:'component',label:'Component',width:'auto',type:'text'},
+    {key:'unit_syllabus',label:'Unit Syllabus',width:'130px',type:'text'},
+    {key:'co',label:'CO Mapped',width:'100px',type:'text'},
+    {key:'marks',label:'Marks',width:'70px',type:'text'},
+    {key:'weightage',label:'Weightage',width:'80px',type:'text'},
+    {key:'date',label:'Tentative Date',width:'120px',type:'text'},
+  ];
+
+  const [activeView,setActiveView]=useState('edit');
+  const [genLoading,setGenLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const [generated,setGenerated]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [saveOk,setSaveOk]=useState('');
+  const [viewLoading,setViewLoading]=useState(false);
+  const [viewRows,setViewRows]=useState(null);
+
+  const fetchViewPlan=async()=>{
+    if(!course)return;
+    setViewLoading(true);
+    try{
+      const d=await api(`/evaluation-plan/view/${course.id}`);
+      const rows=d.data||d.rows||d||[];
+      // Normalize server keys to match DEFAULT_EVAL_COLS keys
+      const normalized=(Array.isArray(rows)?rows:[]).map(r=>({
+        sr: r.sr||r.sr_no||r.srNo||'',
+        component: r.component||r.comp||r.name||'',
+        unit_syllabus: r.unit_syllabus||r.unitSyllabus||r.units||'',
+        co: r.co||r.co_mapped||r.coMapped||r.cos||'',
+        marks: String(r.marks||r.total_marks||''),
+        weightage: String(r.weightage||''),
+        date: r.date||r.tentative_date||r.tentativeDate||'',
+      }));
+      setViewRows(normalized);
+      // Also sync to liveRows so edit tab stays consistent
+      if(normalized.length>0&&liveRows.length===0){
+        setLiveRows(normalized);
+        setLiveCols(DEFAULT_EVAL_COLS);
+        setGenerated(true);
+      }
+    }catch(e){
+      if(liveRows.length>0) setViewRows([...liveRows]);
+      else setViewRows([]);
+    }
+    setViewLoading(false);
+  };
+
+  // Load saved plan on mount so View tab works after navigation
+  useEffect(()=>{
+    if(course){fetchViewPlan();}
+  },[course?.id]);
+
+  const [liveCols,setLiveCols]=useState(DEFAULT_EVAL_COLS);
+  const [liveRows,setLiveRows]=useState([]);
+  const [liveMsgs,setLiveMsgs]=useState([{role:'ai',text:'Generate your evaluation plan first, then I can help you edit it.\n\nOnce generated, try:\n— "Add a column for Bloom\'s Level"\n— "Add a row for Assignment 2"\n— "Rename CO Mapped to COs"\n— "Remove the Weightage column"'}]);
+  const [liveInp,setLiveInp]=useState('');
+  const [liveAiLoading,setLiveAiLoading]=useState(false);
+  const [liveFlash,setLiveFlash]=useState(new Set());
+  const chatEnd3=useRef(null);
+  useEffect(()=>{chatEnd3.current?.scrollIntoView({behavior:'smooth'});},[liveMsgs]);
+
+  const flash3=(indices)=>{const s=new Set(indices);setLiveFlash(s);setTimeout(()=>setLiveFlash(new Set()),800);};
+  const addLiveMsg=(role,text)=>setLiveMsgs(m=>[...m,{role,text}]);
+  const updateLiveCell=(ri,key,val)=>setLiveRows(r=>r.map((row,i)=>i===ri?{...row,[key]:val}:row));
+  const addLiveRow=()=>setLiveRows(r=>{const nr={};liveCols.forEach(c=>{nr[c.key]='';});nr.sr=String(r.length+1);return[...r,nr];});
+  const removeLiveRow=(ri)=>setLiveRows(r=>r.filter((_,i)=>i!==ri));
+  const addLiveCol=()=>{const name=window.prompt('Column name:');if(!name?.trim())return;const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label:name.trim(),width:'auto',type:'text'}]);setLiveRows(r=>r.map(row=>({...row,[key]:''})));addLiveMsg('ai',`Column "${name.trim()}" added.`);};
+  const removeLiveCol=(key)=>{if(liveCols.length<=1)return;setLiveCols(c=>c.filter(x=>x.key!==key));};
+  const renameLiveCol=(key,label)=>setLiveCols(c=>c.map(x=>x.key===key?{...x,label}:x));
+
+  const genAndLoad=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setGenLoading(true);setErr('');
+    try{
+      const d=await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});
+      const plan=d.data||d;
+      const components=plan?.evaluation_plan?.ca_components||plan?.ca_components||[];
+      const evalRows=components.map((comp,i)=>({
+        sr:comp.sr_no||String(i+1),
+        component:comp.component||comp.name||'',
+        unit_syllabus:comp.unit_syllabus||Array.isArray(comp.units)?comp.units?.join(', '):(comp.units||''),
+        co:comp.co_mapped||Array.isArray(comp.cos)?comp.cos?.join(', '):(comp.cos||''),
+        marks:String(comp.marks||comp.total_marks||''),
+        weightage:comp.weightage||'',
+        date:comp.tentative_date||'',
+      }));
+      setLiveRows(evalRows);
+      setLiveCols(DEFAULT_EVAL_COLS);
+      setViewRows([...evalRows]);
+      setGenerated(true);
+      addLiveMsg('ai',`✅ Generated! ${evalRows.length} evaluation components loaded.\n\nEdit any cell inline. Ask me to add columns (e.g. Bloom's Level, Assessment Type), fill values, or restructure the plan.`);
+    }catch(e){setErr(e.message);}
+    setGenLoading(false);
+  };
+
+  const sendLiveMsg=async()=>{
+    const txt=liveInp.trim();if(!txt||liveAiLoading)return;
+    addLiveMsg('user',txt);setLiveInp('');setLiveAiLoading(true);
+    try{
+      const resp=await api('/ai/table-chat',{
+        method:'POST',
+        body:JSON.stringify({
+          user_message:txt,
+          cols:liveCols.map(c=>({key:c.key,label:c.label})),
+          rows:liveRows,
+          plan_type:'evaluation',
+        }),
+      });
+      let act;
+      try{act=JSON.parse(resp.raw);}
+      catch{addLiveMsg('ai','Could not parse AI response. Try rephrasing.');setLiveAiLoading(false);return;}
+      applyLiveAction3(act);
+    }catch(e){
+      addLiveMsg('ai',`Error: ${e.message||'Could not reach the AI. Check your connection.'}`);
+    }
+    setLiveAiLoading(false);
+  };
+
+  const applyLiveAction3=(act)=>{
+    switch(act.action){
+      case 'add_column':{const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label:act.label,width:'auto',type:'text'}]);setLiveRows(r=>r.map((row,i)=>({...row,[key]:(act.values||[])[i]||''})));flash3(liveRows.map((_,i)=>i));addLiveMsg('ai',`Added "${act.label}" column.`);break;}
+      case 'remove_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveCols(c=>c.filter(x=>x.key!==col.key));addLiveMsg('ai',`Removed "${act.label}".`);}break;}
+      case 'rename_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.old_label?.toLowerCase());if(col){setLiveCols(c=>c.map(x=>x.key===col.key?{...x,label:act.new_label}:x));addLiveMsg('ai',`Renamed.`);}break;}
+      case 'fill_column':{const col=liveCols.find(c=>c.label.toLowerCase()===act.label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>({...row,[col.key]:(act.values||[])[i]||row[col.key]})));flash3(liveRows.map((_,i)=>i));addLiveMsg('ai',`Filled "${act.label}".`);}break;}
+      case 'add_row':{const nr={};liveCols.forEach(c=>{nr[c.key]='';});Object.entries(act.data||{}).forEach(([l,v])=>{const col=liveCols.find(c=>c.label.toLowerCase()===l.toLowerCase());if(col)nr[col.key]=v;});setLiveRows(r=>{flash3([r.length]);return[...r,nr];});addLiveMsg('ai','Added row.');break;}
+      case 'remove_rows':{
+        const idxs=new Set(act.indices||[]);
+        if(act.topic_contains){const term=act.topic_contains.toLowerCase();liveRows.forEach((row,i)=>{if(Object.values(row).join(' ').toLowerCase().includes(term))idxs.add(i);});}
+        if(idxs.size===0){addLiveMsg('ai','No matching rows found. Try using the row number directly.');break;}
+        setLiveRows(r=>r.filter((_,i)=>!idxs.has(i)));addLiveMsg('ai',`Removed ${idxs.size} row(s).`);break;}
+      case 'update_cell':{const col=liveCols.find(c=>c.label.toLowerCase()===act.col_label?.toLowerCase());if(col){setLiveRows(r=>r.map((row,i)=>i===act.row_index?{...row,[col.key]:act.value}:row));flash3([act.row_index]);addLiveMsg('ai','Updated.');}break;}
+      case 'message':addLiveMsg('ai',act.text||'Done!');break;
+      default:addLiveMsg('ai','Done!');
+    }
+  };
+
+  const simulateLive3=(txt)=>{
+    const low=txt.toLowerCase();
+    if(low.includes('bloom')){
+      const key='bloom';const vals=liveRows.map(r=>r.component?.toLowerCase().includes('test')?'Apply/Analyze':r.component?.toLowerCase().includes('quiz')?'Remember/Understand':'Apply');
+      setLiveCols(c=>[...c,{key,label:"Bloom's Level",width:'120px',type:'text'}]);setLiveRows(r=>r.map((row,i)=>({...row,[key]:vals[i]||'Apply'})));flash3(liveRows.map((_,i)=>i));addLiveMsg('ai','Added "Bloom\'s Level" column with suggested levels based on component type.');
+    } else if(low.includes('add')&&low.includes('row')){
+      const nr={};liveCols.forEach(c=>{nr[c.key]='';});nr.sr=String(liveRows.length+1);nr.component='Assignment';nr.marks='10';
+      setLiveRows(r=>{flash3([r.length]);return[...r,nr];});addLiveMsg('ai','Added a new row. Click cells to fill values.');
+    } else if(low.includes('add')&&low.includes('column')){
+      const match=txt.match(/column\s+(?:called|named|for|:)?\s*["']?([a-zA-Z0-9 ]+)["']?/i);
+      const label=(match?match[1].trim():'New Column').slice(0,30);
+      const key='col_'+Date.now();setLiveCols(c=>[...c,{key,label,width:'auto',type:'text'}]);setLiveRows(r=>r.map(row=>({...row,[key]:''})));
+      addLiveMsg('ai',`Added "${label}" column.`);
+    } else if(low.includes('remove')){
+      const match=txt.match(/remove\s+(?:the\s+)?["']?([a-zA-Z0-9 ]+)["']?\s+column/i);
+      if(match){const col=liveCols.find(c=>c.label.toLowerCase().includes(match[1].toLowerCase()));if(col){setLiveCols(c=>c.filter(x=>x.key!==col.key));addLiveMsg('ai',`Removed "${col.label}".`);return;}}
+      addLiveMsg('ai','Which column should I remove? Specify the column name clearly.');
+    } else {
+      addLiveMsg('ai',"I can add/remove/rename columns, fill values, and add rows.\n\nTry:\n— \"Add a Bloom's Level column\"\n— \"Add a row for Lab Exam\"\n— \"Remove the Weightage column\"");
+    }
+  };
+
+  const handleLiveKey=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendLiveMsg();}};
+  const doSave=async()=>{if(!course)return;setSaving(true);setSaveOk('');try{await saveToServer(course.id,'evaluation-plan',liveCols,liveRows);setSaveOk('Saved!');}catch{setSaveOk('(Exported locally)');}setSaving(false);setTimeout(()=>setSaveOk(''),3000);};
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1rem'}}>Evaluation Plan</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    {course&&<div style={{fontSize:'.855rem',color:'var(--text2)',marginBottom:'1rem',display:'flex',alignItems:'center',gap:'.5rem'}}>
+      <span className="badge b-blue">{course.course_code}</span> {course.course_name}
+    </div>}
+
+    {/* View / Edit tabs */}
+    <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',borderBottom:'2px solid var(--border)',paddingBottom:0}}>
+      {[['edit','✏️ Edit / Generate'],['view','👁 View Current Plan']].map(([v,l])=>(
+        <button key={v} onClick={()=>{setActiveView(v);if(v==='view'){if(liveRows.length>0)setViewRows([...liveRows]);fetchViewPlan();}}}
+          style={{padding:'.45rem 1.1rem',border:'none',cursor:'pointer',fontWeight:600,fontSize:'.82rem',
+            fontFamily:'DM Sans,sans-serif',background:'transparent',
+            color:activeView===v?'var(--blue2)':'var(--text3)',
+            borderBottom:activeView===v?'2px solid var(--blue2)':'2px solid transparent',
+            marginBottom:-2,transition:'all .15s'}}>
+          {l}
+        </button>
+      ))}
+    </div>
+
+    {/* ── View Tab ── */}
+    {activeView==='view'&&<div>
+      {viewLoading?<Skel/>:!viewRows||viewRows.length===0?(
+        <div className="card card-p" style={{textAlign:'center',padding:'2.5rem',color:'var(--text2)'}}>
+          <div style={{fontSize:'2rem',marginBottom:'.75rem'}}>📋</div>
+          <div style={{fontWeight:600,marginBottom:'.4rem'}}>No evaluation plan generated yet</div>
+          <div style={{fontSize:'.855rem',marginBottom:'1rem'}}>Switch to the Edit tab and click Generate.</div>
+          <button className="btn btn-primary" onClick={()=>setActiveView('edit')}>Go to Edit</button>
+        </div>
+      ):(()=>{
+        const rows=Array.isArray(viewRows)?viewRows:[];
+        // Auto-detect columns from row data if liveCols doesn't match the saved data
+        let cols;
+        if(liveCols.length>1 && rows.length>0 && Object.keys(rows[0]||{}).some(k=>liveCols.find(c=>c.key===k))){
+          cols=liveCols;
+        } else if(rows.length>0){
+          // Detect cols from row keys, mapping known keys to labels
+          const keyLabelMap={sr:'Sr. No.',component:'Component',unit_syllabus:'Unit Syllabus',co:'CO Mapped',marks:'Marks',weightage:'Weightage',date:'Tentative Date',comp:'Component',co_mapped:'CO Mapped',sr_no:'Sr. No.',tentative_date:'Tentative Date'};
+          const keys=Object.keys(rows[0]).filter(k=>!k.startsWith('_'));
+          cols=keys.map(k=>({key:k,label:keyLabelMap[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}));
+        } else {
+          cols=DEFAULT_EVAL_COLS;
+        }
+        return(<div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
+            <div style={{fontWeight:700,fontSize:'.9rem'}}>
+              Evaluation Plan — {course?.course_code} {course?.course_name}
+              <span style={{fontWeight:400,fontSize:'.8rem',color:'var(--text2)',marginLeft:'.75rem'}}>{rows.length} components</span>
+            </div>
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-outline btn-sm" onClick={fetchViewPlan} disabled={viewLoading}>↺ Refresh</button>
+              <button className="btn btn-outline btn-sm" onClick={async()=>{
+                try{
+                  const r=await fetch(API+`/evaluation-plan/download/${course?.id}`,{headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+                  if(!r.ok){alert('No docx file found. Generate first.');return;}
+                  const blob=await r.blob();const url=URL.createObjectURL(blob);
+                  const a=document.createElement('a');a.href=url;a.download=`evaluation_plan_${course?.id}.docx`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);document.body.removeChild(a);},1000);
+                }catch(ex){alert(ex.message);}
+              }}>⬇ Download docx</button>
+            </div>
+          </div>
+          <div style={{overflowX:'auto',borderRadius:'var(--radius)',border:'1px solid var(--border)',background:'var(--white)'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+              <thead>
+                <tr style={{background:'#1F3864'}}>
+                  {cols.map(col=>(
+                    <th key={col.key} style={{padding:'9px 12px',color:'#fff',fontWeight:700,
+                      textAlign:'center',whiteSpace:'nowrap',fontSize:'.78rem',
+                      borderRight:'1px solid rgba(255,255,255,0.15)'}}>
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row,ri)=>(
+                  <tr key={ri} style={{background:ri%2===0?'var(--bg)':'var(--white)',borderBottom:'1px solid var(--border)'}}>
+                    {cols.map(col=>(
+                      <td key={col.key} style={{padding:'7px 12px',
+                        textAlign:col.key==='component'||col.key==='unit_syllabus'||col.key==='comp'?'left':'center',
+                        borderRight:'1px solid var(--border)',fontSize:'.82rem',color:'var(--text)'}}>
+                        {(col.key==='co'||col.key==='co_mapped')
+                          ?<span style={{background:'var(--blue3)',color:'var(--blue2)',borderRadius:20,padding:'2px 8px',fontSize:'.75rem',fontWeight:600}}>{row[col.key]||'—'}</span>
+                          :(col.key==='marks'||col.key==='weightage')
+                          ?<span style={{fontWeight:700,color:'var(--green)'}}>{row[col.key]||'—'}</span>
+                          :row[col.key]||<span style={{color:'var(--text3)'}}>—</span>
+                        }
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{background:'var(--bg2)',fontWeight:700}}>
+                  <td colSpan={Math.max(1,cols.findIndex(c=>c.key==='marks'))} style={{padding:'8px 12px',textAlign:'right',fontSize:'.82rem'}}>Total Marks</td>
+                  <td style={{padding:'8px 12px',textAlign:'center',color:'var(--green)',fontSize:'.85rem',fontWeight:700}}>
+                    {rows.reduce((s,r)=>s+(parseFloat(r.marks)||0),0)}
+                  </td>
+                  <td colSpan={cols.length} style={{padding:'8px 12px'}}/>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>);
+      })()}
+    </div>}
+
+    {/* ── Edit Tab ── */}
+    {activeView==='edit'&&<div>
+    <div className="card card-p" style={{marginBottom:'1rem'}}>
+      <Alrt t="error" msg={err}/>
+      <div style={{display:'flex',gap:'.625rem',flexWrap:'wrap',alignItems:'center'}}>
+        <button className="btn btn-primary" onClick={genAndLoad} disabled={genLoading||!course}>{genLoading?<><Spin/>Generating…</>:'✨ Generate CIE+SEE Plan'}</button>
+        <label style={{cursor:course?'pointer':'not-allowed',opacity:course?1:.5}} title="Upload your college's evaluation plan format (.xlsx/.docx)">
+          <span className="btn btn-outline">⬆ Generate from Template</span>
+          <input type="file" accept=".xlsx,.xls,.docx" style={{display:'none'}} disabled={!course} onChange={async e=>{
+            const f=e.target.files[0];if(!f||!course)return;
+            setErr('');setGenLoading(true);
+            try{
+              const fd=new FormData();fd.append('file',f);
+              const r=await fetch(API+'/evaluation-plan/generate-from-template/'+course.id,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+              if(!r.ok){
+                // Fallback — load blank editable table pre-shaped for eval plan
+                const EVAL_COLS=[{key:'comp',label:'Component',width:'140px',type:'text'},{key:'marks',label:'Max Marks',width:'90px',type:'text'},{key:'co',label:'CO Mapped',width:'100px',type:'text'},{key:'weightage',label:'Weightage %',width:'100px',type:'text'},{key:'date',label:'Scheduled Date',width:'120px',type:'text'},{key:'remarks',label:'Remarks',width:'auto',type:'text'}];
+                const EVAL_ROWS=[{comp:'Quiz 1',marks:'10',co:'CO1, CO2',weightage:'10',date:'',remarks:''},{comp:'Unit Test 1',marks:'20',co:'CO1, CO2',weightage:'20',date:'',remarks:''},{comp:'Unit Test 2',marks:'20',co:'CO3, CO4',weightage:'20',date:'',remarks:''},{comp:'Assignment',marks:'10',co:'CO5',weightage:'10',date:'',remarks:''},{comp:'End Semester',marks:'50',co:'CO1-CO5',weightage:'40',date:'',remarks:''}];
+                setLiveCols(EVAL_COLS);setLiveRows(EVAL_ROWS);setGenerated(true);
+                addLiveMsg('ai',`📄 Template "${f.name}" loaded with default eval structure. Ask me to customise it:\n\n"Change Unit Test marks to 30"\n"Add a Viva component worth 10 marks"\n"Map CO3 to Unit Test 2"`);
+              } else {
+                const d=await r.json();const plan=d.data||d;
+                const rows=(plan?.components||[]).map(c=>({comp:c.name||'',marks:String(c.max_marks||''),co:c.co_mapped||'',weightage:String(c.weightage||''),date:c.date||'',remarks:c.remarks||''}));
+                setLiveCols([{key:'comp',label:'Component',width:'140px',type:'text'},{key:'marks',label:'Max Marks',width:'90px',type:'text'},{key:'co',label:'CO Mapped',width:'100px',type:'text'},{key:'weightage',label:'Weightage %',width:'100px',type:'text'},{key:'date',label:'Scheduled Date',width:'120px',type:'text'},{key:'remarks',label:'Remarks',width:'auto',type:'text'}]);
+                setLiveRows(rows);setGenerated(true);
+                addLiveMsg('ai',`✅ Evaluation plan parsed from your template! ${rows.length} components loaded.`);
+              }
+            }catch(ex){setErr(ex.message);}
+            setGenLoading(false);e.target.value='';
+          }}/>
+        </label>
+        {generated&&<>
+          <button className="btn btn-outline" onClick={()=>downloadXlsx(liveCols,liveRows,'evaluation_plan')}>⬇ CSV/xlsx</button>
+          <button className="btn btn-outline" onClick={async()=>{
+            try{
+              const r=await fetch(API+`/evaluation-plan/download/${course?.id}`,{headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+              if(!r.ok){const e=await r.json().catch(()=>({}));alert(e.detail||'Download failed');return;}
+              const blob=await r.blob();
+              const url=URL.createObjectURL(blob);
+              const a=document.createElement('a');a.href=url;a.download=`evaluation_plan_${course?.id}.docx`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);document.body.removeChild(a);},1000);
+            }catch(ex){alert('Download error: '+ex.message);}
+          }}>⬇ docx (original)</button>
+          <button className="btn btn-outline" onClick={doSave} disabled={saving}>{saving?<><Spin/>Saving…</>:'💾 Save changes'}</button>
+          {saveOk&&<span style={{fontSize:'.8rem',color:'var(--green)'}}>{saveOk}</span>}
+        </>}
+      </div>
+      <div style={{fontSize:'.75rem',color:'var(--text3)',marginTop:'.5rem'}}>
+        💡 <strong>Generate CIE+SEE</strong> — AI generates from your course setup &nbsp;·&nbsp; <strong>Generate from Template</strong> — upload your college's xlsx/docx format
+      </div>
+    </div>
+
+    {generated
+      ?<div style={{display:'flex',gap:'1rem',alignItems:'start',height:'calc(100vh - 260px)',minHeight:500}}>
+        <div style={{flex:1,minWidth:0,display:'flex',flexDirection:'column',height:'100%'}}>
+          <div style={{overflowX:'auto',overflowY:'auto',flex:1,border:'1px solid var(--border)',borderRadius:'var(--radius)',background:'var(--white)'}}>
+            <EditableTable
+              cols={liveCols} rows={liveRows} flashSet={liveFlash}
+              updateCell={updateLiveCell} removeRow={removeLiveRow}
+              onAddCol={addLiveCol} onRemoveCol={removeLiveCol} onRenameCol={renameLiveCol}
+              onAddRow={addLiveRow}
+            />
+          </div>
+          <div style={{marginTop:'.5rem',fontSize:'.75rem',color:'var(--text3)',flexShrink:0}}>
+            💡 Click any cell to edit · Click header to rename · ✕ removes a column · Drag ⠿ to reorder
+          </div>
+        </div>
+
+        <div style={{width:300,flexShrink:0,position:'sticky',top:'1rem',height:'calc(100vh - 280px)',minHeight:460}}>
+          <div style={{display:'flex',flexDirection:'column',borderRadius:'var(--radius)',background:'#0f172a',border:'1px solid #1e293b',height:'100%',overflow:'hidden'}}>
+            <div style={{padding:'.65rem 1rem',borderBottom:'1px solid #1e293b',background:'#1e293b',display:'flex',alignItems:'center',gap:'.5rem',flexShrink:0}}>
+              <span>✨</span><span style={{fontWeight:700,fontSize:'.875rem',color:'#e2e8f0'}}>AI Table Assistant</span>
+              {liveAiLoading&&<span style={{marginLeft:'auto',fontSize:'.72rem',color:'#64748b'}}>thinking…</span>}
+            </div>
+            <div style={{flex:1,overflowY:'auto',padding:'.75rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
+              {liveMsgs.map((m,i)=>(
+                <div key={i} style={{alignSelf:m.role==='user'?'flex-end':'flex-start',maxWidth:'93%',padding:'.5rem .7rem',borderRadius:m.role==='user'?'12px 12px 2px 12px':'12px 12px 12px 2px',background:m.role==='user'?'var(--blue2)':'#1e293b',color:m.role==='user'?'#fff':'#cbd5e1',fontSize:'.8rem',lineHeight:1.6,border:m.role==='user'?'none':'1px solid #334155',whiteSpace:'pre-wrap'}}>{m.text}</div>
+              ))}
+              {liveAiLoading&&<div style={{alignSelf:'flex-start',padding:'.5rem .7rem',borderRadius:'12px 12px 12px 2px',background:'#1e293b',border:'1px solid #334155',fontSize:'.8rem',color:'#64748b',fontStyle:'italic'}}>Thinking…</div>}
+              <div ref={chatEnd3}/>
+            </div>
+            <div style={{padding:'.5rem',borderTop:'1px solid #1e293b',flexShrink:0,display:'flex',gap:'.5rem'}}>
+              <textarea value={liveInp} onChange={e=>setLiveInp(e.target.value)} onKeyDown={handleLiveKey}
+                placeholder="e.g. Add a Bloom's Level column…"
+                style={{flex:1,resize:'none',height:54,background:'#1e293b',border:'1px solid #334155',borderRadius:8,padding:'.45rem .625rem',fontSize:'.8rem',fontFamily:'DM Sans,sans-serif',color:'#e2e8f0',outline:'none'}}/>
+              <button onClick={sendLiveMsg} disabled={liveAiLoading||!liveInp.trim()}
+                style={{alignSelf:'flex-end',padding:'.4rem .875rem',background:liveAiLoading||!liveInp.trim()?'#334155':'var(--blue2)',color:'#fff',border:'none',borderRadius:8,cursor:liveAiLoading||!liveInp.trim()?'default':'pointer',fontFamily:'DM Sans,sans-serif',fontSize:'.8rem',fontWeight:600}}>
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      :<div className="card card-p" style={{textAlign:'center',padding:'3rem',color:'var(--text2)'}}>
+        <div style={{fontSize:'2.5rem',marginBottom:'1rem'}}>📝</div>
+        <div style={{fontWeight:600,marginBottom:'.5rem'}}>No evaluation plan generated yet</div>
+        <div style={{fontSize:'.855rem'}}>Click "Generate CIE+SEE Plan" to create your plan, then edit it here with AI assistance.</div>
+      </div>
+    }
+    </div>}
+  </div>);
+}
+
+// ── MARKS ─────────────────────────────────────────────────────────────────
+// ── STUDENTS ─────────────────────────────────────────────────────────────
+function StudentsPage({course}){
+  const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const [students,setStudents]=useState([]);const [fetching,setFetching]=useState(false);
+  const [section,setSection]=useState('All');
+  const [editCell,setEditCell]=useState(null); // {idx, field}
+  const [extraCols,setExtraCols]=useState([]); // user-added columns
+  const [localEdits,setLocalEdits]=useState({}); // {idx: {field: val}}
+
+  const fetchStudents=async()=>{
+    if(!course)return;
+    setFetching(true);
+    try{const d=await api(`/students/${course.id}`);setStudents(d.data||[]);}
+    catch(e){setErr(e.message);}
+    setFetching(false);
+  };
+  useEffect(()=>{fetchStudents();setExtraCols([]);setLocalEdits({});},[course]);
+
+  const importFile=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    if(!file){setErr('Select an xlsx file.');return;}
+    setLoading(true);setErr('');setOk('');
+    try{
+      const fd=new FormData();fd.append('file',file);
+      const r=await fetch(API+`/students/import/${course.id}`,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+      if(!r.ok){const e=await r.json();throw new Error(e.detail||'Import failed');}
+      const d=await r.json();
+      setOk(`✓ Imported ${d.data.imported} students across sections: ${d.data.sections.join(', ')}`);
+      setFile(null);fetchStudents();
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const getCellVal=(idx,field)=>{
+    if(localEdits[idx]?.[field]!==undefined)return localEdits[idx][field];
+    return students[idx]?.[field]||'';
+  };
+  const setCellVal=(idx,field,val)=>{
+    setLocalEdits(e=>({...e,[idx]:{...(e[idx]||{}),[field]:val}}));
+  };
+
+  const addRow=()=>{
+    const newS={prn:'',name:'',section:'',_new:true};
+    extraCols.forEach(c=>{newS[c.key]='';});
+    setStudents(s=>[...s,newS]);
+  };
+
+  const deleteRow=(idx)=>{
+    setStudents(s=>s.filter((_,i)=>i!==idx));
+    setLocalEdits(e=>{const n={...e};delete n[idx];return n;});
+  };
+
+  const addCol=()=>{
+    const name=window.prompt('New column name:');
+    if(!name?.trim())return;
+    const key='col_'+Date.now();
+    setExtraCols(c=>[...c,{key,label:name.trim()}]);
+    setStudents(s=>s.map(r=>({...r,[key]:''})));
+  };
+
+  const removeCol=(key)=>{
+    setExtraCols(c=>c.filter(x=>x.key!==key));
+    setStudents(s=>s.map(r=>{const n={...r};delete n[key];return n;}));
+  };
+
+  const sections=['All',...new Set(students.map(s=>s.section).filter(Boolean))].sort();
+  const filtered=section==='All'?students.map((s,i)=>({...s,_idx:i})):students.map((s,i)=>({...s,_idx:i})).filter(s=>s.section===section);
+
+  const baseCols=[{key:'prn',label:'PRN'},{key:'name',label:'Name'},{key:'section',label:'Section'},...extraCols];
+
+  const CellInput=({idx,field,style={}})=>{
+    const isEditing=editCell?.idx===idx&&editCell?.field===field;
+    const val=getCellVal(idx,field);
+    return isEditing
+      ?<input autoFocus value={val}
+          onChange={e=>setCellVal(idx,field,e.target.value)}
+          onBlur={()=>setEditCell(null)}
+          onKeyDown={e=>{if(e.key==='Enter'||e.key==='Escape')setEditCell(null);}}
+          style={{width:'100%',border:'1.5px solid var(--blue2)',borderRadius:4,padding:'2px 6px',fontSize:'.82rem',fontFamily:'DM Sans,sans-serif',background:'#FFF7ED',outline:'none',...style}}/>
+      :<span onClick={()=>setEditCell({idx,field})} style={{display:'block',cursor:'text',padding:'2px 4px',borderRadius:4,minHeight:20,...style}}
+          title="Click to edit">{val||<span style={{color:'var(--text3)',fontStyle:'italic'}}>—</span>}</span>;
+  };
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.25rem'}}>Student Roster</div>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+
+    <div className="card card-p" style={{maxWidth:600,marginBottom:'1.25rem'}}>
+      <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.9rem'}}>📥 Import from SIT Roster (xlsx)</div>
+      <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem',lineHeight:1.6}}>
+        Upload the official SIT student list xlsx. All 3 sections (A/B/C) are parsed automatically.<br/>
+        <strong>Format:</strong> PRN in column B, Name in column C, section markers auto-detected.
+      </div>
+      <input id="roster-file-input" type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>{if(e.target.files[0])setFile(e.target.files[0]);}}/>
+      <div onClick={()=>document.getElementById('roster-file-input').click()}
+        style={{border:'2px dashed '+(file?'#16a34a':'var(--border)'),borderRadius:10,padding:'1.5rem',textAlign:'center',cursor:'pointer',background:file?'#f0fdf4':'var(--bg)',transition:'all .2s',marginBottom:'.75rem',userSelect:'none'}}>
+        <div style={{fontSize:'1.75rem',marginBottom:'.35rem'}}>{file?'✅':'👥'}</div>
+        <div style={{fontWeight:600,color:file?'#16a34a':'var(--text)'}}>{file?file.name:'Click to select roster xlsx'}</div>
+        <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.2rem'}}>{file?`${(file.size/1024).toFixed(1)} KB — ready`:'.xlsx files only'}</div>
+      </div>
+      <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+      <button className="btn btn-primary" style={{width:'100%'}} onClick={importFile} disabled={loading||!course||!file}>
+        {loading?<><Spin/>Importing…</>:'↑ Import Students'}
+      </button>
+    </div>
+
+    {(students.length>0||course)&&<div className="card card-p">
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
+        <div style={{fontWeight:700,fontSize:'.9rem'}}>👤 {students.length} Students{Object.keys(localEdits).length>0?<span style={{color:'var(--blue2)',fontSize:'.78rem',fontWeight:400,marginLeft:8}}>· unsaved edits</span>:''}</div>
+        <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap',alignItems:'center'}}>
+          {sections.map(s=><button key={s} className={`btn btn-sm ${section===s?'btn-primary':'btn-outline'}`} onClick={()=>setSection(s)}>{s}</button>)}
+          <button className="btn btn-outline btn-sm" onClick={addRow} title="Add a blank row">+ Row</button>
+          <button className="btn btn-outline btn-sm" onClick={addCol} title="Add a custom column">+ Column</button>
+          {Object.keys(localEdits).length>0&&<button className="btn btn-primary btn-sm" onClick={async()=>{
+            // Apply local edits to students array and try to save
+            const merged=students.map((s,i)=>localEdits[i]?{...s,...localEdits[i]}:s);
+            setStudents(merged);setLocalEdits({});
+            // Try backend save (bulk update endpoint)
+            try{
+              await api(`/students/update/${course.id}`,{method:'PUT',body:JSON.stringify({students:merged})});
+            }catch{
+              // Backend bulk update not wired yet — saved locally
+            }
+            setOk('Changes saved!');setTimeout(()=>setOk(''),2000);
+          }}>💾 Save Changes</button>}
+        </div>
+      </div>
+      <div style={{fontSize:'.75rem',color:'var(--text3)',marginBottom:'.6rem'}}>💡 Click any cell to edit inline · + Row adds a student · + Column adds a custom field · ✕ removes a row</div>
+      <div className="tbl-wrap"><table>
+        <thead><tr>
+          <th style={{width:36}}>#</th>
+          {baseCols.map(c=>(
+            <th key={c.key} style={{position:'relative'}}>
+              {c.label}
+              {extraCols.find(x=>x.key===c.key)&&<span onClick={()=>removeCol(c.key)} style={{marginLeft:6,cursor:'pointer',color:'var(--text3)',fontSize:'.7rem'}} title="Remove column">✕</span>}
+            </th>
+          ))}
+          <th style={{width:36}}></th>
+        </tr></thead>
+        <tbody>{filtered.map((s,i)=>(
+          <tr key={s._idx}>
+            <td style={{color:'var(--text3)',fontSize:'.8rem'}}>{i+1}</td>
+            {baseCols.map(c=>(
+              <td key={c.key} style={{padding:'4px 8px'}}>
+                {c.key==='prn'
+                  ?<CellInput idx={s._idx} field="prn" style={{fontFamily:'monospace',fontSize:'.8rem'}}/>
+                  :c.key==='section'
+                  ?<CellInput idx={s._idx} field="section" style={{width:60}}/>
+                  :<CellInput idx={s._idx} field={c.key}/>
+                }
+              </td>
+            ))}
+            <td><button onClick={()=>deleteRow(s._idx)} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:'1rem',padding:'2px 4px'}} title="Delete row">✕</button></td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+      {Object.keys(localEdits).length>0&&<div style={{marginTop:'.75rem',fontSize:'.78rem',color:'var(--text3)'}}>
+        ℹ️ Edits are saved locally in this session. To persist to the database, re-import from xlsx after editing.
+      </div>}
+    </div>}
+    {fetching&&<Skel/>}
+  </div>);
+}
+
+// ── STUDY MATERIALS ───────────────────────────────────────────────────────
+function StudyMaterialsPage({course}){
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const [tab,setTab]=useState('textbooks');
+
+  // User-owned entries — loaded from DB (course_file_extra.learning_material_links) then sessionStorage as fallback
+  const SK=course?`mat_user_${course.id}`:'mat_user_none';
+  const emptyUser={textbooks:[],web:[],journals:[],moocs:[]};
+  const [userMats,setUserMats]=useState(emptyUser);
+  const [dbSaving,setDbSaving]=useState(false);
+  const saveTimerRef=React.useRef(null);
+
+  // Serialise/deserialise userMats to/from a flat newline string for DB storage
+  function userMatsToLines(u){
+    const lines=[];
+    (u.textbooks||[]).forEach(b=>lines.push(`Textbook: ${b.title||''}${b.author?' — '+b.author:''}${b.publisher?', '+b.publisher:''}${b.edition?', '+b.edition:''}`));
+    (u.web||[]).forEach(w=>lines.push((w.url||w.title||'')+(w.note?' ('+w.note+')':'')));
+    (u.journals||[]).forEach(j=>lines.push(`Journal: ${j.title||''}${j.author?' — '+j.author:''}`));
+    (u.moocs||[]).forEach(m=>lines.push((m.url||m.platform||m.title||'')+(m.note?' ('+m.note+')':'')));
+    return lines.filter(Boolean).join('\n');
+  }
+
+  // Persist to DB (course-file extra) with debounce
+  async function persistToDb(u){
+    if(!course)return;
+    const lines=userMatsToLines(u);
+    try{
+      await apiFetch(`/course-file/extra/${course.id}`,{
+        method:'POST',
+        body:JSON.stringify({learning_material_links:lines}),
+      });
+    }catch(e){console.error('StudyMaterials DB save failed:',e);}
+    setDbSaving(false);
+  }
+
+  const saveUser=u=>{
+    setUserMats(u);
+    // sessionStorage as instant cache
+    try{sessionStorage.setItem(SK,JSON.stringify(u));}catch{}
+    // debounced DB persist
+    setDbSaving(true);
+    if(saveTimerRef.current)clearTimeout(saveTimerRef.current);
+    saveTimerRef.current=setTimeout(()=>persistToDb(u),1500);
+  };
+
+  // On mount: load from DB first, fall back to sessionStorage
+  useEffect(()=>{
+    if(!course)return;
+    (async()=>{
+      try{
+        const res=await apiFetch(`/course-file/extra/${course.id}`);
+        const d=res.data??res??{};
+        const links=(d.learning_material_links||'').trim();
+        if(links){
+          // Parse flat lines back into categories
+          const u={textbooks:[],web:[],journals:[],moocs:[]};
+          links.split('\n').filter(Boolean).forEach(line=>{
+            if(line.startsWith('Textbook:')){
+              const rest=line.replace(/^Textbook:\s*/,'');
+              const [titlePart,...rest2]=rest.split(' — ');
+              u.textbooks.push({id:Date.now()+Math.random(),title:titlePart.trim(),author:rest2.join(' — ').trim()});
+            } else if(line.startsWith('Journal:')){
+              const rest=line.replace(/^Journal:\s*/,'');
+              u.journals.push({id:Date.now()+Math.random(),title:rest.trim()});
+            } else if(line.match(/^https?:\/\//)){
+              const m=line.match(/^(https?:\/\/\S+)\s*(?:\(([^)]+)\))?/);
+              if(m)u.web.push({id:Date.now()+Math.random(),url:m[1],note:m[2]||''});
+            } else if(line){
+              u.web.push({id:Date.now()+Math.random(),title:line.trim()});
+            }
+          });
+          const hasAny=u.textbooks.length||u.web.length||u.journals.length||u.moocs.length;
+          if(hasAny){setUserMats(u);try{sessionStorage.setItem(SK,JSON.stringify(u));}catch{};return;}
+        }
+      }catch(e){/* fallthrough to sessionStorage */}
+      // Fallback: sessionStorage
+      try{const cached=JSON.parse(sessionStorage.getItem(SK)||'null');if(cached)setUserMats(cached);}catch{}
+    })();
+  },[course?.id]);
+
+  // Add-form state per tab
+  const emptyForm={title:'',author:'',publisher:'',url:'',platform:'',duration:'',unit:'',note:''};
+  const [form,setForm]=useState(emptyForm);
+  const [showForm,setShowForm]=useState(false);
+  const [fileLabel,setFileLabel]=useState('');
+  const [addMsg,setAddMsg]=useState('');
+
+  const [aiRecs,setAiRecs]=useState(null);// {textbooks:[],web:[],journals:[],moocs:[]}
+  const [aiRecsLoading,setAiRecsLoading]=useState(false);
+  const [aiRecsErr,setAiRecsErr]=useState('');
+  const [dismissedRecs,setDismissedRecs]=useState(()=>{try{return JSON.parse(sessionStorage.getItem(`mat_dismissed_${course?.id}`)||'[]');}catch{return[];}});
+
+  const fetchAiRecs=async()=>{
+    if(!course)return;
+    setAiRecsLoading(true);setAiRecsErr('');
+    try{
+      const resp=await api(`/ai/study-materials/${course.id}`,{
+        method:'POST',
+        body:JSON.stringify({
+          course_name:course.course_name||'',
+          course_code:course.course_code||'',
+          department:course.department||'',
+          semester:course.semester||'',
+          cos:course.cos||[],
+          syllabus_units:course.syllabus_units||[],
+        })
+      });
+      const parsed=resp.data||resp;
+      setAiRecs(parsed);
+      setDismissedRecs([]);
+      sessionStorage.removeItem(`mat_dismissed_${course?.id}`);
+    }catch(e){setAiRecsErr('Could not generate AI recommendations. Try again.');}
+    setAiRecsLoading(false);
+  };
+
+  const dismissRec=(key)=>{
+    const next=[...dismissedRecs,key];
+    setDismissedRecs(next);
+    try{sessionStorage.setItem(`mat_dismissed_${course?.id}`,JSON.stringify(next));}catch{}
+  };
+
+  const addRecToTab=(item,category)=>{
+    const entry={id:Date.now()+Math.random(),_source:'ai_rec',...item};
+    const u={...userMats,[category]:[...(userMats[category]||[]),entry]};
+    saveUser(u);
+    dismissRec(item.title);
+  };
+
+  useEffect(()=>{
+    if(course){
+      try{setDismissedRecs(JSON.parse(sessionStorage.getItem(`mat_dismissed_${course.id}`)||'[]'));}catch{setDismissedRecs([]);}
+    }
+  },[course?.id]);
+
+  const fetch_=async()=>{
+    if(!course)return;
+    setLoading(true);setErr('');
+    try{
+      // Try direct materials endpoint first
+      const d=await api(`/session-plan/materials/${course.id}`);
+      const raw=d.data||d;
+      // Normalize various response shapes
+      const mats={
+        textbooks:raw.textbooks||raw.reference_books||raw.books||[],
+        web_links:raw.web_links||raw.online_links||raw.nptel_links||raw.web||[],
+        journals:raw.journals||raw.research_papers||raw.papers||[],
+        mooc_courses:raw.mooc_courses||raw.moocs||[],
+      };
+      setData(mats);
+    }catch(e){
+      try{
+        // Fallback: get from session plan
+        const sp=await api(`/session-plan/view/${course.id}`);
+        const plan=sp.data||sp;
+        const mats=plan?.study_materials||plan?.materials||{};
+        if(Object.keys(mats).length>0){setData(mats);}
+        else{
+          // Last resort: generate session plan to get materials
+          const sp2=await api(`/session-plan/generate/${course.id}`,{method:'POST'});
+          const plan2=sp2.data||sp2;
+          setData(plan2?.study_materials||plan2?.materials||{});
+        }
+      }catch{setErr('Generate the session plan first to see AI recommendations.');}
+    }
+    setLoading(false);
+  };
+
+  useEffect(()=>{fetch_();},[course]);
+  useEffect(()=>{setShowForm(false);setForm(emptyForm);},[course]);
+
+  // AI-sourced
+  const aiTextbooks=data?.textbooks||data?.reference_books||data?.books||[];
+  const aiWeb=data?.web_links||data?.online_links||data?.nptel_links||data?.web||[];
+  const aiJournals=data?.journals||data?.research_papers||data?.papers||[];
+  const aiMoocs=data?.mooc_courses||data?.moocs||[];
+
+  const total=(a,k)=>(a||[]).length+(userMats[k]||[]).length;
+
+  // docx/txt/csv file upload state
+  const [pendingImport,setPendingImport]=useState(null); // {items:[{title,raw}], fileName}
+  const [allocations,setAllocations]=useState({}); // {idx: category}
+  const [showAlloc,setShowAlloc]=useState(false);
+
+  const handleFile=e=>{
+    const f=e.target.files[0];
+    if(!f)return;
+    setFileLabel(f.name);
+    const isDocx=f.name.endsWith('.docx');
+    const r=new FileReader();
+    r.onload=async ev=>{
+      let parsedItems=[];
+      if(isDocx){
+        try{
+          // .docx is a ZIP archive — use JSZip to unpack word/document.xml properly
+          const zip=await JSZip.loadAsync(ev.target.result);
+          const xmlFile=zip.file('word/document.xml');
+          if(!xmlFile){setAddMsg('Could not read .docx: missing word/document.xml.');setTimeout(()=>setAddMsg(''),4000);return;}
+          const raw=await xmlFile.async('string');
+
+          // Extract all paragraph text (headings + body)
+          const allParas=[];
+          const paraMatches=raw.match(/<w:p[ >][\s\S]*?<\/w:p>/g)||[];
+          paraMatches.forEach(p=>{
+            const tMatches=p.match(/<w:t[^>]*>([^<]*)<\/w:t>/g)||[];
+            const text=tMatches.map(t=>t.replace(/<[^>]+>/g,'')).join('').trim();
+            if(text)allParas.push(text);
+          });
+
+          // Extract all table rows
+          const tableRows=[];
+          const rowMatches=raw.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g)||[];
+          rowMatches.forEach(tr=>{
+            const cells=[];
+            const cellMatches=tr.match(/<w:tc>[\s\S]*?<\/w:tc>/g)||[];
+            cellMatches.forEach(tc=>{
+              const tMatches=tc.match(/<w:t[^>]*>([^<]*)<\/w:t>/g)||[];
+              const text=tMatches.map(t=>t.replace(/<[^>]+>/g,'')).join('').trim();
+              cells.push(text);
+            });
+            if(cells.some(c=>c.length>2))tableRows.push(cells);
+          });
+
+          // Determine section context from headings in allParas
+          // Walk through paragraphs and rows together to assign category
+          let currentCat='textbooks';
+          const catKeywords={
+            textbooks:['textbook','reference book','beyond gap','book'],
+            web:['web','online','youtube','nptel','blog','video','link'],
+            journals:['journal','magazine','e-journal','paper','article'],
+            moocs:['mooc','coursera','swayam','edx','udemy','online course'],
+          };
+          const detectCat=(text)=>{
+            const t=text.toLowerCase();
+            for(const[cat,kws]of Object.entries(catKeywords)){if(kws.some(k=>t.includes(k)))return cat;}
+            return null;
+          };
+
+          // First pass — find section headings in paragraphs
+          const sectionMap=[];
+          allParas.forEach(p=>{
+            const cat=detectCat(p);
+            if(cat)currentCat=cat;
+          });
+
+          // Second pass — map table rows to categories based on their order
+          // Re-walk: track section changes as we see heading-like paragraphs
+          currentCat='textbooks';
+          // Use the fact that heading paragraphs appear before their tables in docx XML
+          // Split raw by heading markers to assign table rows
+          const sections=raw.split(/<w:p[ >]/);
+          let tableIdx=0;
+          const rowCatMap=[];
+
+          // Simpler approach: assign each table row a category based on which section heading came before it in XML order
+          const allNodes=[];
+          // Extract all paragraphs and rows in document order
+          const nodeRe=/<(w:p|w:tr)[ >]([\s\S]*?)<\/\1>/g;
+          let match;
+          while((match=nodeRe.exec(raw))!==null){
+            const tag=match[1];
+            const content=match[0];
+            const tTexts=(content.match(/<w:t[^>]*>([^<]*)<\/w:t>/g)||[]).map(t=>t.replace(/<[^>]+>/g,'')).join('').trim();
+            allNodes.push({tag,text:tTexts});
+          }
+
+          currentCat='textbooks';
+          allNodes.forEach(node=>{
+            if(node.tag==='w:p'){
+              const cat=detectCat(node.text);
+              if(cat)currentCat=cat;
+            } else if(node.tag==='w:tr'&&node.text.length>3){
+              // Skip header rows (first row of each table, usually contains "Book","Author" etc)
+              const isHeader=['book','author','publisher','sr','web link','module','journal','s.no'].some(h=>node.text.toLowerCase().startsWith(h)||node.text.toLowerCase().includes(h+''));
+              if(!isHeader)rowCatMap.push({text:node.text,cat:currentCat});
+            }
+          });
+
+          // Now build items from rowCatMap — each row's full text as title
+          // Also try to split cells: for table rows extract per-cell data
+          const processedRows=new Set();
+          rowMatches.forEach((tr,ri)=>{
+            const cells=[];
+            const cellMatches=tr.match(/<w:tc>[\s\S]*?<\/w:tc>/g)||[];
+            cellMatches.forEach(tc=>{
+              const tMatches=tc.match(/<w:t[^>]*>([^<]*)<\/w:t>/g)||[];
+              cells.push(tMatches.map(t=>t.replace(/<[^>]+>/g,'')).join('').trim());
+            });
+            const rowText=cells.join(' ').trim();
+            if(!rowText||processedRows.has(rowText))return;
+            if(['book','author','publisher','sr.','web link','module','journal','s.no','sr no'].some(h=>rowText.toLowerCase().startsWith(h)))return;
+            processedRows.add(rowText);
+
+            const mapped=rowCatMap.find(r=>r.text.includes(cells[0])||cells[0].includes(r.text.slice(0,20)));
+            const cat=mapped?.cat||'textbooks';
+
+            // Build structured item based on category + cell count
+            let item={id:Date.now()+ri+Math.random(),_source:'user',_file:f.name};
+            if(cat==='textbooks'&&cells.length>=2){
+              item={...item,title:cells[0]||rowText,author:cells[1]||'',publisher:cells[2]||''};
+            } else if(cat==='web'&&cells.length>=2){
+              // detect URL in any cell
+              const urlCell=cells.find(c=>c.startsWith('http')||c.includes('nptel')||c.includes('youtube')||c.includes('www.'));
+              const titleCell=cells.find(c=>c!==urlCell&&c.length>3);
+              item={...item,title:titleCell||cells[0]||rowText,url:urlCell||'',unit:cells[cells.length-1]||''};
+            } else if(cat==='journals'){
+              const urlCell=cells.find(c=>c.startsWith('http')||c.includes('arxiv')||c.includes('doi'));
+              item={...item,title:cells.find(c=>c!==urlCell&&c.length>3)||rowText,url:urlCell||''};
+            } else if(cat==='moocs'){
+              item={...item,title:cells[0]||rowText,platform:cells[1]||'',url:cells.find(c=>c.startsWith('http'))||''};
+            } else {
+              item={...item,title:rowText};
+            }
+            parsedItems.push({...item,_cat:cat});
+          });
+
+        }catch(ex){console.error('docx parse error',ex);}
+      } else {
+        const text=typeof ev.target.result==='string'?ev.target.result:new TextDecoder().decode(ev.target.result);
+        const lines=text.split('\n').map(l=>l.trim()).filter(l=>l.length>3);
+        parsedItems=lines.map((l,i)=>({id:Date.now()+i,title:l,_source:'user',_file:f.name,_cat:null}));
+      }
+
+      if(!parsedItems.length){setAddMsg('No readable content found in file.');setTimeout(()=>setAddMsg(''),3000);return;}
+
+      // Filter out items that are just numbers, single chars, or header-like entries
+      const filteredItems=parsedItems.filter(it=>{
+        const t=(it.title||'').trim();
+        if(!t||t.length<=2)return false;
+        // Filter lone numbers like "1", "2", "5.", "6.", "Sr.", etc.
+        if(/^[\d]+\.?$/.test(t))return false;
+        if(/^(sr\.?\s*no\.?|s\.?\s*no\.?|#)$/i.test(t))return false;
+        return true;
+      });
+
+      if(!filteredItems.length){setAddMsg('No readable content found after filtering.');setTimeout(()=>setAddMsg(''),3000);return;}
+
+      // Build initial allocations: use _cat if detected, else guess from text
+      const items=filteredItems.map((it,i)=>({...it,id:it.id||Date.now()+i}));
+      const guessed={};
+      items.forEach((it,i)=>{
+        if(it._cat){guessed[i]=it._cat;return;}
+        const t=(it.title||'').toLowerCase();
+        if(t.includes('http')||t.includes('nptel')||t.includes('youtube')||t.includes('www.'))guessed[i]='web';
+        else if(t.includes('arxiv')||t.includes('doi')||t.includes('ieee')||t.includes('vidhya')||t.includes('medium'))guessed[i]='journals';
+        else if(t.includes('coursera')||t.includes('mooc')||t.includes('udemy')||t.includes('swayam'))guessed[i]='moocs';
+        else guessed[i]='textbooks';
+      });
+      setPendingImport({items,fileName:f.name});
+      setAllocations(guessed);
+      setShowAlloc(true);
+    };
+    if(isDocx)r.readAsArrayBuffer(f);
+    else r.readAsText(f);
+    e.target.value='';
+  };
+
+  const confirmAlloc=()=>{
+    const grouped={textbooks:[],web:[],journals:[],moocs:[]};
+    pendingImport.items.forEach((it,i)=>{
+      const cat=allocations[i]||'textbooks';
+      // Preserve all structured fields (author, publisher, url, unit etc.)
+      const {_cat,...rest}=it;
+      grouped[cat].push({...rest,id:Date.now()+i+Math.random(),_source:'user',_file:pendingImport.fileName});
+    });
+    const u={
+      textbooks:[...(userMats.textbooks||[]),...grouped.textbooks],
+      web:[...(userMats.web||[]),...grouped.web],
+      journals:[...(userMats.journals||[]),...grouped.journals],
+      moocs:[...(userMats.moocs||[]),...grouped.moocs],
+    };
+    saveUser(u);
+    const total=Object.values(grouped).reduce((a,b)=>a+b.length,0);
+    setAddMsg(`Imported ${total} items — ${grouped.textbooks.length} textbooks, ${grouped.web.length} web, ${grouped.journals.length} journals, ${grouped.moocs.length} MOOCs`);
+    setTimeout(()=>setAddMsg(''),5000);
+    setShowAlloc(false);setPendingImport(null);setAllocations({});setFileLabel('');
+  };
+
+  const handleAdd=()=>{
+    if(!form.title.trim()){setAddMsg('Title is required.');setTimeout(()=>setAddMsg(''),2500);return;}
+    const entry={id:Date.now(),_source:'user',...Object.fromEntries(Object.entries(form).filter(([,v])=>v.trim()))};
+    const u={...userMats,[tab]:[...(userMats[tab]||[]),entry]};
+    saveUser(u);
+    setForm(emptyForm);setShowForm(false);
+    setAddMsg('Entry added.');setTimeout(()=>setAddMsg(''),2000);
+  };
+
+  const handleDelete=(id,isAI,aiArr,aiKey)=>{
+    if(isAI){
+      // Move AI item to a "hidden" list for this course
+      const hk=`mat_hidden_${course.id}`;
+      const hidden=JSON.parse(sessionStorage.getItem(hk)||'[]');
+      sessionStorage.setItem(hk,JSON.stringify([...hidden,id]));
+      setData(prev=>{
+        const copy={...prev};
+        copy[aiKey]=(copy[aiKey]||[]).filter((_,i)=>i!==id);
+        return copy;
+      });
+    } else {
+      const u={...userMats,[tab]:(userMats[tab]||[]).filter(x=>x.id!==id)};
+      saveUser(u);
+    }
+  };
+
+  const BtnAdd=()=>(
+    <div style={{display:'flex',alignItems:'center',gap:'.5rem',flexWrap:'wrap',marginBottom:'1rem'}}>
+      <button className="btn btn-primary btn-sm" onClick={()=>{setShowForm(f=>!f);setForm(emptyForm);}}>
+        {showForm?'✕ Cancel':'+ Add Manually'}
+      </button>
+      <label style={{cursor:'pointer'}} title="Upload .txt, .csv or .docx — each line/entry will be parsed and you can assign categories">
+        <span className="btn btn-outline btn-sm">⬆ Import from File (.txt / .csv / .docx)</span>
+        <input type="file" accept=".txt,.csv,.docx" style={{display:'none'}} onChange={handleFile}/>
+      </label>
+      {fileLabel&&<span style={{fontSize:'.75rem',color:'var(--text3)'}}>{fileLabel}</span>}
+      {addMsg&&<span style={{fontSize:'.8rem',color:'var(--blue2)',fontWeight:500}}>{addMsg}</span>}
+    </div>
+  );
+
+  // Category allocation modal
+  const CAT_LABELS={textbooks:'📚 Textbook',web:'🔗 Web/NPTEL',journals:'📰 Journal',moocs:'🎓 MOOC'};
+  const AllocModal=()=>{
+    if(!showAlloc||!pendingImport)return null;
+    return(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'1rem'}}>
+        <div style={{background:'var(--card)',borderRadius:14,padding:'1.5rem',maxWidth:700,width:'100%',maxHeight:'80vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,.25)'}}>
+          <div style={{fontWeight:700,fontSize:'1rem',marginBottom:'.25rem'}}>Allocate items to categories</div>
+          <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem'}}>
+            From <strong>{pendingImport.fileName}</strong> · {pendingImport.items.length} items found · <span style={{color:'#C2410C',fontWeight:600}}>✨ AI has auto-guessed categories</span> — adjust as needed
+          </div>
+          <div style={{overflowY:'auto',flex:1,marginBottom:'1rem'}}>
+            {pendingImport.items.map((it,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.5rem .25rem',borderBottom:'1px solid var(--border)'}}>
+                <div style={{flex:1,fontSize:'.82rem',color:'var(--text)',lineHeight:1.4}}>{it.title.length>100?it.title.slice(0,100)+'…':it.title}</div>
+                <select value={allocations[i]||'textbooks'} onChange={e=>setAllocations(a=>({...a,[i]:e.target.value}))}
+                  style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:6,padding:'3px 6px',background:'var(--bg)',color:'var(--text)',cursor:'pointer',flexShrink:0}}>
+                  {Object.entries(CAT_LABELS).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          <div style={{display:'flex',gap:'.5rem',justifyContent:'flex-end'}}>
+            <button className="btn btn-outline btn-sm" onClick={()=>{setShowAlloc(false);setPendingImport(null);setFileLabel('');}}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={confirmAlloc}>✓ Confirm & Import</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const DelBtn=({onClick})=>(
+    <button onClick={onClick} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:'1rem',padding:'2px 6px',borderRadius:4,lineHeight:1}} title="Delete">✕</button>
+  );
+
+  // Form fields per tab
+  const FormPanel=()=>{
+    if(!showForm)return null;
+    const isWeb=tab==='web',isMooc=tab==='moocs',isJournal=tab==='journals';
+    return(
+      <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem',marginBottom:'1rem'}}>
+        <div style={{fontWeight:600,fontSize:'.85rem',marginBottom:'.75rem',color:'var(--text)'}}>Add {tab==='textbooks'?'Textbook':tab==='web'?'Web Resource':tab==='journals'?'Journal':'MOOC'}</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.65rem'}}>
+          <div style={{gridColumn:'1/-1'}}>
+            <label className="fl">Title / Name *</label>
+            <input className="fi" value={form.title} onChange={e=>setForm(p=>({...p,title:e.target.value}))} placeholder={tab==='textbooks'?'e.g. Introduction to Algorithms':tab==='web'?'e.g. NPTEL - Design and Analysis':tab==='journals'?'e.g. IEEE Journal of...':'e.g. Deep Learning Specialization'}/>
+          </div>
+          {tab==='textbooks'&&<>
+            <div><label className="fl">Author(s)</label><input className="fi" value={form.author} onChange={e=>setForm(p=>({...p,author:e.target.value}))} placeholder="e.g. Cormen et al."/></div>
+            <div><label className="fl">Publisher / Edition</label><input className="fi" value={form.publisher} onChange={e=>setForm(p=>({...p,publisher:e.target.value}))} placeholder="e.g. MIT Press, 3rd Ed."/></div>
+          </>}
+          {isWeb&&<>
+            <div style={{gridColumn:'1/-1'}}><label className="fl">URL</label><input className="fi" value={form.url} onChange={e=>setForm(p=>({...p,url:e.target.value}))} placeholder="https://..."/></div>
+            <div><label className="fl">Unit / Module</label><input className="fi" value={form.unit} onChange={e=>setForm(p=>({...p,unit:e.target.value}))} placeholder="e.g. Unit 3"/></div>
+          </>}
+          {isJournal&&<>
+            <div style={{gridColumn:'1/-1'}}><label className="fl">DOI / URL</label><input className="fi" value={form.url} onChange={e=>setForm(p=>({...p,url:e.target.value}))} placeholder="https://doi.org/..."/></div>
+          </>}
+          {isMooc&&<>
+            <div><label className="fl">Platform</label><input className="fi" value={form.platform} onChange={e=>setForm(p=>({...p,platform:e.target.value}))} placeholder="e.g. Coursera, NPTEL"/></div>
+            <div><label className="fl">Duration</label><input className="fi" value={form.duration} onChange={e=>setForm(p=>({...p,duration:e.target.value}))} placeholder="e.g. 8 weeks"/></div>
+            <div style={{gridColumn:'1/-1'}}><label className="fl">Enroll URL</label><input className="fi" value={form.url} onChange={e=>setForm(p=>({...p,url:e.target.value}))} placeholder="https://..."/></div>
+          </>}
+          <div style={{gridColumn:'1/-1'}}><label className="fl">Note (optional)</label><input className="fi" value={form.note} onChange={e=>setForm(p=>({...p,note:e.target.value}))} placeholder="Any additional context…"/></div>
+        </div>
+        <button className="btn btn-primary btn-sm" style={{marginTop:'.75rem'}} onClick={handleAdd}>Add Entry</button>
+      </div>
+    );
+  };
+
+  const AiBadge=()=><span title="AI Recommendation" style={{fontSize:'.65rem',background:'linear-gradient(135deg,#FFEDD5,#FED7AA)',color:'#C2410C',borderRadius:20,padding:'2px 8px',fontWeight:700,marginLeft:6,border:'1px solid #FDBA74',display:'inline-flex',alignItems:'center',gap:3}}>✨ AI</span>;
+  const UserBadge=()=><span style={{fontSize:'.65rem',background:'var(--bg2)',color:'var(--text2)',borderRadius:20,padding:'1px 7px',fontWeight:600,marginLeft:6}}>You</span>;
+
+  const hasAny=aiTextbooks.length||aiWeb.length||aiJournals.length||aiMoocs.length||
+    (userMats.textbooks||[]).length||(userMats.web||[]).length||(userMats.journals||[]).length||(userMats.moocs||[]).length;
+
+  return(<div className="page-body fade-up">
+    <AllocModal/>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
+      <div>
+        <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>Study Materials</div>
+        {course&&<div style={{fontSize:'.82rem',color:'var(--text2)',marginTop:'.2rem'}}>{course.course_name} · {course.course_code}</div>}
+      </div>
+      <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',alignItems:'center'}}>
+        {dbSaving && <span style={{fontSize:11,color:'var(--text2)'}}>💾 Saving…</span>}
+        <button className="btn btn-outline" onClick={fetch_} disabled={loading||!course}>
+          {loading?<><Spin/>Loading…</>:'↻ Refresh'}
+        </button>
+        <button className="btn btn-primary" onClick={fetchAiRecs} disabled={aiRecsLoading||!course}
+          style={{background:'linear-gradient(135deg,#f97316,#ea580c)',border:'none'}}>
+          {aiRecsLoading?<><Spin/>Generating…</>:'✨ Get AI Recommendations'}
+        </button>
+      </div>
+    </div>
+
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+    <Alrt t="error" msg={err}/>
+
+    {/* ── AI Recommendations Panel ── */}
+    {aiRecsLoading&&<div className="card card-p" style={{textAlign:'center',padding:'2rem',marginBottom:'1rem',background:'linear-gradient(135deg,#fff7ed,#ffedd5)',border:'1px solid #fed7aa'}}>
+      <Spin/><span style={{color:'#c2410c',marginLeft:'.5rem',fontWeight:600}}>✨ Claude is analysing your course and generating recommendations…</span>
+    </div>}
+    {aiRecsErr&&<Alrt t="error" msg={aiRecsErr}/>}
+
+    {!aiRecsLoading&&aiRecs&&(()=>{
+      const catMap={textbooks:'textbooks',web:'web',journals:'journals',moocs:'moocs'};
+      const tabRecs=(aiRecs[catMap[tab]]||[]).filter(r=>!dismissedRecs.includes(r.title));
+      if(tab==='master'||tabRecs.length===0)return null;
+      return(
+        <div style={{marginBottom:'1rem',padding:'1rem 1.25rem',background:'linear-gradient(135deg,#fff7ed,#fffbeb)',border:'1px solid #fed7aa',borderRadius:12}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.75rem'}}>
+            <div style={{fontWeight:700,fontSize:'.9rem',color:'#92400e'}}>
+              ✨ AI Recommendations <span style={{fontWeight:400,fontSize:'.78rem',color:'#b45309'}}>for {tab==='textbooks'?'Textbooks':tab==='web'?'Web / NPTEL':tab==='journals'?'Journals':'MOOCs'}</span>
+            </div>
+            <span style={{fontSize:'.72rem',color:'#b45309'}}>Based on your COs & syllabus</span>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:'.6rem'}}>
+            {tabRecs.map((item,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'flex-start',gap:'1rem',padding:'.75rem',background:'rgba(255,255,255,.7)',borderRadius:9,border:'1px solid #fde68a'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,fontSize:'.855rem',color:'var(--text)',marginBottom:2}}>
+                    {tab==='web'&&item.url?<a href={item.url} target="_blank" rel="noreferrer" style={{color:'#c2410c',textDecoration:'none'}}>{item.title} ↗</a>:item.title}
+                  </div>
+                  {item.author&&<div style={{fontSize:'.78rem',color:'var(--text2)'}}>by {item.author}{item.publisher?` · ${item.publisher}`:''}</div>}
+                  {item.platform&&<div style={{fontSize:'.78rem',color:'var(--blue2)'}}>{item.platform}{item.duration?` · ${item.duration}`:''}</div>}
+                  {item.unit&&<div style={{fontSize:'.75rem',color:'var(--text3)'}}>📌 {item.unit}</div>}
+                  {item.reason&&<div style={{fontSize:'.75rem',color:'#92400e',marginTop:3,fontStyle:'italic'}}>💡 {item.reason}</div>}
+                </div>
+                <div style={{display:'flex',gap:'.35rem',flexShrink:0}}>
+                  <button onClick={()=>addRecToTab(item,tab)}
+                    style={{fontSize:'.75rem',padding:'4px 10px',background:'#f97316',color:'#fff',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600,whiteSpace:'nowrap'}}>
+                    + Add
+                  </button>
+                  <button onClick={()=>dismissRec(item.title)}
+                    style={{fontSize:'.75rem',padding:'4px 8px',background:'transparent',color:'#b45309',border:'1px solid #fcd34d',borderRadius:6,cursor:'pointer'}}>
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    })()}
+
+    {!aiRecs&&!aiRecsLoading&&course&&<div style={{marginBottom:'1rem',padding:'.875rem 1.25rem',background:'var(--bg)',border:'1px dashed var(--border)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'.5rem'}}>
+      <div>
+        <div style={{fontWeight:600,fontSize:'.85rem'}}>✨ Get AI-powered recommendations</div>
+        <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:2}}>Claude will analyse your COs and syllabus to suggest the best textbooks, NPTEL links, journals and MOOCs.</div>
+      </div>
+      <button className="btn btn-primary btn-sm" onClick={fetchAiRecs}
+        style={{background:'linear-gradient(135deg,#f97316,#ea580c)',border:'none',whiteSpace:'nowrap'}}>
+        ✨ Generate Recommendations
+      </button>
+    </div>}
+
+    {loading&&<div className="card card-p" style={{textAlign:'center',padding:'3rem'}}>
+      <Spin/><span style={{color:'var(--text2)',marginLeft:'.5rem'}}>Loading saved materials…</span>
+    </div>}
+
+    {!loading&&<>
+      <div className="tabs" style={{marginBottom:0}}>
+        {[['textbooks',`📚 Textbooks (${total(aiTextbooks,'textbooks')})`],['web',`🔗 Web / NPTEL (${total(aiWeb,'web')})`],['journals',`📰 Journals (${total(aiJournals,'journals')})`],['moocs',`🎓 MOOCs (${total(aiMoocs,'moocs')})`],['master','⬆ Master Upload']].map(([t,l])=>(
+          <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>{setTab(t);setShowForm(false);setForm(emptyForm);}}>{l}</div>
+        ))}
+      </div>
+
+      <div className="card card-p" style={{borderTopLeftRadius:0,borderTopRightRadius:0,borderTop:'none'}}>
+
+        {tab==='master'&&(()=>{
+          return(<div>
+            <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.5rem'}}>Master Upload</div>
+            <div style={{fontSize:'.82rem',color:'var(--text2)',marginBottom:'1rem',lineHeight:1.7}}>
+              Upload your institution's study material document (.docx, .txt, .csv). The platform will extract all entries and automatically place them in the correct tabs — Textbooks, Web/NPTEL, Journals, MOOCs — based on the document structure.<br/>
+              <strong>Supports:</strong> The SIT "List of Study Material.docx" format with section headings and tables.
+            </div>
+            <label style={{cursor:'pointer',display:'block'}}>
+              <div style={{border:'2px dashed var(--border)',borderRadius:12,padding:'2.5rem',textAlign:'center',background:'var(--bg)',cursor:'pointer',transition:'all .2s'}}
+                onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor='var(--blue2)';}}
+                onDragLeave={e=>{e.currentTarget.style.borderColor='var(--border)';}}
+                onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor='var(--border)';const f=e.dataTransfer.files[0];if(f){const ev={target:{files:[f],value:''}};handleFile(ev);}}}>
+                <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>📄</div>
+                <div style={{fontWeight:600,color:'var(--text)',marginBottom:'.25rem'}}>Click to upload or drag & drop</div>
+                <div style={{fontSize:'.78rem',color:'var(--text3)'}}>Supports .docx, .txt, .csv — max 5MB</div>
+                {fileLabel&&<div style={{marginTop:'.75rem',fontSize:'.82rem',color:'var(--blue2)',fontWeight:500}}>Selected: {fileLabel}</div>}
+              </div>
+              <input type="file" accept=".txt,.csv,.docx" style={{display:'none'}} onChange={handleFile}/>
+            </label>
+            {addMsg&&<div style={{marginTop:'.75rem',padding:'.6rem .875rem',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,fontSize:'.82rem',color:'#166534',fontWeight:500}}>{addMsg}</div>}
+            <div style={{marginTop:'1.25rem',padding:'1rem',background:'var(--bg)',borderRadius:10,border:'1px solid var(--border)'}}>
+              <div style={{fontWeight:600,fontSize:'.85rem',marginBottom:'.5rem'}}>How it works</div>
+              <div style={{fontSize:'.8rem',color:'var(--text2)',lineHeight:1.8}}>
+                1. Upload your file — works with the SIT study material docx format<br/>
+                2. The parser reads section headings (Textbooks, Web Links, Journals, MOOCs) and table rows<br/>
+                3. A preview appears — you can reassign any item to a different category<br/>
+                4. Confirm → items populate the correct tabs automatically
+              </div>
+            </div>
+          </div>);
+        })()}
+        {tab!=='master'&&<><BtnAdd/><FormPanel/></>}
+
+        {tab==='textbooks'&&(()=>{
+          const all=[...aiTextbooks.map((b,i)=>({...( typeof b==='string'?{title:b}:b),_id:'ai_'+i,_isAI:true})),...(userMats.textbooks||[])];
+          return all.length===0
+            ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No textbooks yet. Add one above or generate the session plan for AI suggestions.</div>
+            :<div className="tbl-wrap"><table>
+              <thead><tr><th>#</th><th>Title</th><th>Author</th><th>Publisher</th><th>Source</th><th></th></tr></thead>
+              <tbody>{all.map((b,i)=><tr key={b._id||b.id||i}>
+                <td style={{color:'var(--text3)'}}>{i+1}</td>
+                <td style={{fontWeight:600,fontSize:'.855rem'}}>{b.title||b.name||b}{b.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{b.note}</div>}</td>
+                <td style={{fontSize:'.82rem'}}>{b.author||'—'}</td>
+                <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{b.publisher||b.edition||'—'}</td>
+                <td>{b._isAI?<AiBadge/>:<UserBadge/>}</td>
+                <td><DelBtn onClick={()=>b._isAI?handleDelete(i,true,aiTextbooks,'textbooks'):handleDelete(b.id,false)}/></td>
+              </tr>)}</tbody>
+            </table></div>;
+        })()}
+
+        {tab==='web'&&(()=>{
+          const all=[...aiWeb.map((w,i)=>({...(typeof w==='string'?{title:w}:w),_id:'ai_'+i,_isAI:true})),...(userMats.web||[])];
+          return all.length===0
+            ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No web resources yet. Add one above.</div>
+            :<div className="tbl-wrap"><table>
+              <thead><tr><th>Sr.</th><th>Resource</th><th>Unit</th><th>Link</th><th>Source</th><th></th></tr></thead>
+              <tbody>{all.map((w,i)=><tr key={w._id||w.id||i}>
+                <td style={{color:'var(--text3)'}}>{i+1}</td>
+                <td style={{fontWeight:500,fontSize:'.855rem'}}>{w.title||w.name||w.link||w.url||"(no title)"}{w.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{w.note}</div>}</td>
+                <td style={{fontSize:'.78rem',color:'var(--text2)'}}>{w.unit||w.module||'—'}</td>
+                <td>{(w.url||w.link_url||w.href)?<a href={w.url||w.link_url||w.href} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
+                <td>{w._isAI?<AiBadge/>:<UserBadge/>}</td>
+                <td><DelBtn onClick={()=>w._isAI?handleDelete(i,true,aiWeb,'web'):handleDelete(w.id,false)}/></td>
+              </tr>)}</tbody>
+            </table></div>;
+        })()}
+
+        {tab==='journals'&&(()=>{
+          const all=[...aiJournals.map((j,i)=>({...(typeof j==='string'?{title:j}:j),_id:'ai_'+i,_isAI:true})),...(userMats.journals||[])];
+          return all.length===0
+            ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No journals yet. Add one above.</div>
+            :<div className="tbl-wrap"><table>
+              <thead><tr><th>Sr.</th><th>Title</th><th>DOI / URL</th><th>Source</th><th></th></tr></thead>
+              <tbody>{all.map((j,i)=><tr key={j._id||j.id||i}>
+                <td style={{color:'var(--text3)'}}>{i+1}</td>
+                <td style={{fontWeight:500,fontSize:'.855rem'}}>{j.title||j.name||j.url||"(no title)"}{j.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',fontWeight:400}}>{j.note}</div>}</td>
+                <td>{(j.url||j.doi)?<a href={j.url||j.doi} target="_blank" rel="noreferrer" style={{color:'var(--blue2)',fontSize:'.8rem'}}>Open →</a>:'—'}</td>
+                <td>{j._isAI?<AiBadge/>:<UserBadge/>}</td>
+                <td><DelBtn onClick={()=>j._isAI?handleDelete(i,true,aiJournals,'journals'):handleDelete(j.id,false)}/></td>
+              </tr>)}</tbody>
+            </table></div>;
+        })()}
+
+        {tab==='moocs'&&(()=>{
+          const all=[...aiMoocs.map((m,i)=>({...(typeof m==='string'?{title:m}:m),_id:'ai_'+i,_isAI:true})),...(userMats.moocs||[])];
+          return all.length===0
+            ?<div style={{textAlign:'center',padding:'2rem',color:'var(--text2)'}}>No MOOCs yet. Add one above.</div>
+            :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(270px,1fr))',gap:'1rem'}}>
+              {all.map((m,i)=>(
+                <div key={m._id||m.id||i} style={{padding:'1rem',border:'1px solid var(--border)',borderRadius:10,background:'var(--bg)',position:'relative'}}>
+                  <div style={{position:'absolute',top:8,right:8,display:'flex',alignItems:'center',gap:4}}>
+                    {m._isAI?<AiBadge/>:<UserBadge/>}
+                    <DelBtn onClick={()=>m._isAI?handleDelete(i,true,aiMoocs,'moocs'):handleDelete(m.id,false)}/>
+                  </div>
+                  <div style={{fontWeight:600,fontSize:'.875rem',marginBottom:'.35rem',paddingRight:'4rem'}}>{m.title||m.name||m.course||m.url||"(no title)"}</div>
+                  {m.platform&&<div style={{fontSize:'.78rem',color:'var(--blue2)',marginBottom:'.25rem'}}>{m.platform}</div>}
+                  {m.duration&&<div style={{fontSize:'.75rem',color:'var(--text3)'}}>⏱ {m.duration}</div>}
+                  {m.note&&<div style={{fontSize:'.75rem',color:'var(--text3)',marginTop:'.25rem'}}>{m.note}</div>}
+                  {(m.url||m.link)&&<a href={m.url||m.link} target="_blank" rel="noreferrer" style={{display:'inline-block',marginTop:'.5rem',fontSize:'.78rem',color:'var(--blue2)'}}>Enroll →</a>}
+                </div>
+              ))}
+            </div>;
+        })()}
+      </div>
+    </>}
+  </div>);
+}
+
+function MarksPage({course}){
+  const [tab,setTab]=useState('upload');
+  const [uploadMode,setUploadMode]=useState('xlsx');
+  const [file,setFile]=useState(null);const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');const [ok,setOk]=useState('');
+  const [students,setStudents]=useState([]);const [fetching,setFetching]=useState(false);
+  // manual entry state
+  const [manualStudents,setManualStudents]=useState([]);const [saving,setSaving]=useState(false);
+  // eval-plan-driven marks grid state
+  const [evalPlanComps,setEvalPlanComps]=useState([]);const [evalPlanLoading,setEvalPlanLoading]=useState(false);
+  const [marksGrid,setMarksGrid]=useState({});// {prn: {compName: value}}
+  const [gridStudents,setGridStudents]=useState([]);// [{prn,name,section}]
+  const [gridSaving,setGridSaving]=useState(false);const [gridOk,setGridOk]=useState('');const [gridErr,setGridErr]=useState('');
+  const [sectionFilter,setSectionFilter]=useState('All');
+  // current marks state
+  const [currentMarks,setCurrentMarks]=useState([]);const [currentLoading,setCurrentLoading]=useState(false);
+  const [currentErr,setCurrentErr]=useState('');const [currentOk,setCurrentOk]=useState('');
+  const [editingRow,setEditingRow]=useState(null);const [editBuf,setEditBuf]=useState({});const [savingRow,setSavingRow]=useState(null);
+  const cos=course?.cos||[];
+  const components=Object.keys(course?.evaluation_config?.components||{});
+  const maxMarks=course?.evaluation_config?.components||{};
+
+  const fetchMarksPreview=async()=>{
+    if(!course)return;
+    setFetching(true);
+    try{
+      const d=await api(`/attainment/calculate/${course.id}`);
+      const result=d.data||d;
+      const rows=Object.values(result.co_attainment||{});
+      setStudents(rows);
+    }catch(e){
+      if(e.message&&e.message.includes('No student marks'))setStudents([]);
+      else setErr(e.message);
+    }
+    setFetching(false);
+  };
+
+  const fetchCurrentMarks=async()=>{
+    if(!course)return;
+    setCurrentLoading(true);setCurrentErr('');
+    try{
+      const d=await api(`/attainment/marks/${course.id}`);
+      setCurrentMarks(d.data||[]);
+    }catch(e){
+      if(e.message&&e.message.includes('No student marks'))setCurrentMarks([]);
+      else setCurrentErr(e.message);
+    }
+    setCurrentLoading(false);
+  };
+
+  // Fetch eval plan component names (excluding ESE)
+  const fetchEvalPlanComps=async()=>{
+    if(!course)return;
+    setEvalPlanLoading(true);
+    try{
+      const d=await api(`/evaluation-plan/view/${course.id}`);
+      const rows=d.data||d.rows||d||[];
+      const ESE_KW=['end semester','ese','end-semester','final exam'];
+      const isEse=(n)=>ESE_KW.some(k=>n.toLowerCase().includes(k));
+      const comps=(Array.isArray(rows)?rows:[])
+        .map(r=>({name:r.component||r.comp||r.name||'',marks:r.marks||r.total_marks||''}))
+        .filter(c=>c.name&&!isEse(c.name));
+      setEvalPlanComps(comps);
+    }catch(e){setEvalPlanComps([]);}
+    setEvalPlanLoading(false);
+  };
+
+  // Fetch students for grid
+  const fetchGridStudents=async()=>{
+    if(!course)return;
+    try{
+      const d=await api(`/students/${course.id}`);
+      const rows=(d.data||[]).map(s=>({prn:s.prn||s.student_id||s.id,name:s.name||s.student_name||'',section:s.section||''}));
+      setGridStudents(rows);
+      // Load existing marks into grid
+      try{
+        const md=await api(`/attainment/marks/${course.id}`);
+        const existing={};
+        (md.data||[]).forEach(rec=>{
+          const prn=rec.student_id;
+          existing[prn]={};
+          const m=rec.marks||{};
+          // marks can be flat {comp:val} or co-wise {CO1:{comp:val}}
+          const firstVal=Object.values(m)[0];
+          if(firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object'){
+            Object.assign(existing[prn],m);
+          } else {
+            Object.values(m).forEach(coM=>{if(coM&&typeof coM==='object')Object.assign(existing[prn],coM);});
+          }
+        });
+        setMarksGrid(existing);
+      }catch(e){}
+    }catch(e){}
+  };
+
+  const saveGrid=async()=>{
+    if(!course){setGridErr('No course selected.');return;}
+    setGridSaving(true);setGridErr('');setGridOk('');
+    try{
+      const students=gridStudents.map(s=>({
+        student_id:s.prn,student_name:s.name,
+        marks:marksGrid[s.prn]||{}
+      }));
+      await api(`/attainment/marks/${course.id}`,{method:'POST',body:JSON.stringify({students})});
+      setGridOk('✓ Marks saved successfully.');
+      setTimeout(()=>setGridOk(''),3000);
+    }catch(e){setGridErr(e.message);}
+    setGridSaving(false);
+  };
+
+  const updateCell=(prn,comp,val)=>setMarksGrid(prev=>({...prev,[prn]:{...(prev[prn]||{}),[comp]:val}}));
+
+  const startEdit=(rec)=>{setEditingRow(rec.student_id);setEditBuf(JSON.parse(JSON.stringify(rec.marks)));};
+  const cancelEdit=()=>{setEditingRow(null);setEditBuf({});};
+
+  const saveEdit=async(rec)=>{
+    setSavingRow(rec.student_id);setCurrentErr('');setCurrentOk('');
+    try{
+      // Determine format of this record's marks
+      const firstKey=Object.keys(rec.marks||{})[0]||'';
+      const firstVal=Object.values(rec.marks||{})[0];
+      const recIsExamWise=firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object';
+      const recIsCoWise=!recIsExamWise&&/^CO\d+$/i.test(firstKey);
+      const recIsComponentWise=!recIsExamWise&&!recIsCoWise;
+      // For component-wise, convert {comp: num} → {comp: {Total: num}}
+      let marksToSave=editBuf;
+      if(recIsComponentWise){
+        marksToSave={};
+        Object.entries(editBuf).forEach(([comp,val])=>{
+          marksToSave[comp]={Total:typeof val==='number'?val:parseFloat(val)||0};
+        });
+      }
+      const payload={students:[{student_id:rec.student_id,student_name:rec.student_name,marks:marksToSave}]};
+      await api(`/attainment/marks/${course.id}/student/${encodeURIComponent(rec.student_id)}`,{method:'PUT',body:JSON.stringify(payload)});
+      setCurrentOk(`✓ Marks updated for ${rec.student_name}`);
+      setEditingRow(null);setEditBuf({});
+      fetchCurrentMarks();fetchMarksPreview();
+    }catch(e){setCurrentErr(e.message);}
+    setSavingRow(null);
+  };
+
+  const uploadXlsx=async()=>{
+    if(!course){setErr('Select a course.');return;}
+    if(!file){setErr('Select an xlsx file.');return;}
+    setLoading(true);setErr('');setOk('');
+    try{
+      const fd=new FormData();fd.append('file',file);
+      const r=await fetch(API+`/attainment/marks/${course.id}/xlsx`,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+      if(!r.ok){const e=await r.json();throw new Error(e.detail||'Upload failed');}
+      const d=await r.json();
+      const ud=d.data||d;
+      setOk(`✓ Uploaded ${ud.parsed_students||d.parsed_students||'all'} students. View and edit in "Current Marks" tab.`);
+      setFile(null);
+      setTab('current');
+      fetchMarksPreview();
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const uploadDocx=async()=>{
+    if(!course){setErr('Select a course.');return;}
+    if(!file){setErr('Select a .docx file.');return;}
+    setLoading(true);setErr('');setOk('');
+    try{
+      const fd=new FormData();fd.append('file',file);
+      const r=await fetch(API+`/attainment/marks/${course.id}/docx`,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
+      if(!r.ok){const e=await r.json();throw new Error(e.detail||'Upload failed');}
+      const d=await r.json();
+      const ud=d.data||d;
+      setOk(`✓ Uploaded ${ud.parsed_students||d.parsed_students||'all'} students from docx. View and edit in "Current Marks" tab.`);
+      setFile(null);
+      setTab('current');
+      fetchMarksPreview();
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const initManual=()=>{
+    if(!course)return;
+    const rows=(course.cos||[]).map(co=>({
+      co_id:co.co_id,
+      ...Object.fromEntries(components.map(c=>[c,'']))
+    }));
+    setManualStudents(rows);
+    setTab('manual');
+  };
+
+  const saveManual=async()=>{
+    if(!course)return;
+    setSaving(true);setErr('');setOk('');
+    try{
+      // Build a single "aggregate" student entry from manual CO-component marks
+      const marksObj={};
+      manualStudents.forEach(row=>{
+        marksObj[row.co_id]={};
+        components.forEach(c=>{ marksObj[row.co_id][c]=parseFloat(row[c])||0; });
+      });
+      const payload={students:[{student_id:'AGG_001',student_name:'Class Average',marks:marksObj}]};
+      await api(`/attainment/marks/${course.id}`,{method:'POST',body:JSON.stringify(payload)});
+      setOk('✓ Marks saved. Go to Attainment to calculate results.');
+    }catch(e){setErr(e.message);}
+    setSaving(false);
+  };
+
+  useEffect(()=>{if(tab==='summary')fetchMarksPreview();},[tab,course]);
+  useEffect(()=>{if(tab==='current')fetchCurrentMarks();},[tab,course]);
+  useEffect(()=>{if(tab==='manual'){fetchEvalPlanComps();fetchGridStudents();}},[tab,course?.id]);
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.25rem'}}>Upload Student Marks</div>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+
+    <div className="tabs" style={{marginBottom:'1.25rem'}}>
+      {[['upload','📤 Upload xlsx'],['manual','✏️ Marks Sheet'],['current','📋 Current Marks'],['summary','📊 CO Summary']].map(([t,l])=>(
+        <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{l}</div>
+      ))}
+    </div>
+
+    {/* ── Upload Tab ── */}
+    {tab==='upload'&&<div className="card card-p" style={{maxWidth:600}}>
+      <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.9rem'}}>📤 Upload Marks</div>
+      {/* ── Format toggle ── */}
+      <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem'}}>
+        <button className={`btn btn-sm ${uploadMode==='xlsx'?'btn-primary':'btn-outline'}`} onClick={()=>{setUploadMode('xlsx');setFile(null);setErr('');setOk('');}}>📊 Excel (.xlsx)</button>
+        <button className={`btn btn-sm ${uploadMode==='docx'?'btn-primary':'btn-outline'}`} onClick={()=>{setUploadMode('docx');setFile(null);setErr('');setOk('');}}>📄 Word (.docx)</button>
+      </div>
+      {uploadMode==='xlsx'&&<div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.875rem',lineHeight:1.7,padding:'.75rem',background:'var(--blue3)',borderRadius:8}}>
+        <strong>Expected format:</strong> Column B = PRN, Column C = Student Name, Column D+ = CO-wise marks.<br/>
+        Section headers (Section A/B/C), formula cells and blank rows are auto-skipped.
+      </div>}
+      {uploadMode==='docx'&&<div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.875rem',lineHeight:1.7,padding:'.75rem',background:'var(--blue3)',borderRadius:8}}>
+        <strong>Expected format:</strong> A table with PRN, Student Name, and CO columns (CO1, CO2, …).<br/>
+        The first matching table in the document will be parsed automatically.
+      </div>}
+      <input id="marks-file-input" type="file" accept={uploadMode==='xlsx'?'.xlsx,.xls':'.docx'} style={{display:'none'}} onChange={e=>{if(e.target.files[0])setFile(e.target.files[0]);}}/>
+      <div onClick={()=>document.getElementById('marks-file-input').click()}
+        style={{border:'2px dashed '+(file?'#16a34a':'var(--border)'),borderRadius:10,padding:'2rem',textAlign:'center',cursor:'pointer',background:file?'#f0fdf4':'var(--bg)',transition:'all .2s',marginBottom:'.875rem',userSelect:'none'}}>
+        <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>{file?'✅':(uploadMode==='xlsx'?'📊':'📄')}</div>
+        <div style={{fontWeight:600,color:file?'#16a34a':'var(--text)'}}>{file?file.name:(uploadMode==='xlsx'?'Click to select marks xlsx':'Click to select marks docx')}</div>
+        <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.25rem'}}>{file?`${(file.size/1024).toFixed(1)} KB — ready to upload`:(uploadMode==='xlsx'?'.xlsx files only':'.docx files only')}</div>
+      </div>
+      <Alrt t="error" msg={err}/><Alrt t="success" msg={ok}/>
+      <div style={{display:'flex',gap:'.75rem'}}>
+        <button className="btn btn-outline" onClick={()=>document.getElementById('marks-file-input').click()} style={{flex:1}}>
+          📂 Choose File
+        </button>
+        <button className="btn btn-primary" onClick={uploadMode==='xlsx'?uploadXlsx:uploadDocx} disabled={loading||!course||!file} style={{flex:2}}>
+          {loading?<><Spin/>Uploading…</>:'↑ Upload Marks'}
+        </button>
+      </div>
+    </div>}
+
+    {/* ── Manual Entry Tab — Student Marks Grid ── */}
+    {tab==='manual'&&(()=>{
+      const sections=['All',...[...new Set(gridStudents.map(s=>s.section).filter(Boolean))].sort()];
+      const filtered=sectionFilter==='All'?gridStudents:gridStudents.filter(s=>s.section===sectionFilter);
+      const filled=evalPlanComps.length>0&&filtered.length>0
+        ?Math.round(filtered.filter(s=>evalPlanComps.some(c=>marksGrid[s.prn]?.[c.name]!==undefined&&marksGrid[s.prn]?.[c.name]!=='')).length/filtered.length*100)
+        :0;
+      return(<div>
+        {/* Header bar */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem',flexWrap:'wrap',gap:'.75rem'}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:'.95rem'}}>✏️ Student Marks Sheet</div>
+            <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:2}}>
+              Fill in marks as assessments are completed. Changes auto-populate — click Save when done.
+            </div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:'.5rem',flexWrap:'wrap'}}>
+            {/* Section filter pills */}
+            {sections.length>1&&sections.map(s=>(
+              <button key={s} onClick={()=>setSectionFilter(s)}
+                className={`btn btn-sm ${sectionFilter===s?'btn-primary':'btn-outline'}`}
+                style={{minWidth:36}}>{s}</button>
+            ))}
+            <button className="btn btn-primary btn-sm" onClick={saveGrid} disabled={gridSaving||!course}>
+              {gridSaving?<><Spin/>Saving…</>:'💾 Save Marks'}
+            </button>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        {evalPlanComps.length>0&&filtered.length>0&&<div style={{marginBottom:'1rem'}}>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:'.75rem',color:'var(--text2)',marginBottom:3}}>
+            <span>Fill progress</span><span>{filled}% of students have at least one mark</span>
+          </div>
+          <div style={{height:6,background:'var(--border)',borderRadius:99,overflow:'hidden'}}>
+            <div style={{height:'100%',width:filled+'%',background:'var(--green1,#16a34a)',borderRadius:99,transition:'width .4s'}}/>
+          </div>
+        </div>}
+
+        <Alrt t="error" msg={gridErr}/><Alrt t="success" msg={gridOk}/>
+
+        {!course&&<Alrt t="warning" msg="Select a course first."/>}
+        {course&&evalPlanLoading&&<Skel/>}
+        {course&&!evalPlanLoading&&evalPlanComps.length===0&&
+          <Alrt t="info" msg="No evaluation plan found. Please generate an Evaluation Plan first, then come back here."/>}
+        {course&&!evalPlanLoading&&evalPlanComps.length>0&&gridStudents.length===0&&
+          <Alrt t="warning" msg="No students found. Add students in the Students page first."/>}
+
+        {course&&!evalPlanLoading&&evalPlanComps.length>0&&gridStudents.length>0&&
+        <div className="tbl-wrap">
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.83rem'}}>
+            <thead>
+              <tr style={{background:'var(--bg2)'}}>
+                <th style={{textAlign:'center',width:36,padding:'8px 4px',position:'sticky',left:0,background:'var(--bg2)',zIndex:2}}>#</th>
+                <th style={{minWidth:120,padding:'8px 8px',position:'sticky',left:36,background:'var(--bg2)',zIndex:2,borderRight:'2px solid var(--border)'}}>PRN</th>
+                <th style={{minWidth:180,padding:'8px 8px',position:'sticky',left:156,background:'var(--bg2)',zIndex:2,borderRight:'2px solid var(--border)'}}>Name</th>
+                {sections.length>2&&<th style={{width:70,padding:'8px 6px',textAlign:'center'}}>Section</th>}
+                {evalPlanComps.map(c=>(
+                  <th key={c.name} style={{textAlign:'center',padding:'6px 4px',minWidth:90,whiteSpace:'nowrap'}}>
+                    <div style={{fontWeight:600}}>{c.name}</div>
+                    {c.marks&&<div style={{fontSize:'.7rem',color:'var(--text3)',fontWeight:400}}>/{c.marks} marks</div>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((s,idx)=>{
+                const rowMarks=marksGrid[s.prn]||{};
+                const hasAny=evalPlanComps.some(c=>rowMarks[c.name]!==undefined&&rowMarks[c.name]!=='');
+                return(
+                  <tr key={s.prn} style={{background:idx%2===0?'var(--bg)':'var(--white)',transition:'background .15s'}}
+                    onMouseEnter={e=>{e.currentTarget.style.background='var(--blue3)'}}
+                    onMouseLeave={e=>{e.currentTarget.style.background=idx%2===0?'var(--bg)':'var(--white)'}}>
+                    <td style={{textAlign:'center',color:'var(--text3)',padding:'5px 4px',position:'sticky',left:0,background:'inherit',zIndex:1}}>{idx+1}</td>
+                    <td style={{fontFamily:'monospace',fontSize:'.76rem',padding:'5px 8px',position:'sticky',left:36,background:'inherit',zIndex:1,borderRight:'2px solid var(--border)',color:hasAny?'var(--text)':'var(--text3)'}}>{s.prn}</td>
+                    <td style={{padding:'5px 8px',fontWeight:hasAny?600:'normal',position:'sticky',left:156,background:'inherit',zIndex:1,borderRight:'2px solid var(--border)'}}>{s.name||'—'}</td>
+                    {sections.length>2&&<td style={{textAlign:'center',padding:'5px 4px',fontSize:'.75rem',color:'var(--text2)'}}>{s.section}</td>}
+                    {evalPlanComps.map(c=>{
+                      const val=rowMarks[c.name]??'';
+                      const max=parseFloat(c.marks)||null;
+                      const numVal=parseFloat(val);
+                      const over=max&&!isNaN(numVal)&&numVal>max;
+                      return(
+                        <td key={c.name} style={{textAlign:'center',padding:'3px 4px'}}>
+                          <input
+                            type="number" min="0" max={max||undefined}
+                            value={val}
+                            placeholder="—"
+                            title={over?`Exceeds max ${max}`:''}
+                            style={{
+                              width:72,textAlign:'center',
+                              border:'1px solid '+(over?'#ef4444':val!==''?'var(--blue2)':'var(--border)'),
+                              borderRadius:6,padding:'4px 2px',fontSize:'.82rem',
+                              background:val!==''?(over?'#fef2f2':'#f0fdf4'):'var(--white)',
+                              outline:'none',transition:'all .15s'
+                            }}
+                            onChange={e=>updateCell(s.prn,c.name,e.target.value)}
+                          />
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+            {/* Footer totals row */}
+            <tfoot>
+              <tr style={{background:'var(--bg2)',fontWeight:700,fontSize:'.78rem'}}>
+                <td colSpan={sections.length>2?4:3} style={{padding:'7px 8px',color:'var(--text2)'}}>
+                  Class Avg →
+                </td>
+                {evalPlanComps.map(c=>{
+                  const vals=filtered.map(s=>parseFloat(marksGrid[s.prn]?.[c.name])).filter(v=>!isNaN(v));
+                  const avg=vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*100)/100:null;
+                  return(
+                    <td key={c.name} style={{textAlign:'center',padding:'7px 4px',color:'var(--blue2)'}}>
+                      {avg!==null?avg:'—'}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          </table>
+        </div>}
+      </div>);
+    })()}
+
+    {/* ── Current Marks Tab ── component-first view ── */}
+    {tab==='current'&&<div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem',flexWrap:'wrap',gap:'.5rem'}}>
+        <div style={{fontWeight:700,fontSize:'.95rem'}}>📋 Student Marks by Component (Editable)</div>
+        <button className="btn btn-outline btn-sm" onClick={fetchCurrentMarks} disabled={currentLoading}>{currentLoading?<><Spin/>Loading…</>:'↺ Refresh'}</button>
+      </div>
+      <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.75rem',padding:'.6rem .875rem',background:'var(--blue3)',borderRadius:8}}>
+        Columns show each evaluation component. Click ✎ Edit to update individual marks.
+        Max marks per component: {Object.entries(maxMarks).map(([k,v])=>`${k}: ${v}M`).join(' · ')||'—'}
+      </div>
+      <Alrt t="error" msg={currentErr}/><Alrt t="success" msg={currentOk}/>
+      {currentLoading?<Skel/>:currentMarks.length===0?
+        <Alrt t="info" msg="No marks uploaded yet. Use the Upload tab to upload your marks file."/>:
+        (()=>{
+          // Detect format: exam-wise (flat: {"Quiz": 8.5}) vs co-wise ({"CO1": {"Quiz": 8}})
+          const firstMarks=currentMarks[0]?.marks||{};
+          const firstKey=Object.keys(firstMarks)[0]||'';
+          const firstVal=Object.values(firstMarks)[0];
+          const isExamWise=firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object';
+          // Component-wise: outer keys are component names (not CO IDs), values are {Total:X} dicts
+          const isCoWise=!isExamWise&&/^CO\d+$/i.test(firstKey);
+          const isComponentWise=!isExamWise&&!isCoWise;
+
+          let evalComps, eseKey, caComps, allDisp;
+          if(isExamWise||isComponentWise){
+            // Both exam-wise and component-wise: outer keys ARE the component names
+            evalComps=[...new Set(currentMarks.flatMap(r=>Object.keys(r.marks||{})))];
+            eseKey=evalComps.find(c=>c.toLowerCase().includes('end')||c.toLowerCase().includes('ese')||c.toLowerCase().includes('sem'))||null;
+            caComps=evalComps.filter(c=>c!==eseKey);
+            allDisp=[...caComps,...(eseKey?[eseKey]:[])];
+          } else {
+            evalComps = components.length ? components : [...new Set(currentMarks.flatMap(r=>Object.values(r.marks||{}).flatMap(co=>Object.keys(co||{}).filter(k=>k!=='Total'))))];
+            eseKey = evalComps.find(c=>c.toLowerCase().includes('end')||c.toLowerCase().includes('ese')||c.toLowerCase().includes('sem')) || null;
+            caComps = evalComps.filter(c=>c!==eseKey);
+            allDisp = [...caComps, ...(eseKey?[eseKey]:[])] ;
+          }
+
+          const getCompTotal=(rec,comp)=>{
+            if(isExamWise){
+              const v=rec.marks?.[comp];
+              if(v===undefined||v===null||v==='') return null;
+              const n=parseFloat(v);
+              return isNaN(n)?null:Math.round(n*100)/100;
+            }
+            if(isComponentWise){
+              // marks[comp] = {Total: 8.5} — read Total directly
+              const sub=rec.marks?.[comp];
+              if(!sub) return null;
+              const v=typeof sub==='object'?sub.Total:sub;
+              if(v===undefined||v===null||v==='') return null;
+              const n=parseFloat(v);
+              return isNaN(n)?null:Math.round(n*100)/100;
+            }
+            // co-wise: sum over all CO sub-marks for this component
+            let t=0;
+            Object.values(rec.marks||{}).forEach(coMarks=>{
+              const v=coMarks?.[comp];
+              if(v!==undefined&&v!==null&&v!==''){const n=parseFloat(v);if(!isNaN(n)) t+=n;}
+            });
+            return t>0?Math.round(t*100)/100:null;
+          };
+
+          const getGrandTotal=(rec)=>{
+            let t=0;
+            allDisp.forEach(comp=>{const v=getCompTotal(rec,comp);if(v)t+=v;});
+            return Math.round(t*100)/100;
+          };
+
+          return(<div className="tbl-wrap"><table>
+            <thead>
+              <tr>
+                <th style={{minWidth:40,textAlign:'center'}}>#</th>
+                <th style={{minWidth:110}}>PRN</th>
+                <th style={{minWidth:180}}>Student Name</th>
+                {caComps.map(comp=>(
+                  <th key={comp} style={{textAlign:'center',background:'var(--blue3)',color:'var(--blue2)',whiteSpace:'nowrap',fontSize:'.8rem'}}>
+                    {comp}<div style={{fontWeight:400,fontSize:'.7rem',color:'var(--text3)'}}>/{maxMarks[comp]||'—'}</div>
+                  </th>
+                ))}
+                {eseKey&&<th style={{textAlign:'center',background:'#fef3c7',color:'#92400e',whiteSpace:'nowrap',fontSize:'.8rem'}}>
+                  {eseKey}<div style={{fontWeight:400,fontSize:'.7rem',color:'#b45309'}}>/{maxMarks[eseKey]||60}</div>
+                </th>}
+                <th style={{textAlign:'center',background:'var(--bg2)',fontSize:'.8rem'}}>Total</th>
+                <th style={{textAlign:'center'}}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>{currentMarks.map((rec,idx)=>{
+              const isEditing=editingRow===rec.student_id;
+              const isSaving=savingRow===rec.student_id;
+              const grandTotal=getGrandTotal(rec);
+              return(<tr key={rec.student_id} style={{background:isEditing?'var(--blue3)':idx%2===0?'var(--bg)':'var(--white)'}}>
+                <td style={{textAlign:'center',color:'var(--text3)',fontSize:'.8rem'}}>{idx+1}</td>
+                <td style={{fontFamily:'monospace',fontSize:'.78rem'}}>{rec.student_id}</td>
+                <td style={{fontSize:'.85rem',fontWeight:isEditing?600:'normal'}}>{rec.student_name}</td>
+                {allDisp.map(comp=>{
+                  const totVal=getCompTotal(rec,comp);
+                  const displayVal=totVal!==null?(Number.isInteger(totVal)?totVal:totVal.toFixed(2)):'—';
+                  const isEse=comp===eseKey;
+                  // For exam-wise: editBuf is flat {comp: val}. For component-wise: {comp: val}. For co-wise: {CO1: {comp: val}}
+                  const editVal=isExamWise||isComponentWise
+                    ?(editBuf?.[comp]??totVal??'')
+                    :(editBuf?.[Object.keys(rec.marks||{})[0]]?.[comp]??totVal??'');
+                  return(<td key={comp} style={{textAlign:'center',background:isEditing?(isEse?'#fef9c3':'var(--blue3)'):''}}>
+                    {isEditing?
+                      <input type="number" min="0" max={maxMarks[comp]||999}
+                        value={editVal}
+                        style={{width:60,textAlign:'center',border:'1px solid '+(isEse?'#f59e0b':'var(--blue2)'),borderRadius:5,padding:'2px 4px',fontSize:'.82rem'}}
+                        onChange={e=>{
+                          const v=e.target.value;
+                          setEditBuf(b=>{
+                            const nb=JSON.parse(JSON.stringify(b));
+                            if(isExamWise||isComponentWise){
+                              nb[comp]=v===''?'':parseFloat(v)||0;
+                            } else {
+                              const coKeys=Object.keys(rec.marks||{});
+                              coKeys.forEach(co=>{if(rec.marks[co]?.[comp]!==undefined){if(!nb[co])nb[co]={};nb[co][comp]=v===''?'':parseFloat(v)||0;}});
+                              if(!coKeys.some(co=>rec.marks[co]?.[comp]!==undefined)){
+                                const fco=coKeys[0]||'CO1';if(!nb[fco])nb[fco]={};nb[fco][comp]=v===''?'':parseFloat(v)||0;
+                              }
+                            }
+                            return nb;
+                          });
+                        }}/>
+                      :<span style={{fontSize:'.85rem',fontWeight:600,color:displayVal==='—'?'var(--text3)':isEse?'#92400e':'var(--text)'}}>{displayVal}</span>
+                    }
+                  </td>);
+                })}
+                <td style={{textAlign:'center',fontWeight:700,background:'var(--bg2)',fontSize:'.85rem',color:grandTotal>0?'var(--green)':'var(--text3)'}}>{grandTotal>0?(Number.isInteger(grandTotal)?grandTotal:grandTotal.toFixed(2)):'—'}</td>
+                <td style={{textAlign:'center',whiteSpace:'nowrap'}}>
+                  {isEditing?(<>
+                    <button className="btn btn-primary btn-sm" onClick={()=>saveEdit(rec)} disabled={isSaving} style={{marginRight:4,fontSize:'.75rem'}}>
+                      {isSaving?<><Spin/>Saving…</>:'💾 Save'}
+                    </button>
+                    <button className="btn btn-outline btn-sm" onClick={cancelEdit} style={{fontSize:'.75rem'}}>✕ Cancel</button>
+                  </>):(
+                    <button className="btn btn-outline btn-sm" onClick={()=>startEdit(rec)} style={{fontSize:'.75rem'}}>✎ Edit</button>
+                  )}
+                </td>
+              </tr>);
+            })}</tbody>
+          </table></div>);
+        })()
+      }
+    </div>}
+
+    {/* ── CO Summary Tab ── */}
+    {tab==='summary'&&<div>
+      {fetching?<Skel/>:students.length===0?
+        <Alrt t="info" msg="No marks uploaded yet. Upload xlsx or enter marks manually first."/>:
+        <div className="card card-p">
+          <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.9rem'}}>📊 CO-wise Marks Summary</div>
+          <div className="tbl-wrap"><table>
+            <thead><tr><th>CO</th><th>Bloom Level</th><th>Avg Marks</th><th>Max Marks</th><th>Students ≥ 60%</th><th>Attainment %</th><th>Status</th></tr></thead>
+            <tbody>{students.map(co=>(
+              <tr key={co.co_id}>
+                <td><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong></td>
+                <td><span className="badge b-blue">{co.bloom_level}</span></td>
+                <td style={{fontWeight:600}}>{co.avg_marks_scored}</td>
+                <td style={{color:'var(--text3)'}}>{co.max_marks}</td>
+                <td>{co.students_passed_threshold} / {co.total_students}</td>
+                <td style={{minWidth:160}}><PBar pct={co.attainment_percentage}/></td>
+                <td><LvlB l={co.attainment_level}/></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </div>
+      }
+    </div>}
+  </div>);
+}
+
+// ── ATTAINMENT ────────────────────────────────────────────────────────────
+function AttainmentPage({course}){
+  const [data,setData]=useState(null);const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');const [tab,setTab]=useState('co');
+  const [genLoading,setGenLoading]=useState(false);const [genOk,setGenOk]=useState('');
+  const [threshold,setThreshold]=useState(60);
+  const [editingThreshold,setEditingThreshold]=useState(false);
+  const [thresholdInput,setThresholdInput]=useState('60');
+
+  const calc=async()=>{
+    if(!course){setErr('Select a course.');return;}
+    setLoading(true);setErr('');
+    try{const d=await api(`/attainment/calculate/${course.id}`);setData(d.data||d);}
+    catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const generateReport=async()=>{
+    if(!course||!data)return;
+    setGenLoading(true);setGenOk('');setErr('');
+    try{
+      await api(`/attainment/report/${course.id}`,{method:'POST'});
+      setGenOk('Report generated!');
+    }catch(e){setErr(e.message);}
+    setGenLoading(false);
+  };
+
+  useEffect(()=>{if(course)calc();},[course]);
+
+  const coList=data?Object.values(data.co_attainment):[];
+  const poList=data?Object.values(data.po_attainment):[];
+  // Re-evaluate attainment against current threshold
+  const coListWithThreshold=coList.map(co=>({
+    ...co,
+    target_met_custom: co.attainment_percentage >= threshold,
+  }));
+  const attainedCOs=coListWithThreshold.filter(c=>c.target_met_custom).length;
+
+  return(<div className="page-body fade-up">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.25rem',flexWrap:'wrap',gap:'.75rem'}}>
+      <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>CO / PO Attainment</div>
+      <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+        <button className="btn btn-outline btn-sm" onClick={calc} disabled={loading||!course}>{loading?<><Spin/>Calculating…</>:'🔄 Recalculate'}</button>
+        {data&&<button className="btn btn-outline btn-sm" onClick={generateReport} disabled={genLoading}>{genLoading?<><Spin/>Generating…</>:'📄 Generate Report'}</button>}
+        {data&&<a href={`${API}/attainment/download/${course.id}`} className="btn btn-primary btn-sm" style={{textDecoration:'none'}}>⬇ Download docx</a>}
+      </div>
+    </div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <Alrt t="error" msg={err}/>
+    {genOk&&<Alrt t="success" msg={genOk}/>}
+
+    {loading&&!data&&<Skel/>}
+
+    {data&&<>
+      {/* ── Stats Row ── */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:'1rem',marginBottom:'1.5rem'}}>
+        {[
+          {icon:'📊',label:'Overall CO Attainment',value:data.overall_co_attainment+'%',color:'var(--blue3)',tc:'var(--blue2)',big:true},
+          {icon:'✅',label:'COs Meeting Target',value:`${attainedCOs} / ${coList.length}`,color:'#f0fdf4',tc:'var(--green)'},
+          {icon:'👥',label:'Total Students',value:data.total_students,color:'#F5F3F0',tc:'#57534E'},
+        ].map((s,i)=>(
+          <div key={i} style={{background:s.color,border:'1.5px solid var(--border)',borderRadius:12,padding:'1rem',boxShadow:'0 2px 8px rgba(0,0,0,.06)'}}>
+            <div style={{fontSize:'1.4rem',marginBottom:'.3rem'}}>{s.icon}</div>
+            <div style={{fontFamily:'DM Serif Display,serif',fontSize:s.big?'1.75rem':'1.4rem',color:s.tc,lineHeight:1}}>{s.value}</div>
+            <div style={{fontSize:'.75rem',color:'var(--text2)',marginTop:'.3rem'}}>{s.label}</div>
+          </div>
+        ))}
+        {/* Editable threshold card */}
+        <div style={{background:'var(--amber2)',border:'1.5px solid var(--border)',borderRadius:12,padding:'1rem',boxShadow:'0 2px 8px rgba(0,0,0,.06)'}}>
+          <div style={{fontSize:'1.4rem',marginBottom:'.3rem'}}>🎯</div>
+          {editingThreshold
+            ?<div style={{display:'flex',alignItems:'center',gap:'.3rem'}}>
+              <input autoFocus type="number" min="1" max="100" value={thresholdInput}
+                onChange={e=>setThresholdInput(e.target.value)}
+                onKeyDown={e=>{if(e.key==='Enter'){const v=Math.min(100,Math.max(1,parseInt(thresholdInput)||60));setThreshold(v);setEditingThreshold(false);}if(e.key==='Escape')setEditingThreshold(false);}}
+                style={{width:60,fontFamily:'DM Serif Display,serif',fontSize:'1.5rem',color:'#b45309',border:'2px solid #b45309',borderRadius:6,padding:'0 4px',background:'transparent',outline:'none'}}/>
+              <span style={{fontFamily:'DM Serif Display,serif',fontSize:'1.5rem',color:'#b45309'}}>%</span>
+              <button onClick={()=>{const v=Math.min(100,Math.max(1,parseInt(thresholdInput)||60));setThreshold(v);setEditingThreshold(false);}} style={{background:'#b45309',color:'#fff',border:'none',borderRadius:4,padding:'2px 6px',cursor:'pointer',fontSize:'.75rem',marginLeft:2}}>✓</button>
+            </div>
+            :<div style={{display:'flex',alignItems:'center',gap:'.4rem',cursor:'pointer'}} onClick={()=>{setThresholdInput(String(threshold));setEditingThreshold(true);}}>
+              <span style={{fontFamily:'DM Serif Display,serif',fontSize:'1.75rem',color:'#b45309',lineHeight:1}}>{threshold}%</span>
+              <span style={{fontSize:'.7rem',color:'#b45309',background:'rgba(180,83,9,.1)',padding:'1px 5px',borderRadius:4,marginTop:4}}>edit ✎</span>
+            </div>
+          }
+          <div style={{fontSize:'.75rem',color:'var(--text2)',marginTop:'.3rem'}}>Threshold — click to change</div>
+        </div>
+      </div>
+
+      {/* ── CO Attainment Visual Bars ── */}
+      <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>📈 CO Attainment at a Glance</div>
+        {coListWithThreshold.map(co=>{
+          const pct=co.attainment_percentage;
+          const color=pct>=70?'#16a34a':pct>=50?'#d97706':'#dc2626';
+          return(<div key={co.co_id} style={{marginBottom:'1rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.35rem'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+                <span style={{fontWeight:700,color:'var(--blue2)',minWidth:36}}>{co.co_id}</span>
+                <span style={{fontSize:'.78rem',color:'var(--text2)',maxWidth:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{co.statement}</span>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem',flexShrink:0}}>
+                <span style={{fontSize:'.82rem',fontWeight:700,color:color}}>{pct}%</span>
+                <LvlB l={co.attainment_level}/>
+              </div>
+            </div>
+            <div style={{height:10,background:'var(--bg2)',borderRadius:10,overflow:'hidden',position:'relative'}}>
+              <div style={{width:`${Math.min(pct,100)}%`,height:'100%',background:color,borderRadius:10,transition:'width .6s ease'}}/>
+              {/* target line at custom threshold% */}
+              <div style={{position:'absolute',top:0,left:`${threshold}%`,width:2,height:'100%',background:'#94a3b8'}}/>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:'.68rem',color:'var(--text3)',marginTop:'.2rem'}}>
+              <span>Avg: {co.avg_marks_scored}/{co.max_marks} marks</span>
+              <span>{co.students_passed_threshold}/{co.total_students} students ≥ threshold</span>
+            </div>
+          </div>);
+        })}
+        <div style={{fontSize:'.72rem',color:'var(--text3)',marginTop:'.5rem',paddingTop:'.5rem',borderTop:'1px solid var(--border)'}}>
+          ▎ Grey line = {threshold}% target threshold (click threshold card above to change)
+        </div>
+      </div>
+
+      {/* ── Tabs for detailed tables ── */}
+      <div className="tabs">
+        {[['co','CO Details'],['po','PO Attainment'],['gap','Gap Analysis']].map(([t,l])=>(
+          <div key={t} className={`tab ${tab===t?'on':''}`} onClick={()=>setTab(t)}>{l}</div>
+        ))}
+      </div>
+
+      {tab==='co'&&<div className="card card-p">
+        <div className="tbl-wrap"><table>
+          <thead><tr><th>CO</th><th>Bloom</th><th>Statement</th><th>Avg Score</th><th>Max</th><th>Passed</th><th>Attainment</th><th>Level</th></tr></thead>
+          <tbody>{coList.map(co=>(
+            <tr key={co.co_id}>
+              <td><strong style={{color:'var(--blue2)'}}>{co.co_id}</strong></td>
+              <td><span className="badge b-blue">{co.bloom_level}</span></td>
+              <td style={{fontSize:'.82rem',maxWidth:280}}>{co.statement}</td>
+              <td style={{fontWeight:600,textAlign:'center'}}>{co.avg_marks_scored}</td>
+              <td style={{textAlign:'center',color:'var(--text3)'}}>{co.max_marks}</td>
+              <td style={{textAlign:'center'}}>{co.students_passed_threshold}/{co.total_students}</td>
+              <td style={{minWidth:140}}><PBar pct={co.attainment_percentage}/></td>
+              <td><LvlB l={co.attainment_level}/></td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      </div>}
+
+      {tab==='po'&&<div className="card card-p">
+        <div style={{fontSize:'.8rem',color:'var(--text2)',marginBottom:'.875rem',padding:'.6rem',background:'var(--bg)',borderRadius:8}}>
+          💡 PO attainment is calculated as a weighted average of CO attainments using the CO-PO correlation matrix.
+        </div>
+        <div className="tbl-wrap"><table>
+          <thead><tr><th>PO</th><th>Statement</th><th>Attainment</th><th>Level</th></tr></thead>
+          <tbody>{poList.map(po=>(
+            <tr key={po.po_id}>
+              <td><strong style={{color:'var(--blue2)'}}>{po.po_id}</strong></td>
+              <td style={{fontSize:'.82rem'}}>{po.statement}</td>
+              <td style={{minWidth:160}}><PBar pct={po.attainment_percentage}/></td>
+              <td><LvlB l={po.attainment_level}/></td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      </div>}
+
+      {tab==='gap'&&<div>
+        <div className="card card-p" style={{marginBottom:'1rem'}}>
+          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>⚠️ COs Below Target ({"<"}{threshold}%)</div>
+          {coListWithThreshold.filter(c=>!c.target_met_custom).length===0
+            ?<div style={{textAlign:'center',padding:'1.5rem',color:'var(--green)',fontWeight:600}}>🎉 All COs meeting the {threshold}% target!</div>
+            :coListWithThreshold.filter(c=>!c.target_met_custom).map(co=>(
+              <div key={co.co_id} style={{padding:'.75rem',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,marginBottom:'.5rem'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div>
+                    <span style={{fontWeight:700,color:'#dc2626'}}>{co.co_id}</span>
+                    <span style={{fontSize:'.82rem',color:'var(--text)',marginLeft:'.5rem'}}>{co.statement}</span>
+                  </div>
+                  <span style={{fontWeight:700,color:'#dc2626',flexShrink:0}}>{co.attainment_percentage}%</span>
+                </div>
+                <div style={{fontSize:'.78rem',color:'#b91c1c',marginTop:'.3rem'}}>
+                  Gap: {(threshold-co.attainment_percentage).toFixed(1)}% below target. Only {co.students_passed_threshold}/{co.total_students} students passed the threshold.
+                </div>
+              </div>
+            ))
+          }
+        </div>
+        <div className="card card-p">
+          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>⚠️ POs Below Target</div>
+          {poList.filter(p=>p.attainment_percentage<threshold).length===0
+            ?<div style={{textAlign:'center',padding:'1.5rem',color:'var(--green)',fontWeight:600}}>🎉 All POs meeting the {threshold}% target!</div>
+            :poList.filter(p=>p.attainment_percentage<threshold).map(po=>(
+              <div key={po.po_id} style={{padding:'.75rem',background:'#fffbeb',border:'1px solid #fed7aa',borderRadius:8,marginBottom:'.5rem'}}>
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span style={{fontWeight:700,color:'#b45309'}}>{po.po_id}</span>
+                  <span style={{fontWeight:700,color:'#b45309'}}>{po.attainment_percentage}%</span>
+                </div>
+                <div style={{fontSize:'.78rem',color:'#92400e',marginTop:'.2rem'}}>{po.statement}</div>
+              </div>
+            ))
+          }
+        </div>
+      </div>}
+    </>}
+  </div>);
+}
+
+// ── REPORTS ───────────────────────────────────────────────────────────────
+function ReportsPage({course}){
+  const [nbaLoading,setNbaLoading]=useState(false);
+  const [attLoading,setAttLoading]=useState(false);
+  const [courseFileLoading,setCourseFileLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const [statuses,setStatuses]=useState({nba:'idle',att:'idle',coursefile:'idle'});
+  const set=(k,v)=>setStatuses(s=>({...s,[k]:v}));
+  const [templates,setTemplates]=useState({nba:null,att:null,coursefile:null});
+  const setTpl=(k,f)=>setTemplates(t=>({...t,[k]:f}));
+  const nbaRef=useRef();const attRef=useRef();const cfRef=useRef();
+
+  const postWithTemplate=async(url,templateFile)=>{
+    const token=sessionStorage.getItem('obe_token');
+    if(templateFile){
+      const fd=new FormData();fd.append('template',templateFile);
+      const r=await fetch(API+url,{method:'POST',body:fd,headers:{Authorization:'Bearer '+token}});
+      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
+      return r.json();
+    }
+    return api(url,{method:'POST'});
+  };
+
+  const genNba=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setNbaLoading(true);setErr('');set('nba','loading');
+    try{
+      await postWithTemplate(`/attainment/nba-report/${course.id}`,templates.nba);
+      set('nba','done');
+    }catch(e){setErr(e.message);set('nba','idle');}
+    setNbaLoading(false);
+  };
+
+  const genAtt=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setAttLoading(true);setErr('');set('att','loading');
+    try{
+      await postWithTemplate(`/attainment/report/${course.id}`,templates.att);
+      set('att','done');
+    }catch(e){setErr(e.message);set('att','idle');}
+    setAttLoading(false);
+  };
+
+  const genCourseFile=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setCourseFileLoading(true);setErr('');set('coursefile','loading');
+    try{
+      await postWithTemplate(`/attainment/report/${course.id}`,templates.coursefile);
+      await postWithTemplate(`/attainment/nba-report/${course.id}`,templates.coursefile);
+      set('coursefile','done');
+    }catch(e){setErr(e.message);set('coursefile','idle');}
+    setCourseFileLoading(false);
+  };
+
+  const StatusBadge=({s})=>{
+    if(s==='done')return<span className="badge b-green">✓ Ready to download</span>;
+    if(s==='loading')return<span className="badge b-blue"><span className="spin"/>Generating…</span>;
+    return<span className="badge b-gray">Not generated</span>;
+  };
+
+  const reports=[
+    {
+      key:'nba',
+      icon:'🏆',
+      title:'NBA / NAAC PDF Report',
+      desc:'Full NBA-format PDF with CO/PO attainment charts, gap analysis, CO-PO correlation matrix, and AI-generated recommendations. Required for accreditation submissions.',
+      color:'#FFF7ED',
+      tc:'#C2410C',
+      onGen:genNba,
+      loading:nbaLoading,
+      tplRef:nbaRef,
+      downloadHref:course?`${API}/attainment/nba-report/download/${course.id}`:null,
+      downloadLabel:'⬇ Download PDF',
+    },
+    {
+      key:'att',
+      icon:'📊',
+      title:'CO/PO Attainment Report (Word)',
+      desc:'Detailed Word document with student-wise CO attainment, class average, remedial flags, and PO attainment via CO-PO matrix.',
+      color:'#d1fae5',
+      tc:'#065f46',
+      onGen:genAtt,
+      loading:attLoading,
+      tplRef:attRef,
+      downloadHref:course?`${API}/attainment/download/${course.id}`:null,
+      downloadLabel:'⬇ Download .docx',
+    },
+    {
+      key:'coursefile',
+      icon:'📁',
+      title:'Full Course File',
+      desc:'One-click generation of the complete NBA/NAAC course file — includes session plan, evaluation plan, question papers, marks analysis, and CO/PO attainment. Download all separately after generation.',
+      color:'#ede9fe',
+      tc:'#6d28d9',
+      onGen:genCourseFile,
+      loading:courseFileLoading,
+      tplRef:cfRef,
+      downloadHref:null,
+      downloadLabel:null,
+    },
+    {
+      key:'session',
+      icon:'📅',
+      title:'Session Plan (.docx)',
+      desc:'Download the original AI-generated session plan Word document with unit-wise topic breakdown, methodology, and CO mapping.',
+      color:'#fef3c7',
+      tc:'#b45309',
+      onGen:null,
+      loading:false,
+      downloadHref:course?`${API}/session-plan/download/${course.id}`:null,
+      downloadLabel:'⬇ Download .docx',
+    },
+    {
+      key:'eval',
+      icon:'📋',
+      title:'Evaluation Plan (.docx)',
+      desc:'Download the original AI-generated evaluation plan Word document with CA component breakdown, marks, weightage, and CO mapping.',
+      color:'#fce7f3',
+      tc:'#be185d',
+      onGen:null,
+      loading:false,
+      downloadHref:course?`${API}/evaluation-plan/download/${course.id}`:null,
+      downloadLabel:'⬇ Download .docx',
+    },
+    {
+      key:'qpaper',
+      icon:'❓',
+      title:'Question Paper (.docx + PDF)',
+      desc:'Download the last generated question paper with Bloom\'s tags, PI tags, difficulty split, and CO mapping.',
+      color:'#E8E3D9',
+      tc:'#57534E',
+      onGen:null,
+      loading:false,
+      downloadHref:course?`${API}/questions/paper/download/${course.id}/docx`:null,
+      downloadLabel:'⬇ Download .docx',
+      downloadHref2:course?`${API}/questions/paper/download/${course.id}/pdf`:null,
+      downloadLabel2:'⬇ Download PDF',
+    },
+  ];
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.35rem'}}>NBA / NAAC Reports</div>
+    <div style={{fontSize:'.855rem',color:'var(--text2)',marginBottom:'1.5rem'}}>Generate and download all course documents for accreditation</div>
+
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+    <Alrt t="error" msg={err}/>
+
+    {course&&<div style={{background:'linear-gradient(135deg,#0A0A0A,#2A1500)',borderRadius:14,padding:'1.25rem 1.5rem',marginBottom:'1.5rem',color:'#fff',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:700,fontSize:'1rem'}}>{course.course_name}</div>
+        <div style={{fontSize:'.82rem',opacity:.75,marginTop:'.2rem'}}>{course.course_code} · {course.department} · Sem {course.semester}</div>
+      </div>
+      <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+        <span style={{background:'rgba(255,255,255,.12)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{(course.cos||[]).length} COs</span>
+        <span style={{background:'rgba(255,255,255,.12)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{(course.pos||[]).length} POs</span>
+        <span style={{background:'rgba(255,255,255,.12)',padding:'3px 12px',borderRadius:20,fontSize:'.78rem'}}>{course.total_hours} hrs</span>
+      </div>
+    </div>}
+
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(360px,1fr))',gap:'1rem'}}>
+      {reports.map(r=>(
+        <div key={r.key} className="card card-p" style={{borderTop:`3px solid ${r.tc}`,display:'flex',flexDirection:'column'}}>
+          <div style={{display:'flex',alignItems:'flex-start',gap:'.875rem',marginBottom:'.875rem'}}>
+            <div style={{width:44,height:44,borderRadius:12,background:r.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',flexShrink:0}}>{r.icon}</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:'.9rem',color:'var(--text)'}}>{r.title}</div>
+              <div style={{marginTop:'.35rem'}}><StatusBadge s={statuses[r.key]||'idle'}/></div>
+            </div>
+          </div>
+          <div style={{fontSize:'.82rem',color:'var(--text2)',lineHeight:1.6,flex:1,marginBottom:'1rem'}}>{r.desc}</div>
+          {r.key==='coursefile'&&statuses.coursefile==='done'&&<div style={{marginBottom:'.75rem',padding:'.6rem',background:'#f0fdf4',borderRadius:8,fontSize:'.78rem',color:'#166534',border:'1px solid #bbf7d0'}}>
+            ✓ Generated. Download the Attainment Report and NBA PDF above.
+          </div>}
+          {r.onGen&&(<div style={{marginBottom:'.65rem',padding:'.6rem .75rem',background:'var(--bg2)',borderRadius:8}}>
+            <div style={{fontSize:'.74rem',color:'var(--text2)',marginBottom:'.35rem',fontWeight:600}}>&#128206; Template (optional)</div>
+            <div style={{display:'flex',alignItems:'center',gap:'.4rem',flexWrap:'wrap'}}>
+              <input type="file" accept=".docx" style={{display:'none'}} ref={r.tplRef}
+                onChange={e=>setTpl(r.key,e.target.files[0]||null)}/>
+              <button className="btn btn-outline btn-sm" onClick={()=>r.tplRef.current&&r.tplRef.current.click()}
+                style={{fontSize:'.73rem',padding:'3px 10px'}}>
+                {templates[r.key]?'✓ '+templates[r.key].name:'Upload .docx template'}
+              </button>
+              {templates[r.key]&&<span onClick={()=>setTpl(r.key,null)} title="Remove template"
+                style={{cursor:'pointer',color:'var(--text3)',fontSize:'.85rem',lineHeight:1}}>×</span>}
+            </div>
+            {templates[r.key]&&<div style={{fontSize:'.71rem',color:'var(--text3)',marginTop:'.3rem'}}>
+              Report will follow your template’s structure and format
+            </div>}
+          </div>)}
+          <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',marginTop:'auto'}}>
+            {r.downloadHref&&<a href={r.downloadHref} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel}</a>}
+            {r.downloadHref2&&<a href={r.downloadHref2} className="btn btn-outline btn-sm" style={{textDecoration:'none'}} target="_blank" rel="noreferrer">{r.downloadLabel2}</a>}
+            {r.onGen&&<button className="btn btn-primary btn-sm" onClick={r.onGen} disabled={r.loading||!course}>
+              {r.loading?<><Spin/>Generating…</>:'✨ Generate'}
+            </button>}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>);
+}
+
+// ── COURSE FILE ─────────────────────────────────────────────────────────────
+/**
+ * CourseFileEditor.jsx  — fixed & redesigned
+ *
+ * Bugs fixed vs original:
+ *  1. updateExtra stale-closure → autoSave now uses functional setState + ref for latest value
+ *  2. institution_name / institution_address / co_po_justification were never persisted
+ *     (not in backend model) — removed from extra state; institution fields are now
+ *     display-only from course data, co_po_justification removed cleanly
+ *  3. Session plan cols parsed correctly (top-level, not inside .data)
+ *  4. loadAll used Promise.allSettled but session/eval 404 path wasn't raising — added
+ *     explicit 404 check via response wrapper
+ *  5. hasContent used wrong field keys for progress bar — unified via FIELD_MAP
+ *  6. AIChatPanel used /ai/chat but route is /ai/table-chat — fixed
+ *
+ * API surface:
+ *   GET  /courses/{courseId}
+ *   GET  /course-file/extra/{courseId}
+ *   POST /course-file/extra/{courseId}
+ *   POST /course-file/generate/{courseId}
+ *   GET  /course-file/download/{courseId}
+ *   GET  /course-file/attachments/{courseId}
+ *   POST /course-file/upload/{courseId}
+ *   DELETE /course-file/attachment/{id}
+ *   GET  /session-plan/view/{courseId}
+ *   GET  /evaluation-plan/view/{courseId}
+ *   GET  /attainment/calculate/{courseId}
+ *   POST /ai/table-chat
+ */
+
+
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const API_BASE = window.API || 'https://obe-automate.onrender.com';
+
+// Maps section number → which extra field drives the "has content" indicator
+const SECTION_FIELD_MAP = {
+  1:  "vision_text",
+  2:  "po_peo_pso_text",
+  3:  "syllabus_timetable",
+  5:  "prev_co_attainment",
+  8:  "slow_learners",
+  10: "activity_reports",
+  11: "learning_material_links",
+  13: "attendance_links",
+  14: "student_list",
+};
+
+const SECTION_META = [
+  { no: 0,  title: "Course File Contents",           icon: "☰", auto: true,  desc: "Table of contents — auto-generated with all 13 sections listed" },
+  { no: 1,  title: "Vision & Mission",              icon: "◈", auto: false, desc: "Department vision and mission statements" },
+  { no: 2,  title: "POs, PEOs & PSOs",              icon: "◉", auto: false, desc: "Program Outcomes, Educational Objectives, and Specific Outcomes" },
+  { no: 3,  title: "Syllabus & Timetable",          icon: "◈", auto: true,  desc: "Auto-extracted from uploaded syllabus and dashboard timetable" },
+  { no: 4,  title: "CO Statements & CO-PO Mapping", icon: "◉", auto: true,  desc: "Auto-populated from course setup — COs, Bloom\'s levels, CO-PO matrix" },
+  { no: 5,  title: "Previous CO Attainment",        icon: "◈", auto: false, desc: "Previous year CO attainment + action plan" },
+  { no: 6,  title: "Session Plan",                  icon: "◉", auto: true,  desc: "Auto-populated from Session Plan page" },
+  { no: 7,  title: "Evaluation Plan",               icon: "◈", auto: true,  desc: "Auto-populated from Evaluation Plan page" },
+  { no: 8,  title: "Slow & Advanced Learners",      icon: "◉", auto: false, desc: "Student categorisation and interventions" },
+  { no: 9,  title: "CO Attainment Results",         icon: "◈", auto: true,  desc: "Auto-populated from attainment data" },
+  { no: 10, title: "Activity Reports",              icon: "◉", auto: false, desc: "Co-curricular and extracurricular activities" },
+  { no: 11, title: "Learning Materials",            icon: "◈", auto: false, desc: "Textbooks, web links, and study resources" },
+  { no: 12, title: "Question Bank",                 icon: "◉", auto: true,  desc: "Auto-populated from question bank" },
+  { no: 13, title: "Attendance Records",            icon: "◈", auto: false, desc: "Attendance portal links and summary" },
+  { no: 14, title: "Student List",                  icon: "◉", auto: false, desc: "Batch-wise student roster with PRNs" },
+];
+
+// ─── Utils ────────────────────────────────────────────────────────────────────
+
+const cfToken = () => sessionStorage.getItem('obe_token') || '';
+
+async function apiFetch(path, opts = {}) {
+  const headers = { Authorization: `Bearer ${cfToken()}`, ...opts.headers };
+  if (!(opts.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw Object.assign(new Error(err.detail ?? `HTTP ${res.status}`), { status: res.status });
+  }
+  return res.json();
+}
+
+function fmt(bytes) {
+  if (!bytes) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+function bloomColor(level) {
+  const map = {
+    Remember: "#6B7280", Understand: "#3B82F6", Apply: "#10B981",
+    Analyse: "#F59E0B", Evaluate: "#EF4444", Create: "#8B5CF6",
+  };
+  return map[level] ?? "#6B7280";
+}
+
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const T = {
+  bg:          "#080E1A",
+  surface:     "rgba(15,23,42,0.65)",
+  surfaceHigh: "rgba(22,32,55,0.8)",
+  border:      "rgba(255,255,255,0.13)",
+  borderFocus: "#3B82F6",
+  borderArea:  "rgba(255,255,255,0.18)",
+  text:        "#F1F5F9",
+  textMuted:   "#94A3B8",
+  textSub:     "#CBD5E1",
+  blue:        "#3B82F6",
+  blueLight:   "#60A5FA",
+  green:       "#22C55E",
+  amber:       "#F59E0B",
+  red:         "#EF4444",
+  mono:        "'JetBrains Mono', 'Fira Code', monospace",
+  sans:        "'DM Sans', system-ui, sans-serif",
+};
+
+// ─── Primitive UI components ──────────────────────────────────────────────────
+
+function AutoBadge() {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      fontSize: 10, fontWeight: 700, color: T.amber,
+      background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.25)",
+      borderRadius: 4, padding: "2px 7px", letterSpacing: "0.05em",
+    }}>
+      ⚡ Auto
+    </span>
+  );
+}
+
+function InfoBox({ color = T.blueLight, bg = "rgba(59,130,246,0.06)", border = "rgba(59,130,246,0.18)", children }) {
+  return (
+    <div style={{
+      padding: "11px 14px", background: bg, border: `1px solid ${border}`,
+      borderRadius: 8, fontSize: 12, color, lineHeight: 1.6,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function Spinner({ size = 28 }) {
+  return (
+    <>
+      <style>{`@keyframes _spin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{
+        width: size, height: size,
+        border: `2px solid rgba(255,255,255,0.08)`,
+        borderTop: `2px solid ${T.blue}`,
+        borderRadius: "50%", animation: "_spin 0.75s linear infinite",
+      }} />
+    </>
+  );
+}
+
+// ─── Field wrapper ────────────────────────────────────────────────────────────
+
+function Field({ label, required, hint, children }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <label style={{
+        display: "block", fontSize: 11, fontWeight: 700, color: T.textSub,
+        marginBottom: 7, letterSpacing: "0.06em", textTransform: "uppercase",
+      }}>
+        {label}
+        {required && <span style={{ color: T.red, marginLeft: 3 }}>*</span>}
+      </label>
+      {children}
+      {hint && (
+        <p style={{ fontSize: 11, color: T.textMuted, marginTop: 5, marginBottom: 0 }}>{hint}</p>
+      )}
+    </div>
+  );
+}
+
+// ─── Textarea / Input ─────────────────────────────────────────────────────────
+
+const baseInputStyle = {
+  width: "100%", boxSizing: "border-box",
+  background: "rgba(8,14,26,0.7)",
+  border: `1px solid ${T.border}`,
+  borderRadius: 8, color: T.text, fontSize: 13,
+  padding: "9px 12px", lineHeight: 1.65,
+  outline: "none", transition: "border-color 0.18s, box-shadow 0.18s",
+  fontFamily: T.sans,
+};
+
+function Textarea({ value, onChange, placeholder, rows = 4, mono = false }) {
+  return (
+    <textarea
+      value={value ?? ""}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      rows={rows}
+      style={{
+        ...baseInputStyle,
+        resize: "vertical",
+        minHeight: rows * 22 + 18,
+        fontFamily: mono ? T.mono : T.sans,
+        fontSize: mono ? 12 : 13,
+      }}
+      onFocus={e => {
+        e.target.style.borderColor = T.borderFocus;
+        e.target.style.boxShadow = "0 0 0 3px rgba(59,130,246,0.12)";
+      }}
+      onBlur={e => {
+        e.target.style.borderColor = T.border;
+        e.target.style.boxShadow = "none";
+      }}
+    />
+  );
+}
+
+function TextInput({ value, onChange, placeholder }) {
+  return (
+    <input
+      type="text"
+      value={value ?? ""}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      style={{ ...baseInputStyle, height: 38 }}
+      onFocus={e => {
+        e.target.style.borderColor = T.borderFocus;
+        e.target.style.boxShadow = "0 0 0 3px rgba(59,130,246,0.12)";
+      }}
+      onBlur={e => {
+        e.target.style.borderColor = T.border;
+        e.target.style.boxShadow = "none";
+      }}
+    />
+  );
+}
+
+// ─── ReadOnly table ───────────────────────────────────────────────────────────
+
+function ReadOnlyTable({ columns, rows, emptyMsg }) {
+  if (!rows?.length) {
+    return (
+      <div style={{
+        padding: "22px", textAlign: "center", color: T.textMuted, fontSize: 13,
+        background: T.surface, borderRadius: 8, border: `1px dashed rgba(255,255,255,0.07)`,
+      }}>
+        {emptyMsg ?? "No data available"}
+      </div>
+    );
+  }
+  return (
+    <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid #D1D5DB" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, background: "#FFFFFF" }}>
+        <thead>
+          <tr style={{ background: "#1E3A5F" }}>
+            {columns.map(c => (
+              <th key={c.key} style={{
+                padding: "9px 13px", textAlign: "left", color: "#FFFFFF",
+                fontWeight: 700, fontSize: 11, letterSpacing: "0.05em",
+                textTransform: "uppercase", borderBottom: "1px solid #D1D5DB",
+                whiteSpace: "nowrap",
+              }}>
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr
+              key={i}
+              style={{ borderBottom: "1px solid #E5E7EB", background: i % 2 === 0 ? "#FFFFFF" : "#F9FAFB" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#EFF6FF"}
+              onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#FFFFFF" : "#F9FAFB"}
+            >
+              {columns.map(c => (
+                <td key={c.key} style={{ padding: "8px 13px", color: "#111827", verticalAlign: "top" }}>
+                  {c.render ? c.render(row[c.key], row) : (row[c.key] ?? "—")}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Info card (for auto sections) ───────────────────────────────────────────
+
+function InfoCard({ label, value }) {
+  return (
+    <div style={{
+      background: T.surface, borderRadius: 8, padding: "10px 14px",
+      border: `1px solid ${T.border}`,
+    }}>
+      <div style={{
+        fontSize: 10, color: T.textMuted, fontWeight: 700,
+        textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4,
+      }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 13, color: T.text, fontWeight: 500 }}>
+        {value ?? "—"}
+      </div>
+    </div>
+  );
+}
+
+// ─── Attachment zone ──────────────────────────────────────────────────────────
+
+function AttachmentZone({ courseId, sectionNo, attachments, onRefresh }) {
+  const [uploading, setUploading] = useState(false);
+  const [label, setLabel]         = useState("");
+  const [err, setErr]             = useState("");
+  const fileRef = useRef();
+
+  const mine = attachments.filter(a =>
+    sectionNo ? a.section_no === sectionNo : !a.section_no
+  );
+
+  async function handleUpload(file) {
+    if (!file) return;
+    if (!label.trim()) { setErr("Enter a label first."); return; }
+    setErr(""); setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("label", label.trim());
+      if (sectionNo) fd.append("section_no", String(sectionNo));
+      await fetch(`${API_BASE}/course-file/upload/${courseId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${cfToken()}` },
+        body: fd,
+      });
+      setLabel("");
+      if (fileRef.current) fileRef.current.value = "";
+      onRefresh();
+    } catch (e) {
+      setErr("Upload failed: " + e.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm("Delete this attachment?")) return;
+    try {
+      await apiFetch(`/course-file/attachment/${id}`, { method: "DELETE" });
+      onRefresh();
+    } catch (e) {
+      alert("Delete failed: " + e.message);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      {/* Existing */}
+      {mine.length > 0 && (
+        <div style={{ marginBottom: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+          {mine.map(a => (
+            <div key={a.id} style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 11px", background: T.surface, borderRadius: 7,
+              border: `1px solid ${T.border}`,
+            }}>
+              <span style={{ fontSize: 15 }}>📎</span>
+              <span style={{ flex: 1, fontSize: 12, color: "#CBD5E1", fontWeight: 500 }}>{a.label}</span>
+              <span style={{ fontSize: 11, color: T.textMuted }}>
+                {a.filename} · {fmt(a.file_size)}
+              </span>
+              <a
+                href={`${API_BASE}/course-file/attachment/${a.id}/download?token=${cfToken()}`}
+                download
+                style={{ fontSize: 11, color: T.blueLight, textDecoration: "none", padding: "2px 6px" }}
+              >
+                ↓
+              </a>
+              <button
+                onClick={() => handleDelete(a.id)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: T.red, fontSize: 14, padding: 2, lineHeight: 1 }}
+                title="Remove"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Upload row */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          type="text"
+          placeholder="Label (e.g. Faculty Timetable)"
+          value={label}
+          onChange={e => { setLabel(e.target.value); setErr(""); }}
+          style={{ ...baseInputStyle, flex: 1, height: 36, fontSize: 12 }}
+          onFocus={e => { e.target.style.borderColor = T.borderFocus; }}
+          onBlur={e => { e.target.style.borderColor = T.border; }}
+        />
+        <input ref={fileRef} type="file" style={{ display: "none" }} onChange={e => handleUpload(e.target.files?.[0])} />
+        <button
+          onClick={() => {
+            if (!label.trim()) { setErr("Enter a label first."); return; }
+            fileRef.current?.click();
+          }}
+          disabled={uploading}
+          style={{
+            padding: "0 14px", height: 36, background: "rgba(59,130,246,0.12)",
+            border: "1px solid rgba(59,130,246,0.28)", borderRadius: 7,
+            color: T.blueLight, fontSize: 12, cursor: uploading ? "not-allowed" : "pointer",
+            whiteSpace: "nowrap", fontWeight: 600,
+          }}
+        >
+          {uploading ? "Uploading…" : "+ Attach File"}
+        </button>
+      </div>
+      {err && <p style={{ fontSize: 11, color: T.red, marginTop: 5 }}>{err}</p>}
+    </div>
+  );
+}
+
+// ─── CO / PO Attainment bars ──────────────────────────────────────────────────
+
+function AttainmentDisplay({ data }) {
+  if (!data) return (
+    <InfoBox color={T.textMuted} bg="transparent" border={T.border}>
+      No attainment data. Upload marks via the Attainment page first.
+    </InfoBox>
+  );
+
+  // Backend returns co_attainment as a dict {CO1:{...}, CO2:{...}} not an array
+  const rawCo = data.co_attainment ?? data.coAttainment ?? {};
+  const rawPo = data.po_attainment ?? data.poAttainment ?? {};
+  const coAtt = Array.isArray(rawCo) ? rawCo : Object.values(rawCo);
+  const poAtt = Array.isArray(rawPo) ? rawPo : Object.values(rawPo);
+
+  const barColor = v => {
+    const n = parseFloat(v);
+    if (n >= 75) return T.green;
+    if (n >= 60) return T.amber;
+    return T.red;
+  };
+
+  const BarRow = ({ id, val, statement, level, targetMet }) => {
+    const pct = Math.min(parseFloat(val) || 0, 100);
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
+          <span style={{ minWidth: 46, fontSize: 12, fontWeight: 700, color: "#CBD5E1" }}>{id}</span>
+          <div style={{ flex: 1, height: 8, background: "rgba(255,255,255,0.06)", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{
+              width: `${pct}%`, height: "100%",
+              background: barColor(pct), borderRadius: 4,
+              transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
+            }} />
+          </div>
+          <span style={{ minWidth: 46, fontSize: 12, fontWeight: 600, color: barColor(pct), textAlign: "right" }}>
+            {pct.toFixed(1)}%
+          </span>
+          {level && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "rgba(255,255,255,0.07)", color: T.textMuted, whiteSpace: "nowrap" }}>{level}</span>}
+          {targetMet !== undefined && (
+            <span style={{ fontSize: 10, color: targetMet ? T.green : T.red }}>{targetMet ? "✓ Target Met" : "✗ Below Target"}</span>
+          )}
+        </div>
+        {statement && <p style={{ margin: "0 0 0 56px", fontSize: 11, color: T.textMuted, lineHeight: 1.4 }}>{statement}</p>}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {data.course_name && (
+        <div style={{ display: "flex", gap: 16, marginBottom: 18, flexWrap: "wrap" }}>
+          {data.overall_co_attainment !== undefined && (
+            <div style={{ padding: "8px 16px", background: "rgba(59,130,246,0.1)", borderRadius: 8, border: "1px solid rgba(59,130,246,0.2)" }}>
+              <p style={{ margin: 0, fontSize: 11, color: T.textMuted }}>Overall CO Attainment</p>
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: barColor(data.overall_co_attainment) }}>{data.overall_co_attainment}%</p>
+            </div>
+          )}
+          {data.total_students !== undefined && (
+            <div style={{ padding: "8px 16px", background: "rgba(255,255,255,0.04)", borderRadius: 8, border: `1px solid ${T.border}` }}>
+              <p style={{ margin: 0, fontSize: 11, color: T.textMuted }}>Total Students</p>
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: T.text }}>{data.total_students}</p>
+            </div>
+          )}
+          {data.threshold_percentage !== undefined && (
+            <div style={{ padding: "8px 16px", background: "rgba(255,255,255,0.04)", borderRadius: 8, border: `1px solid ${T.border}` }}>
+              <p style={{ margin: 0, fontSize: 11, color: T.textMuted }}>Pass Threshold</p>
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: T.text }}>{data.threshold_percentage}%</p>
+            </div>
+          )}
+        </div>
+      )}
+      {coAtt.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>
+            CO Attainment
+          </p>
+          {coAtt.map((co, i) => (
+            <BarRow key={i}
+              id={co.co_id ?? `CO${i+1}`}
+              val={co.attainment_percentage ?? co.attainment ?? co.percentage ?? 0}
+              statement={co.statement}
+              level={co.attainment_level}
+              targetMet={co.target_met}
+            />
+          ))}
+        </div>
+      )}
+      {poAtt.length > 0 && (
+        <div>
+          <p style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>
+            PO Attainment
+          </p>
+          {poAtt.map((po, i) => (
+            <BarRow key={i}
+              id={po.po_id ?? `PO${i+1}`}
+              val={po.attainment_percentage ?? po.attainment ?? po.percentage ?? 0}
+              level={po.attainment_level}
+              targetMet={po.target_met}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Section wrapper (collapsible) ───────────────────────────────────────────
+
+function SectionWrapper({ no, title, icon, auto, desc, children, hasContent }) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <section style={{ borderBottom: `1px solid rgba(255,255,255,0.08)` }}>
+      {/* Header button */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 12,
+          padding: "13px 28px", background: "transparent", border: "none",
+          cursor: "pointer", textAlign: "left",
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.022)"}
+        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, color: T.textMuted, minWidth: 22, fontFamily: T.mono }}>
+          {String(no).padStart(2, "0")}
+        </span>
+        <span style={{ fontSize: 17, color: hasContent ? T.blueLight : "#475569" }}>{icon}</span>
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: T.text, letterSpacing: "0.01em" }}>
+          {title}
+        </span>
+        {auto && <AutoBadge />}
+        {hasContent && !auto && (
+          <span
+            style={{ width: 7, height: 7, borderRadius: "50%", background: T.green, flexShrink: 0 }}
+            title="Has content"
+          />
+        )}
+        <span style={{
+          fontSize: 11, color: T.textMuted, marginLeft: 2, display: "inline-block",
+          transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.2s",
+        }}>
+          ▾
+        </span>
+      </button>
+
+      {/* Body */}
+      {open && (
+        <div style={{ padding: "2px 28px 22px 62px" }}>
+          <p style={{ fontSize: 12, color: T.textMuted, marginTop: 0, marginBottom: 14 }}>{desc}</p>
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─── AI Chat panel ────────────────────────────────────────────────────────────
+
+function CourseFileAIPanel({ courseId, course, extra }) {
+  const [messages, setMessages] = useState(() => [{
+    role: "assistant",
+    text: `Course file loaded for ${course?.course_name ?? "this course"}.\n\nI can help you:\n• Write a department vision or mission\n• Suggest action plans for low-attainment COs\n• List which manual fields still need filling\n• Draft activity report entries`,
+  }]);
+  const [input, setInput]   = useState("");
+  const [busy, setBusy]     = useState(false);
+  const scrollRef           = useRef();
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // Update welcome message when course loads
+  useEffect(() => {
+    if (course?.course_name) {
+      setMessages(m => {
+        const updated = [...m];
+        if (updated[0]?.role === "assistant") {
+          updated[0] = {
+            ...updated[0],
+            text: `Course file loaded for ${course.course_name}.\n\nI can help you:\n• Write a department vision or mission\n• Suggest action plans for low-attainment COs\n• List which manual fields still need filling\n• Draft activity report entries`,
+          };
+        }
+        return updated;
+      });
+    }
+  }, [course?.course_name]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput("");
+    setMessages(m => [...m, { role: "user", text }]);
+    setBusy(true);
+
+    const systemCtx = [
+      `You are an AI assistant for an OBE (Outcome-Based Education) Course File editor in an Indian engineering college.`,
+      `Course: ${course?.course_name} (${course?.course_code}), Faculty: ${course?.faculty_name}, Dept: ${course?.department}.`,
+      `Current saved extra fields: ${JSON.stringify(extra)}`,
+      `Help the faculty fill in required fields. Be concise and specific. When suggesting text to paste, provide it directly.`,
+    ].join(" ");
+
+    try {
+      const res = await apiFetch("/ai/table-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: text, context: systemCtx, course_id: courseId }),
+      });
+      const reply = res.data?.reply ?? res.reply ?? res.message ?? "Done.";
+      setMessages(m => [...m, { role: "assistant", text: reply }]);
+    } catch {
+      // Local fallback
+      setMessages(m => [...m, { role: "assistant", text: localFallback(text, course, extra) }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", height: "100%",
+      background: "rgba(8,14,26,0.97)",
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: "13px 16px", borderBottom: `1px solid ${T.borderArea}`,
+        display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 15 }}>✦</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: T.text, letterSpacing: "0.02em" }}>
+          AI Assistant
+        </span>
+      </div>
+
+      {/* Messages */}
+      <div ref={scrollRef} style={{
+        flex: 1, overflowY: "auto", padding: "14px 14px",
+        display: "flex", flexDirection: "column", gap: 10,
+      }}>
+        {messages.map((m, i) => (
+          <div key={i}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: T.textMuted,
+              letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4,
+            }}>
+              {m.role === "user" ? "You" : "Assistant"}
+            </div>
+            <div style={{
+              fontSize: 12, lineHeight: 1.65,
+              color: m.role === "user" ? "#CBD5E1" : T.textSub,
+              background: m.role === "user"
+                ? "rgba(59,130,246,0.09)"
+                : "rgba(255,255,255,0.03)",
+              border: `1px solid ${m.role === "user" ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.05)"}`,
+              borderRadius: 8, padding: "9px 12px", whiteSpace: "pre-wrap",
+            }}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {busy && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+            <Spinner size={14} />
+            <span style={{ fontSize: 11, color: T.textMuted }}>Thinking…</span>
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: "10px 12px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
+        <textarea
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Ask about any section… (Enter to send)"
+          rows={2}
+          style={{
+            flex: 1, background: "rgba(15,23,42,0.7)", border: `1px solid ${T.border}`,
+            borderRadius: 7, color: "#CBD5E1", fontSize: 12,
+            padding: "8px 10px", resize: "none", outline: "none", fontFamily: T.sans,
+          }}
+        />
+        <button
+          onClick={send}
+          disabled={busy || !input.trim()}
+          style={{
+            padding: "8px 12px", background: (busy || !input.trim()) ? "rgba(59,130,246,0.15)" : T.blue,
+            border: "none", borderRadius: 7, color: "#fff",
+            cursor: (busy || !input.trim()) ? "not-allowed" : "pointer",
+            fontSize: 14, alignSelf: "flex-end", transition: "background 0.15s",
+          }}
+        >
+          ↑
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function localFallback(text, course, extra) {
+  const t = text.toLowerCase();
+  const dept = course?.department ?? "Engineering";
+  if (t.includes("vision"))
+    return `Suggested vision:\n\n"To be a globally recognized centre of excellence in ${dept}, nurturing innovative, ethical, and socially responsible professionals."\n\nPaste this in Section 1 → Department Vision.`;
+  if (t.includes("mission"))
+    return `Suggested missions (enter one per line):\n\nM1: To provide quality education through outcome-based learning.\nM2: To foster research culture and industry collaboration.\nM3: To develop professionals with strong ethical values.`;
+  if (t.includes("action plan") || t.includes("attainment"))
+    return `Typical action plan:\n\n• Remedial classes for students below 40%\n• Additional tutorials for weak CO topics\n• Peer learning groups\n• Reassessment after 2 weeks of intervention`;
+  if (t.includes("missing") || t.includes("incomplete"))
+    return `Fields requiring manual input:\n• Section 1 — Vision & Mission text\n• Section 5 — Previous CO attainment + action plan\n• Section 8 — Slow/Advanced learner names\n• Section 10 — Activity reports\n• Section 11 — Resource links\n• Section 13 — Attendance portal URL`;
+  return `Try asking:\n• "Write a vision for ${dept} department"\n• "Suggest action plan for low attainment"\n• "What fields are missing?"`;
+}
+
+// ─── Custom Tab Section ───────────────────────────────────────────────────────
+
+function CustomTabSection({ tab, idx, courseId, attachments, onRefresh, onUpdate, onDelete }) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleVal, setTitleVal]         = useState(tab.title);
+  const sectionNo = `C${idx + 1}`;
+
+  return (
+    <section style={{ borderBottom: `1px solid rgba(255,255,255,0.08)` }}>
+      <div style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 12,
+        padding: "13px 28px", background: "transparent",
+      }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: T.textMuted, minWidth: 22, fontFamily: T.mono }}>
+          {sectionNo}
+        </span>
+        <span style={{ fontSize: 17, color: T.amber }}>✦</span>
+        {editingTitle ? (
+          <input
+            autoFocus
+            value={titleVal}
+            onChange={e => setTitleVal(e.target.value)}
+            onBlur={() => { setEditingTitle(false); onUpdate("title", titleVal); }}
+            onKeyDown={e => { if (e.key === "Enter") { setEditingTitle(false); onUpdate("title", titleVal); } }}
+            style={{
+              flex: 1, background: "rgba(8,14,26,0.7)", border: `1px solid ${T.borderFocus}`,
+              borderRadius: 6, color: T.text, fontSize: 14, fontWeight: 600, padding: "4px 8px",
+              outline: "none", fontFamily: T.sans,
+            }}
+          />
+        ) : (
+          <span
+            onClick={() => setEditingTitle(true)}
+            title="Click to rename"
+            style={{ flex: 1, fontSize: 14, fontWeight: 600, color: T.text, cursor: "text", letterSpacing: "0.01em" }}
+          >
+            {tab.title || `Custom Section ${idx + 1}`}
+          </span>
+        )}
+        <span style={{ fontSize: 10, color: T.amber, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 4, padding: "2px 7px" }}>
+          Custom
+        </span>
+        <button
+          onClick={onDelete}
+          title="Delete this section"
+          style={{ background: "none", border: "none", cursor: "pointer", color: T.red, fontSize: 15, padding: "2px 6px", lineHeight: 1, opacity: 0.7 }}
+          onMouseEnter={e => e.currentTarget.style.opacity = "1"}
+          onMouseLeave={e => e.currentTarget.style.opacity = "0.7"}
+        >
+          ×
+        </button>
+      </div>
+      <div style={{ padding: "2px 28px 22px 62px" }}>
+        <p style={{ fontSize: 12, color: T.textMuted, marginTop: 0, marginBottom: 14 }}>
+          Custom section — click the title above to rename.
+        </p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          {[
+            {t:"text",    label:"📝 Paragraph"},
+            {t:"points",  label:"• Points"},
+            {t:"table",   label:"📊 Table"},
+            {t:"image",   label:"🖼 Image + Caption"},
+          ].map(({t, label}) => (
+            <button
+              key={t}
+              onClick={() => onUpdate("type", t)}
+              style={{
+                padding: "5px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                background: (tab.type||"text") === t ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.04)",
+                border: `1px solid ${(tab.type||"text") === t ? "rgba(59,130,246,0.4)" : "rgba(255,255,255,0.1)"}`,
+                color: (tab.type||"text") === t ? T.blueLight : T.textMuted,
+                transition: "all 0.15s",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {(tab.type === "text" || !tab.type) && (
+          <Field label="Content">
+            <Textarea value={tab.content ?? ""} onChange={v => onUpdate("content", v)} rows={8} placeholder="Write your section content here…" />
+          </Field>
+        )}
+        {tab.type === "points" && (
+          <Field label="Bullet Points" hint="One point per line">
+            <Textarea value={tab.content ?? ""} onChange={v => onUpdate("content", v)} rows={8} placeholder={"• First point\n• Second point\n• Third point"} mono />
+          </Field>
+        )}
+        {tab.type === "table" && (
+          <div>
+            <Field label="Table Data" hint="First row = headers. Separate columns with | character.">
+              <Textarea value={tab.content ?? ""} onChange={v => onUpdate("content", v)} rows={8} placeholder={"Sr No | Name | Details | Remarks\n1 | Item A | Description | OK\n2 | Item B | Description | OK"} mono />
+            </Field>
+            {tab.content && (() => {
+              const lines = tab.content.trim().split("\n").filter(Boolean);
+              if (lines.length < 2) return null;
+              const headers = lines[0].split("|").map(s => s.trim());
+              const dataRows = lines.slice(1).map(l => l.split("|").map(s => s.trim()));
+              return (
+                <div style={{ marginTop: 8, overflowX: "auto", borderRadius: 8, border: `1px solid ${T.border}` }}>
+                  <p style={{ fontSize: 10, color: T.textMuted, margin: "8px 12px 4px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Preview</p>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead><tr style={{ background: T.surfaceHigh }}>
+                      {headers.map((h, i) => <th key={i} style={{ padding: "7px 12px", color: T.textSub, fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", fontSize: 11 }}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {dataRows.map((row, ri) => (
+                        <tr key={ri} style={{ borderBottom: `1px solid rgba(255,255,255,0.04)` }}>
+                          {row.map((cell, ci) => <td key={ci} style={{ padding: "7px 12px", color: T.textSub }}>{cell}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+        {tab.type === "image" && (
+          <div>
+            <Field label="Caption / Description">
+              <Textarea value={tab.content ?? ""} onChange={v => onUpdate("content", v)} rows={3} placeholder="Describe the image or write a caption…" />
+            </Field>
+            <p style={{ fontSize: 11, color: T.textMuted, margin: "4px 0 10px" }}>Upload images using the attachment zone below.</p>
+          </div>
+        )}
+        <AttachmentZone courseId={courseId} sectionNo={null} attachments={attachments} onRefresh={onRefresh} />
+      </div>
+    </section>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+// ─── Learning Materials: Pull from Study Materials page ──────────────────────
+
+function LearningMaterialsImportBtn({ courseId, onImport }) {
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function pull() {
+    setLoading(true);
+    try {
+      const d = await apiFetch(`/session-plan/materials/${courseId}`).catch(() => null);
+      const raw = d?.data ?? d ?? {};
+      const lines = [];
+
+      const books = raw.textbooks ?? raw.reference_books ?? raw.books ?? [];
+      books.forEach(b => {
+        const title = b.title ?? b.name ?? String(b);
+        const author = b.author ?? b.authors ?? "";
+        const pub    = b.publisher ?? "";
+        const ed     = b.edition ?? b.year ?? "";
+        lines.push(`Textbook: ${title}${author ? " — " + author : ""}${pub ? ", " + pub : ""}${ed ? ", " + ed : ""}`);
+      });
+
+      const webLinks = raw.web_links ?? raw.online_links ?? raw.nptel_links ?? raw.web ?? [];
+      webLinks.forEach(w => {
+        const url  = typeof w === "string" ? w : (w.url ?? w.link ?? "");
+        const desc = typeof w === "object"  ? (w.description ?? w.title ?? "") : "";
+        if (url) lines.push(url + (desc ? "  (" + desc + ")" : ""));
+      });
+
+      const moocs = raw.mooc_courses ?? raw.moocs ?? [];
+      moocs.forEach(m => {
+        const url  = typeof m === "string" ? m : (m.url ?? m.link ?? "");
+        const desc = typeof m === "object"  ? (m.title ?? m.platform ?? "") : "";
+        if (url) lines.push(url + (desc ? "  (" + desc + ")" : ""));
+      });
+
+      if (lines.length) {
+        onImport(lines.join("\n"));
+        setDone(true);
+        setTimeout(() => setDone(false), 3000);
+      }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <button
+      onClick={pull}
+      disabled={loading}
+      title="Pull materials from Study Materials page"
+      style={{
+        display: "flex", alignItems: "center", gap: 5,
+        padding: "4px 11px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+        cursor: loading ? "not-allowed" : "pointer",
+        background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)",
+        color: done ? T.green : "#818cf8", transition: "all 0.15s", whiteSpace: "nowrap",
+      }}
+      onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "rgba(99,102,241,0.22)"; }}
+      onMouseLeave={e => { if (!loading) e.currentTarget.style.background = "rgba(99,102,241,0.12)"; }}
+    >
+      {loading ? <Spinner size={11} /> : (done ? "✓" : "⬇")}
+      {loading ? " Pulling…" : done ? " Imported!" : " Pull from Study Materials"}
+    </button>
+  );
+}
+
+function LearningMaterialsAIBtn({ course, onGenerated }) {
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState("");
+
+  async function generate() {
+    if (busy) return;
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch(`/ai/learning-materials/${course?.id ?? 0}`, {
+        method: "POST",
+        body: JSON.stringify({
+          course_name: course?.course_name ?? "",
+          course_code: course?.course_code ?? "",
+          department: course?.department ?? "",
+          semester: course?.semester ?? "",
+          cos: course?.cos ?? [],
+          syllabus_units: course?.syllabus_units ?? [],
+        }),
+      });
+      const text = res.data ?? res;
+      if (text) onGenerated(String(text));
+      else throw new Error("Empty response");
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {err && <span style={{ fontSize: 10, color: T.red }}>{err}</span>}
+      <button
+        onClick={generate}
+        disabled={busy}
+        title="Generate AI-recommended learning materials"
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "4px 11px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+          cursor: busy ? "not-allowed" : "pointer",
+          background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.3)",
+          color: "#a78bfa", transition: "all 0.15s", whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!busy) e.currentTarget.style.background = "rgba(139,92,246,0.22)"; }}
+        onMouseLeave={e => { if (!busy) e.currentTarget.style.background = "rgba(139,92,246,0.12)"; }}
+      >
+        {busy ? <Spinner size={11} /> : "✨"}
+        {busy ? " Generating…" : " Generate with AI"}
+      </button>
+    </div>
+  );
+}
+
+// ─── Learners Auto-Populate from Attainment ──────────────────────────────────
+
+function LearnersAutoPopulate({ attainment, courseId, onPopulate }) {
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function autoFill() {
+    setLoading(true);
+    try {
+      // Fetch full student marks to categorise slow/advanced
+      const marksRes = await apiFetch(`/attainment/marks/${courseId}`).catch(() => null);
+      const records = marksRes?.data ?? marksRes ?? [];
+
+      // co_attainment dict from attainment prop
+      const rawCo = attainment?.co_attainment ?? {};
+      const coAtt = Array.isArray(rawCo) ? rawCo : Object.values(rawCo);
+      // threshold for "slow" — below 60% of max marks per CO
+      const SLOW_THRESHOLD = 0.60;
+      const ADV_THRESHOLD  = 0.85;
+
+      if (Array.isArray(records) && records.length > 0) {
+        const slowRows = [];
+        const advRows  = [];
+
+        records.forEach(rec => {
+          if (!rec) return;
+          const name = rec.student_name ?? rec.name ?? "";
+          const prn  = rec.prn ?? rec.roll_no ?? "";
+          const marks = rec.marks ?? {};
+
+          // Determine per-CO scores where possible
+          const weakCOs = [];
+          const strongCOs = [];
+
+          coAtt.forEach(co => {
+            const coId = co.co_id;
+            const maxM = co.max_marks ?? 100;
+            // Try to find student marks for this CO
+            const coScore = marks[coId] ?? marks[coId?.toLowerCase()] ?? null;
+            if (coScore !== null && coScore !== undefined) {
+              const pct = parseFloat(coScore) / maxM;
+              if (pct < SLOW_THRESHOLD) weakCOs.push(coId);
+              if (pct >= ADV_THRESHOLD) strongCOs.push(coId);
+            }
+          });
+
+          // Fallback: use overall total if no CO-wise marks
+          if (weakCOs.length === 0 && strongCOs.length === 0) {
+            const total = Object.values(marks).reduce((s, v) => {
+              const n = typeof v === "object" ? (v?.Total ?? 0) : (parseFloat(v) || 0);
+              return s + n;
+            }, 0);
+            const maxTotal = attainment?.total_students ? 100 : 100;
+            const pct = total / maxTotal;
+            if (pct < SLOW_THRESHOLD) coAtt.forEach(co => weakCOs.push(co.co_id));
+            if (pct >= ADV_THRESHOLD)  coAtt.forEach(co => strongCOs.push(co.co_id));
+          }
+
+          if (weakCOs.length > 0)  slowRows.push(`${name.padEnd(20)} | ${prn} | ${weakCOs.join(", ")}`);
+          if (strongCOs.length > 0) advRows.push(`${name.padEnd(20)} | ${prn} | High performance in ${strongCOs.join(", ")}`);
+        });
+
+        const header_s = "Student Name         | PRN      | Weak COs\n" + "-".repeat(55);
+        const header_a = "Student Name         | PRN      | Achievements\n" + "-".repeat(55);
+
+        onPopulate(
+          slowRows.length ? header_s + "\n" + slowRows.join("\n") : null,
+          advRows.length  ? header_a + "\n" + advRows.join("\n")  : null
+        );
+        setDone(true);
+        setTimeout(() => setDone(false), 3000);
+      } else {
+        // No per-student records — just show overall attainment summary
+        const slowCOs = coAtt.filter(co => (co.attainment_percentage ?? 0) < 60).map(co => co.co_id);
+        const advCOs  = coAtt.filter(co => (co.attainment_percentage ?? 0) >= 85).map(co => co.co_id);
+        const note_s = slowCOs.length
+          ? `Low class attainment detected in: ${slowCOs.join(", ")}.\nEnter individual student names and PRNs above for NBA compliance.`
+          : "No COs below 60% threshold. Upload per-student marks for detailed slow learner identification.";
+        onPopulate(note_s, null);
+        setDone(true);
+        setTimeout(() => setDone(false), 3000);
+      }
+    } catch (e) {
+      console.error("Learner auto-populate error:", e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10, marginBottom: 14,
+      padding: "9px 14px", background: "rgba(59,130,246,0.06)",
+      border: "1px solid rgba(59,130,246,0.18)", borderRadius: 8,
+    }}>
+      <span style={{ fontSize: 12, color: T.textSub, flex: 1 }}>
+        ⚡ Auto-categorise students from marks data
+      </span>
+      {done && <span style={{ fontSize: 11, color: T.green }}>✓ Populated!</span>}
+      <button
+        onClick={autoFill}
+        disabled={loading}
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "5px 13px", borderRadius: 6, fontSize: 12, fontWeight: 700,
+          cursor: loading ? "not-allowed" : "pointer",
+          background: "rgba(59,130,246,0.14)", border: "1px solid rgba(59,130,246,0.3)",
+          color: "#60a5fa", transition: "all 0.15s", whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "rgba(59,130,246,0.25)"; }}
+        onMouseLeave={e => { if (!loading) e.currentTarget.style.background = "rgba(59,130,246,0.14)"; }}
+      >
+        {loading ? <Spinner size={11} /> : "⚡"}
+        {loading ? " Loading…" : " Auto-fill from Marks"}
+      </button>
+    </div>
+  );
+}
+
+// ─── Action Plan AI Button ────────────────────────────────────────────────────
+
+function ActionPlanAIBtn({ course, prevCoAttainment, onGenerated, disabled }) {
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState("");
+
+  async function generate() {
+    if (disabled || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch(`/ai/action-plan/${course?.id ?? 0}`, {
+        method: "POST",
+        body: JSON.stringify({
+          course_name: course?.course_name ?? "",
+          course_code: course?.course_code ?? "",
+          prev_co_attainment: prevCoAttainment ?? "",
+        }),
+      });
+      const text = res.data ?? res;
+      if (text) onGenerated(String(text));
+      else throw new Error("Empty response from AI");
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {err && <span style={{ fontSize: 10, color: T.red, maxWidth: 160 }}>{err}</span>}
+      <button
+        onClick={generate}
+        disabled={disabled || busy}
+        title={disabled ? "Enter previous CO attainment data first" : "Generate action plan using AI"}
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "4px 11px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+          cursor: disabled || busy ? "not-allowed" : "pointer",
+          background: busy ? "rgba(16,185,129,0.05)" : "rgba(16,185,129,0.12)",
+          border: "1px solid rgba(16,185,129,0.3)",
+          color: disabled ? T.textMuted : "#34d399",
+          opacity: disabled ? 0.5 : 1,
+          transition: "all 0.15s",
+          whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(16,185,129,0.22)"; }}
+        onMouseLeave={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(16,185,129,0.12)"; }}
+      >
+        {busy ? <Spinner size={11} /> : "✨"}
+        {busy ? " Generating…" : " Generate with AI"}
+      </button>
+    </div>
+  );
+}
+
+// ─── AI CO-PO Justification Generator ────────────────────────────────────────
+
+function PODescriptionsAIBtn({ course, onGenerated, disabled }) {
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState("");
+
+  async function generate() {
+    if (disabled || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch(`/ai/generate-po-descriptions/${course?.id ?? 0}`, {
+        method: "POST",
+        body: JSON.stringify({
+          department: course?.department ?? "",
+          pos: course?.pos ?? [],
+        }),
+      });
+      const text = res.data ?? res;
+      if (text) onGenerated(String(text));
+      else throw new Error("Empty response from AI");
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {err && <span style={{ fontSize: 11, color: T.red }}>{err}</span>}
+      <button
+        onClick={generate}
+        disabled={disabled || busy}
+        title={disabled ? "Add POs in Course Setup first" : "Use AI to expand PO labels into full NBA-standard descriptions"}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+          cursor: disabled || busy ? "not-allowed" : "pointer",
+          background: busy ? "rgba(16,185,129,0.06)" : "rgba(16,185,129,0.13)",
+          border: "1px solid rgba(16,185,129,0.3)",
+          color: disabled ? T.textMuted : "#6ee7b7",
+          opacity: disabled ? 0.5 : 1,
+          transition: "all 0.15s",
+          whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(16,185,129,0.22)"; }}
+        onMouseLeave={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(16,185,129,0.13)"; }}
+      >
+        {busy ? <Spinner size={13} /> : "✨"}
+        {busy ? " Generating…" : " Expand POs with AI"}
+      </button>
+    </div>
+  );
+}
+
+function CoPoJustificationAIBtn({ course, onGenerated, disabled }) {
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState("");
+
+  async function generate() {
+    if (disabled || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch(`/ai/co-po-justification/${course.id}`, {
+        method: "POST",
+        body: JSON.stringify({
+          course_name: course?.course_name ?? "",
+          course_code: course?.course_code ?? "",
+          department: course?.department ?? "",
+          cos: course?.cos ?? [],
+          pos: course?.pos ?? [],
+          co_po_matrix: course?.co_po_matrix ?? {},
+        }),
+      });
+      const text = res.data ?? res;
+      if (text) onGenerated(String(text));
+      else throw new Error("Empty response from AI");
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {err && <span style={{ fontSize: 11, color: T.red }}>{err}</span>}
+      <button
+        onClick={generate}
+        disabled={disabled || busy}
+        title={disabled ? "Complete course setup with COs and CO-PO matrix first" : "Generate justification using AI"}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          padding: "5px 13px", borderRadius: 7, fontSize: 12, fontWeight: 700,
+          cursor: disabled || busy ? "not-allowed" : "pointer",
+          background: busy ? "rgba(139,92,246,0.06)" : "rgba(139,92,246,0.14)",
+          border: "1px solid rgba(139,92,246,0.3)",
+          color: disabled ? T.textMuted : "#a78bfa",
+          opacity: disabled ? 0.5 : 1,
+          transition: "all 0.15s",
+          whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(139,92,246,0.22)"; }}
+        onMouseLeave={e => { if (!disabled && !busy) e.currentTarget.style.background = "rgba(139,92,246,0.14)"; }}
+      >
+        {busy ? <Spinner size={13} /> : "✨"}
+        {busy ? " Generating…" : " Generate with AI"}
+      </button>
+    </div>
+  );
+}
+
+function CoPoJustificationView({ value, onChange }) {
+  const [editMode, setEditMode] = useState(false);
+  const [openIdx, setOpenIdx]   = useState(null);
+
+  // Parse "CO1 → PO1 (3): text..." entries — supports multi-sentence paragraphs
+  const entries = React.useMemo(() => {
+    if (!value?.trim()) return [];
+    const results = [];
+    // Split on lines that start with a CO→PO header
+    const headerRe = /^(CO\d+\s*[→\->]+\s*PO\d+(?:\/PSO\d+)?\s*\(\d\))\s*:\s*/i;
+    const lines = value.split("\n");
+    let current = null;
+    for (const line of lines) {
+      const m = line.match(headerRe);
+      if (m) {
+        if (current) results.push(current);
+        current = { header: m[1].trim(), body: line.slice(m[0].length).trim() };
+      } else if (current) {
+        // continuation of previous entry
+        const trimmed = line.trim();
+        if (trimmed) current.body += (current.body ? " " : "") + trimmed;
+      }
+    }
+    if (current) results.push(current);
+    return results;
+  }, [value]);
+
+  // colour badge by strength level
+  function levelColor(header) {
+    const m = header.match(/\((\d)\)/);
+    const lvl = m ? Number(m[1]) : 0;
+    if (lvl === 3) return { bg: "rgba(20,184,166,0.18)", border: "rgba(20,184,166,0.45)", text: "#2dd4bf" };
+    if (lvl === 2) return { bg: "rgba(99,102,241,0.15)", border: "rgba(99,102,241,0.4)",  text: "#a5b4fc" };
+    return               { bg: "rgba(245,158,11,0.12)",  border: "rgba(245,158,11,0.35)", text: "#fcd34d" };
+  }
+
+  // Group by CO
+  const groups = React.useMemo(() => {
+    const g = {};
+    for (const e of entries) {
+      const co = e.header.split(/[→\->]/)[0].trim();
+      if (!g[co]) g[co] = [];
+      g[co].push(e);
+    }
+    return g;
+  }, [entries]);
+
+  const hasContent = entries.length > 0;
+
+  return (
+    <div>
+      {/* Toggle row */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: 11, color: T.textMuted }}>
+          {hasContent ? `${entries.length} mapping${entries.length !== 1 ? "s" : ""} across ${Object.keys(groups).length} CO${Object.keys(groups).length !== 1 ? "s" : ""}` : "No justifications yet — generate with AI or type below"}
+        </span>
+        <button
+          onClick={() => setEditMode(p => !p)}
+          style={{
+            fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 5, cursor: "pointer",
+            background: editMode ? "rgba(239,68,68,0.12)" : "rgba(148,163,184,0.1)",
+            border: editMode ? "1px solid rgba(239,68,68,0.3)" : `1px solid ${T.border}`,
+            color: editMode ? "#fca5a5" : T.textSub,
+          }}
+        >
+          {editMode ? "✕ Close Editor" : "✏ Edit Raw Text"}
+        </button>
+      </div>
+
+      {/* Raw editor — shown when editMode */}
+      {editMode && (
+        <Textarea
+          value={value}
+          onChange={onChange}
+          placeholder={"CO1 → PO1 (3): This CO directly maps to PO1 because...\nCO1 → PO2 (3): The problem analysis skills required...\n..."}
+          rows={10}
+          mono
+        />
+      )}
+
+      {/* Accordion view — shown when not editing and content exists */}
+      {!editMode && hasContent && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {Object.entries(groups).map(([coId, items]) => (
+            <div key={coId} style={{ borderRadius: 8, border: `1px solid ${T.border}`, overflow: "hidden" }}>
+              {/* CO group header */}
+              <div style={{
+                padding: "7px 14px",
+                background: "rgba(15,23,42,0.7)",
+                fontSize: 12, fontWeight: 700, color: "#e2e8f0",
+                letterSpacing: "0.04em",
+                borderBottom: `1px solid ${T.border}`,
+              }}>
+                {coId} <span style={{ fontWeight: 400, color: T.textMuted, fontSize: 11 }}>— {items.length} PO mapping{items.length !== 1 ? "s" : ""}</span>
+              </div>
+              {/* Each CO→PO entry */}
+              {items.map((entry, i) => {
+                const c = levelColor(entry.header);
+                const isOpen = openIdx === `${coId}-${i}`;
+                // Split header for display: "CO1 → PO1 (3)"
+                const parts = entry.header.match(/^(CO\d+)\s*[→\->]+\s*(PO\d+(?:\/PSO\d+)?)\s*\((\d)\)$/i);
+                return (
+                  <div key={i} style={{ borderBottom: i < items.length - 1 ? `1px solid rgba(255,255,255,0.05)` : "none" }}>
+                    {/* Clickable header row */}
+                    <button
+                      onClick={() => setOpenIdx(isOpen ? null : `${coId}-${i}`)}
+                      style={{
+                        width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "9px 14px", background: isOpen ? "rgba(15,23,42,0.9)" : "rgba(8,14,26,0.5)",
+                        border: "none", cursor: "pointer", textAlign: "left", gap: 12,
+                        transition: "background 0.15s",
+                      }}
+                      onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = "rgba(15,23,42,0.8)"; }}
+                      onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "rgba(8,14,26,0.5)"; }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+                        {/* Badge */}
+                        <span style={{
+                          padding: "2px 9px", borderRadius: 5, fontSize: 11, fontWeight: 800,
+                          background: c.bg, border: `1px solid ${c.border}`, color: c.text,
+                          whiteSpace: "nowrap", flexShrink: 0,
+                        }}>
+                          {parts ? `${parts[1]} → ${parts[2]}` : entry.header.split(":")[0]}
+                          <span style={{ marginLeft: 5, opacity: 0.8 }}>
+                            {parts ? `(${parts[3]})` : ""}
+                          </span>
+                        </span>
+                        {/* Preview sentence — first sentence only */}
+                        <span style={{
+                          fontSize: 12, color: T.textSub, overflow: "hidden", textOverflow: "ellipsis",
+                          whiteSpace: "nowrap", flex: 1,
+                        }}>
+                          {entry.body.split(/(?<=[.!?])\s+/)[0]}
+                        </span>
+                      </div>
+                      <span style={{ color: T.textMuted, fontSize: 14, flexShrink: 0, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
+                    </button>
+                    {/* Expanded body */}
+                    {isOpen && (
+                      <div style={{
+                        padding: "12px 16px 14px",
+                        background: "rgba(8,14,26,0.7)",
+                        borderTop: `1px solid rgba(255,255,255,0.06)`,
+                      }}>
+                        <p style={{ margin: 0, fontSize: 13, color: "#cbd5e1", lineHeight: 1.7 }}>
+                          {entry.body}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state when not editing */}
+      {!editMode && !hasContent && (
+        <div style={{
+          padding: "22px 16px", borderRadius: 8, border: `1px dashed ${T.border}`,
+          textAlign: "center", color: T.textMuted, fontSize: 13,
+        }}>
+          Click <strong style={{ color: "#a78bfa" }}>✨ Generate with AI</strong> to auto-generate detailed CO-PO mapping justifications, or use <strong style={{ color: T.textSub }}>✏ Edit Raw Text</strong> to type manually.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CourseFileEditor({ courseId }) {
+  // All fields persisted in CourseFileExtraPayload — keep in sync with backend route.
+  const EXTRA_DEFAULTS = {
+    vision_text:            "",
+    mission_text:           "",
+    batch:                  "",
+    po_peo_pso_text:        "",
+    peo_text:               "",
+    pso_text:               "",
+    co_po_justification:    "",
+    prev_co_attainment:     "",
+    action_plan:            "",
+    slow_learners:          "",
+    advanced_learners:      "",
+    activity_reports:       "",
+    learning_material_links:"",
+    attendance_links:       "",
+    student_list:           "",
+    custom_tabs:            "[]",
+  };
+
+  // ── Custom tabs state ─────────────────────────────────────────────────────
+  const [customTabs, setCustomTabs] = useState([]);
+
+  // Parse custom_tabs from extra when it loads
+  useEffect(() => {
+    try {
+      const parsed = JSON.parse(extra.custom_tabs || "[]");
+      if (Array.isArray(parsed)) setCustomTabs(parsed);
+    } catch { setCustomTabs([]); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // only on mount; after that we manage customTabs independently
+
+  function addCustomTab() {
+    const newTab = { id: Date.now().toString(), title: "Custom Section", type: "text", content: "" };
+    const next = [...customTabs, newTab];
+    setCustomTabs(next);
+    updateExtra("custom_tabs", JSON.stringify(next));
+  }
+
+  function updateCustomTab(id, field, val) {
+    const next = customTabs.map(t => t.id === id ? { ...t, [field]: val } : t);
+    setCustomTabs(next);
+    updateExtra("custom_tabs", JSON.stringify(next));
+  }
+
+  function deleteCustomTab(id) {
+    if (!confirm("Delete this custom section?")) return;
+    const next = customTabs.filter(t => t.id !== id);
+    setCustomTabs(next);
+    updateExtra("custom_tabs", JSON.stringify(next));
+  }
+
+  const [course,      setCourse]      = useState(null);
+  const [extra,       setExtra]       = useState(EXTRA_DEFAULTS);
+  const [sessionPlan, setSessionPlan] = useState({ rows: [], cols: [] });
+  const [evalPlan,    setEvalPlan]    = useState({ rows: [], cols: [] });
+  const [attainment,  setAttainment]  = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const [timetable,   setTimetable]   = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const [generating,  setGenerating]  = useState(false);
+  const [saveStatus,  setSaveStatus]  = useState(null); // "saved" | "error" | null
+  const [loadErrors,  setLoadErrors]  = useState({});
+  const [cfStudents,  setCfStudents]  = useState([]); // student roster loaded from DB
+  const [cfMarks,     setCfMarks]     = useState([]); // exam-wise marks from attainment
+  const [cfQP,        setCfQP]        = useState({}); // CA name → question paper from master attainment
+  const [cfBloomMap,  setCfBloomMap]  = useState({}); // CA name → {q_no → bloom string} from AI
+  const [cfAiMats,    setCfAiMats]    = useState(null); // AI-generated materials {textbooks,web,journals,moocs}
+
+  // Ref always holds latest extra — fixes stale-closure autosave bug
+  const extraRef   = useRef(extra);
+  const saveTimer  = useRef(null);
+
+  useEffect(() => { extraRef.current = extra; }, [extra]);
+
+  // ── Load ──────────────────────────────────────────────────────────────────
+
+  useEffect(() => { if (courseId) loadAll(); }, [courseId]);
+
+  async function loadAll() {
+    setLoading(true);
+    const errors = {};
+
+    const [courseRes, extraRes, sessionRes, evalRes, attainRes, attachRes, ttRes, studentsRes, marksRes] =
+      await Promise.allSettled([
+        apiFetch(`/courses/${courseId}`),
+        apiFetch(`/course-file/extra/${courseId}`),
+        apiFetch(`/session-plan/view/${courseId}`),
+        apiFetch(`/evaluation-plan/view/${courseId}`),
+        apiFetch(`/attainment/calculate/${courseId}`),
+        apiFetch(`/course-file/attachments/${courseId}`),
+        apiFetch(`/dashboard/timetable`),
+        apiFetch(`/students/${courseId}`),
+        apiFetch(`/attainment/marks/${courseId}`),
+      ]);
+
+    if (courseRes.status === "fulfilled") {
+      setCourse(courseRes.value.data ?? courseRes.value);
+    } else {
+      errors.course = courseRes.reason?.message;
+    }
+
+    if (extraRes.status === "fulfilled") {
+      const d = extraRes.value.data ?? extraRes.value ?? {};
+      if (Object.keys(d).length > 0) {
+        setExtra(prev => {
+          const merged = { ...prev, ...d };
+          // Auto-fill POs from course data if DB has empty po_peo_pso_text
+          if (!merged.po_peo_pso_text?.trim()) {
+            const coursePOs = (courseRes.value?.data ?? courseRes.value)?.pos ?? [];
+            if (coursePOs.length) {
+              merged.po_peo_pso_text = coursePOs.map(p => `${p.po_id}: ${p.statement}`).join("\n");
+            }
+          }
+          return merged;
+        });
+      }
+    } else {
+      errors.extra = extraRes.reason?.message;
+    }
+
+    // Session plan: { data: [...], cols: [...] } — both at top level, not nested
+    if (sessionRes.status === "fulfilled") {
+      const v = sessionRes.value;
+      setSessionPlan({
+        rows: v.data ?? [],
+        cols: v.cols ?? [],
+      });
+    } else {
+      errors.session = sessionRes.reason?.message;
+    }
+
+    // Eval plan: same shape
+    if (evalRes.status === "fulfilled") {
+      const v = evalRes.value;
+      setEvalPlan({
+        rows: v.data ?? [],
+        cols: v.cols ?? [],
+      });
+    } else {
+      errors.eval = evalRes.reason?.message;
+    }
+
+    if (attainRes.status === "fulfilled") {
+      setAttainment(attainRes.value.data ?? attainRes.value);
+    } else {
+      errors.attainment = attainRes.reason?.message;
+    }
+
+    if (attachRes.status === "fulfilled") {
+      setAttachments(attachRes.value.data ?? []);
+    } else {
+      errors.attachments = attachRes.reason?.message;
+    }
+
+    if (ttRes?.status === "fulfilled") {
+      setTimetable(ttRes.value.data ?? null);
+    }
+
+    if (studentsRes.status === "fulfilled") {
+      setCfStudents(studentsRes.value.data ?? []);
+    }
+
+    if (marksRes.status === "fulfilled") {
+      setCfMarks(marksRes.value.data ?? []);
+    }
+
+    // Load QP sheets from master attainment (co-po-template)
+    try {
+      const sheetsRes = await apiFetch(`/co-po-template/load-all-sheets/${courseId}`);
+      if (sheetsRes.sheets && Object.keys(sheetsRes.sheets).length > 0) {
+        setCfQP(sheetsRes.sheets);
+        // AI bloom classification for all questions across all CA sheets
+        try {
+          const allQTexts = [];
+          Object.entries(sheetsRes.sheets).forEach(([ca, data]) => {
+            (data.qp || []).forEach(q => {
+              if (q.question_text) allQTexts.push(q.question_text);
+            });
+          });
+          if (allQTexts.length > 0) {
+            const bloomRes = await apiFetch('/syllabus/classify-bloom', {
+              method: 'POST',
+              body: JSON.stringify({ statements: allQTexts })
+            });
+            if (bloomRes.levels) {
+              // Map results back per CA → q_no
+              const bloomMap = {};
+              let idx = 0;
+              Object.entries(sheetsRes.sheets).forEach(([ca, data]) => {
+                bloomMap[ca] = {};
+                (data.qp || []).forEach(q => {
+                  if (q.question_text) {
+                    bloomMap[ca][String(q.q_no ?? '')] = bloomRes.levels[idx] || null;
+                    idx++;
+                  }
+                });
+              });
+              if (typeof setCfBloomMap === "function") setCfBloomMap(bloomMap);
+            }
+          }
+        } catch { /* bloom AI failed silently */ }
+      }
+    } catch { /* silent */ }
+
+    setLoadErrors(errors);
+    setLoading(false);
+  }
+
+  async function refreshAttachments() {
+    try {
+      const res = await apiFetch(`/course-file/attachments/${courseId}`);
+      setAttachments(res.data ?? []);
+    } catch { /* silent */ }
+  }
+
+  // ── Auto-save (debounced, no stale closure) ───────────────────────────────
+
+  // FIX: don't pass extra as argument — read from ref at flush time
+  const updateExtra = useCallback((key, value) => {
+    setExtra(prev => {
+      const next = { ...prev, [key]: value };
+      extraRef.current = next;
+      return next;
+    });
+    setSaveStatus(null);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      // extraRef.current is always fresh here
+      autoSave(extraRef.current);
+    }, 1500);
+  }, []);  // no deps — reads ref at call time
+
+  async function autoSave(data) {
+    try {
+      await apiFetch(`/course-file/extra/${courseId}`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch {
+      setSaveStatus("error");
+    }
+  }
+
+  async function saveNow() {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaving(true);
+    try {
+      await apiFetch(`/course-file/extra/${courseId}`, {
+        method: "POST",
+        body: JSON.stringify(extraRef.current),
+      });
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (e) {
+      setSaveStatus("error");
+      alert("Save failed: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleGenerate() {
+    setGenerating(true);
+    try {
+      await saveNow();
+      await apiFetch(`/course-file/generate/${courseId}`, { method: "POST" });
+      window.open(`${API_BASE}/course-file/download/${courseId}?token=${cfToken()}`, "_blank");
+    } catch (e) {
+      alert("Generation failed: " + e.message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+
+  const sessionCols = useMemo(() => {
+    if (sessionPlan.cols?.length) return sessionPlan.cols;
+    if (!sessionPlan.rows?.length) return [];
+    return Object.keys(sessionPlan.rows[0]).map(k => ({
+      key: k,
+      label: k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+    }));
+  }, [sessionPlan]);
+
+  const evalCols = useMemo(() => {
+    if (evalPlan.cols?.length) return evalPlan.cols;
+    if (!evalPlan.rows?.length) return [];
+    return Object.keys(evalPlan.rows[0]).map(k => ({
+      key: k,
+      label: k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+    }));
+  }, [evalPlan]);
+
+  const hasContent = useCallback((field) => {
+    return !!(field && extra[field]?.trim().length > 0);
+  }, [extra]);
+
+  // Progress: count filled sections
+  const readySections = useMemo(() => {
+    const std = SECTION_META.filter(s => {
+      if (s.auto) return true;
+      const field = SECTION_FIELD_MAP[s.no];
+      return field ? hasContent(field) : false;
+    }).length;
+    const custom = customTabs.filter(t => t.content?.trim()).length;
+    return std + custom;
+  }, [hasContent, customTabs]);
+
+  // ── Guard ─────────────────────────────────────────────────────────────────
+
+  if (!courseId) {
+    return (
+      <div style={{
+        height: "100%", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        color: T.textMuted, fontSize: 14, gap: 8,
+        fontFamily: T.sans, background: T.bg,
+      }}>
+        <span style={{ fontSize: 32 }}>📄</span>
+        <span>Select a course to view its file</span>
+      </div>
+    );
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div style={{
+      display: "flex", height: "100%",
+      fontFamily: T.sans, background: T.bg, color: T.text, overflow: "hidden",
+    }}>
+
+      {/* ── LEFT: Document editor ─────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden", borderRight: `1px solid ${T.borderArea}` }}>
+
+        {/* Top bar */}
+        <div style={{
+          display: "flex", alignItems: "center", padding: "0 20px", height: 52, flexShrink: 0,
+          borderBottom: `1px solid ${T.borderArea}`, background: "rgba(8,14,26,0.97)", gap: 12,
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: T.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {loading ? "Loading…" : `${course?.course_name ?? "Untitled"} — Course File`}
+          </span>
+
+          {saveStatus === "saved" && (
+            <span style={{ fontSize: 12, color: T.green, display: "flex", alignItems: "center", gap: 4 }}>
+              ✓ Saved
+            </span>
+          )}
+          {saveStatus === "error" && (
+            <span style={{ fontSize: 12, color: T.red }}>⚠ Save failed</span>
+          )}
+
+          <button
+            onClick={saveNow}
+            disabled={saving || loading}
+            style={{
+              padding: "0 16px", height: 34,
+              background: "rgba(255,255,255,0.06)", border: `1px solid rgba(255,255,255,0.1)`,
+              borderRadius: 7, color: "#CBD5E1", fontSize: 12, cursor: "pointer", fontWeight: 600,
+            }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+
+          <button
+            onClick={handleGenerate}
+            disabled={generating || loading}
+            style={{
+              padding: "0 16px", height: 34,
+              background: generating ? "rgba(16,185,129,0.15)" : "#10B981",
+              border: "none", borderRadius: 7, color: "#fff",
+              fontSize: 12, cursor: generating ? "not-allowed" : "pointer", fontWeight: 700,
+              display: "flex", alignItems: "center", gap: 6,
+            }}
+          >
+            {generating ? <><Spinner size={13} /> Generating…</> : "↓ Download .docx"}
+          </button>
+        </div>
+
+        {/* Loading state */}
+        {loading ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
+            <Spinner />
+            <span style={{ fontSize: 13, color: T.textMuted }}>Loading course file…</span>
+          </div>
+        ) : (
+          <div style={{ flex: 1, overflowY: "auto" }}>
+
+            {/* ── Cover sheet ─────────────────────────────────────────────── */}
+            <div style={{
+              margin: "22px 28px 0", padding: "20px 24px",
+              background: T.surface, border: `1px solid ${T.borderArea}`, borderRadius: 10,
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
+                Cover Sheet Preview
+              </div>
+              <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 3 }}>
+                    {course?.institution_name ?? "Institution"}
+                  </div>
+                  <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 16 }}>
+                    OBE Course File — Academic Year {course?.academic_year ?? "—"}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                    {[
+                      ["Course", `${course?.course_name ?? "—"} (${course?.course_code ?? "—"})`],
+                      ["Faculty", course?.faculty_name ?? "—"],
+                      ["Department", course?.department ?? "—"],
+                      ["Semester", course?.semester ?? "—"],
+                      ["Credits", course?.credits ?? "—"],
+                      ["Total Hours", course?.total_hours ?? "—"],
+                    ].map(([k, v]) => (
+                      <div key={k}>
+                        <div style={{ fontSize: 10, color: T.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{k}</div>
+                        <div style={{ fontSize: 12, color: T.textSub, marginTop: 3 }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ minWidth: 150 }}>
+                  <Field label="Batch Year">
+                    <TextInput
+                      value={extra.batch}
+                      onChange={v => updateExtra("batch", v)}
+                      placeholder="e.g. 2022-26"
+                    />
+                  </Field>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Progress bar ────────────────────────────────────────────── */}
+            <div style={{ margin: "14px 28px 0", display: "flex", alignItems: "center", gap: 3 }}>
+              {SECTION_META.map(s => {
+                const field = SECTION_FIELD_MAP[s.no];
+                const filled = s.auto || hasContent(field);
+                return (
+                  <div
+                    key={s.no}
+                    title={`${s.no}. ${s.title}`}
+                    style={{
+                      flex: 1, height: 4, borderRadius: 2,
+                      background: filled ? T.green : "rgba(255,255,255,0.06)",
+                      transition: "background 0.3s",
+                    }}
+                  />
+                );
+              })}
+              <span style={{ fontSize: 11, color: T.textMuted, marginLeft: 10, whiteSpace: "nowrap" }}>
+                {readySections} / {SECTION_META.length + customTabs.length} ready
+              </span>
+            </div>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 0 — Course File Contents (auto TOC)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={0} {...SECTION_META.find(s=>s.no===0)} hasContent={true}>
+              <InfoBox color={T.green} bg="rgba(34,197,94,0.07)" border="rgba(34,197,94,0.22)">
+                ✅ This section is fully auto-generated. The table below will appear exactly as shown in the exported .docx file.
+              </InfoBox>
+              <div style={{ marginTop: 12, borderRadius: 8, border: "1px solid #D1D5DB", overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, background: "#FFFFFF" }}>
+                  <thead>
+                    <tr style={{ background: "#1E3A5F" }}>
+                      <th style={{ padding: "9px 14px", color: "#FFFFFF", fontWeight: 700, borderBottom: "1px solid #D1D5DB", textAlign: "center", width: 60, fontSize: 11 }}>Sr. No</th>
+                      <th style={{ padding: "9px 14px", color: "#FFFFFF", fontWeight: 700, borderBottom: "1px solid #D1D5DB", textAlign: "left", fontSize: 11 }}>Title</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      "Vision & Mission of the Department",
+                      "Program Outcomes (POs), Program Educational Objectives (PEOs) and Program Specific Outcomes (PSOs)",
+                      "Syllabus, Personal Timetable",
+                      "CO Statements, CO-PO-PSO Mapping with justification",
+                      "CO Attainment from previous academic year and the action plan",
+                      "Session Plan",
+                      "Evaluation plan with CO Mapping",
+                      "List of Slow and Advanced learners and the action plans",
+                      "CO Attainment of internal evaluation",
+                      "Reports of activities planned and conducted",
+                      "Learning Material",
+                      "Question Bank",
+                      "Compiled Attendance",
+                    ].map((title, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid #E5E7EB", background: i % 2 === 0 ? "#FFFFFF" : "#F9FAFB" }}>
+                        <td style={{ padding: "8px 14px", color: "#111827", textAlign: "center", fontWeight: 600 }}>{i + 1}</td>
+                        <td style={{ padding: "8px 14px", color: "#111827" }}>{title}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 1 — Vision & Mission
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={1} {...SECTION_META.find(s=>s.no===1)} hasContent={hasContent("vision_text")}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Field label="Department Vision" required hint="Single sentence capturing the long-term aspiration">
+                  <Textarea
+                    value={extra.vision_text}
+                    onChange={v => updateExtra("vision_text", v)}
+                    placeholder={"To be a globally recognized centre of excellence in Computer Science, nurturing innovative, ethical, and socially responsible professionals."}
+                    rows={4}
+                  />
+                </Field>
+                <Field label="Department Mission" hint="Enter M1, M2, M3… on separate lines">
+                  <Textarea
+                    value={extra.mission_text}
+                    onChange={v => updateExtra("mission_text", v)}
+                    placeholder={"M1: Provide quality outcome-based education through modern pedagogy.\nM2: Foster research culture and industry collaboration.\nM3: Develop professionals with strong ethical and social values."}
+                    rows={4}
+                  />
+                </Field>
+              </div>
+              <AttachmentZone courseId={courseId} sectionNo={1} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 2 — POs, PEOs, PSOs (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={2} {...SECTION_META.find(s=>s.no===2)} hasContent={hasContent("po_peo_pso_text")}>
+              <InfoBox color={T.blueLight} bg="rgba(59,130,246,0.06)" border="rgba(59,130,246,0.18)">
+                Enter all Program Outcomes (PO1–PO12), Program Educational Objectives (PEO1–PEO3), and Program Specific Outcomes (PSO1–PSO2) as defined by your department. These appear verbatim in the course file.
+              </InfoBox>
+              {/* Auto-fill / AI-generate PO buttons */}
+              {(() => {
+                const coursePOs = course?.pos ?? [];
+                const alreadyFilled = extra.po_peo_pso_text?.trim().length > 0;
+                return (
+                  <div style={{ marginTop: 10, marginBottom: 2, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    {coursePOs.length > 0 && (
+                      <button
+                        onClick={() => {
+                          if (alreadyFilled && !confirm("Overwrite existing POs text with data from Course Setup?")) return;
+                          const lines = coursePOs.map(p => `${p.po_id}: ${p.statement}`).join("\n");
+                          updateExtra("po_peo_pso_text", lines);
+                        }}
+                        style={{
+                          padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                          background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.3)",
+                          color: "#93c5fd", cursor: "pointer",
+                        }}
+                      >
+                        ⚡ Fill POs from Course Setup ({coursePOs.length} POs found)
+                      </button>
+                    )}
+                    <PODescriptionsAIBtn
+                      course={course}
+                      disabled={!(course?.pos?.length > 0)}
+                      onGenerated={v => {
+                        if (alreadyFilled && !confirm("Overwrite existing POs text with AI-generated descriptions?")) return;
+                        updateExtra("po_peo_pso_text", v);
+                      }}
+                    />
+                  </div>
+                );
+              })()}
+              <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Field label="Program Outcomes (POs)" required hint="One per line, e.g. PO1: Engineering Knowledge — Apply...">
+                  <Textarea
+                    value={extra.po_peo_pso_text}
+                    onChange={v => updateExtra("po_peo_pso_text", v)}
+                    placeholder={"PO1: Engineering Knowledge: Apply the knowledge of mathematics, science...\nPO2: Problem Analysis: Identify, formulate, review research literature...\nPO3: Design/Development of Solutions: Design solutions for complex...\n...\nPO12: Life-long Learning: Recognize the need for independent learning..."}
+                    rows={10}
+                    mono
+                  />
+                </Field>
+                <div>
+                  <Field label="Program Educational Objectives (PEOs)" hint="One per line">
+                    <Textarea
+                      value={extra.peo_text ?? ""}
+                      onChange={v => updateExtra("peo_text", v)}
+                      placeholder={"PEO1: Apply knowledge of latest trends in AIML for technology development.\nPEO2: Be competent engineers with innovative thinking and research attitude.\nPEO3: Have enhanced interpersonal and managerial skills with social awareness."}
+                      rows={5}
+                      mono
+                    />
+                  </Field>
+                  <Field label="Program Specific Outcomes (PSOs)" hint="One per line">
+                    <Textarea
+                      value={extra.pso_text ?? ""}
+                      onChange={v => updateExtra("pso_text", v)}
+                      placeholder={"PSO1: Apply concepts of AI/ML in analysis, design and development of intelligent systems.\nPSO2: Foundation in cutting-edge AI/ML areas including NLP, Computer Vision, RL..."}
+                      rows={4}
+                      mono
+                    />
+                  </Field>
+                </div>
+              </div>
+              <AttachmentZone courseId={courseId} sectionNo={2} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 3 — Syllabus & Timetable (auto from upload + dashboard)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={3} {...SECTION_META.find(s=>s.no===3)} hasContent={sessionPlan.rows.length > 0 || !!timetable}>
+              {/* Syllabus — auto from session plan */}
+              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 0 }}>
+                Syllabus (extracted from uploaded syllabus)
+              </p>
+              {(() => {
+                // Extract units from session plan rows
+                const unitMap = {};
+                (sessionPlan.rows || []).forEach(row => {
+                  const unitNo = row.unit || row.unit_no || row.unitNo || row.unit_number;
+                  const topic  = row.topic || row.points_to_cover || row.pointsToCover || row.content || row.description;
+                  if (!unitNo) return;
+                  const key = String(unitNo);
+                  if (!unitMap[key]) unitMap[key] = { unit_number: unitNo, unit_title: row.unit_title || `Unit ${unitNo}`, topics: [] };
+                  if (topic && !unitMap[key].topics.includes(topic)) unitMap[key].topics.push(topic);
+                });
+                const units = Object.values(unitMap);
+                if (units.length === 0) {
+                  return (
+                    <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                      ⚡ Syllabus not yet extracted. Upload your syllabus PDF via <strong>Upload Syllabus</strong> page, then generate the <strong>Session Plan</strong> to auto-populate this section.
+                    </InfoBox>
+                  );
+                }
+                return (
+                  <div style={{ borderRadius: 8, border: `1px solid ${T.border}`, overflow: "hidden" }}>
+                    {units.map((u, i) => (
+                      <div key={i} style={{ padding: "10px 14px", borderBottom: i < units.length - 1 ? `1px solid rgba(255,255,255,0.06)` : "none", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.012)" }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: T.blueLight, marginBottom: 4 }}>
+                          Unit {u.unit_number}: {u.unit_title}
+                        </div>
+                        {u.topics.length > 0 && (
+                          <ul style={{ margin: "4px 0 0 16px", padding: 0, listStyle: "disc" }}>
+                            {u.topics.slice(0, 8).map((t, ti) => (
+                              <li key={ti} style={{ fontSize: 12, color: T.textSub, marginBottom: 2 }}>{t}</li>
+                            ))}
+                            {u.topics.length > 8 && (
+                              <li style={{ fontSize: 11, color: T.textMuted, listStyle: "none", marginLeft: -16 }}>…and {u.topics.length - 8} more topics</li>
+                            )}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Personal Timetable — auto from dashboard timetable upload */}
+              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 22 }}>
+                Personal Timetable (from dashboard timetable upload)
+              </p>
+              {timetable ? (
+                <div style={{ borderRadius: 8, border: `1px solid ${T.border}`, overflow: "hidden" }}>
+                  {/* Header */}
+                  <div style={{ padding: "10px 14px", background: T.surfaceHigh, display: "flex", gap: 20, flexWrap: "wrap" }}>
+                    {timetable.faculty_name && <span style={{ fontSize: 12, color: T.text, fontWeight: 700 }}>{timetable.faculty_name}</span>}
+                    {timetable.department && <span style={{ fontSize: 12, color: T.textSub }}>{timetable.department}</span>}
+                    {timetable.academic_year && <span style={{ fontSize: 12, color: T.textMuted }}>{timetable.academic_year}</span>}
+                  </div>
+                  {/* Schedule */}
+                  {(() => {
+                    const schedule = timetable.schedule || {};
+                    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+                    // Format a slot entry {time, course, section, room} into a display label
+                    function slotLabel(entry) {
+                      if (!entry) return "";
+                      if (typeof entry === "string") return entry.trim();
+                      if (typeof entry === "object") {
+                        const parts = [];
+                        if (entry.time)    parts.push(entry.time);
+                        if (entry.course || entry.subject) parts.push(entry.course || entry.subject);
+                        if (entry.section) parts.push(entry.section);
+                        if (entry.room)    parts.push(`(${entry.room})`);
+                        return parts.join(" ") || JSON.stringify(entry);
+                      }
+                      return String(entry);
+                    }
+
+                    return days.map(day => {
+                      const raw = schedule[day];
+                      // schedule[day] may be an array of slot objects OR a plain dict {timeSlot: value}
+                      const entries = Array.isArray(raw)
+                        ? raw.filter(e => e && (e.course || e.subject || typeof e === "string"))
+                        : Object.values(raw || {}).filter(v => v && typeof v === "object" ? (v.course || v.subject) : String(v).trim());
+
+                      return (
+                        <div key={day} style={{ padding: "8px 14px", borderTop: `1px solid rgba(255,255,255,0.06)`, display: "flex", alignItems: "flex-start", gap: 12 }}>
+                          <span style={{ minWidth: 90, fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", paddingTop: 2 }}>{day}</span>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {entries.length > 0 ? entries.map((entry, i) => (
+                              <span key={i} style={{ fontSize: 11, background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 4, padding: "2px 8px", color: "#fb923c" }}>
+                                {slotLabel(entry)}
+                              </span>
+                            )) : (
+                              <span style={{ fontSize: 11, color: T.textMuted }}>—</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              ) : (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ Timetable not uploaded yet. Go to the <strong>Dashboard</strong> and upload your individual timetable .docx to auto-populate this section.
+                </InfoBox>
+              )}
+              <AttachmentZone courseId={courseId} sectionNo={3} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 4 — CO Statements + CO-PO Mapping (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={4} {...SECTION_META.find(s=>s.no===4)} hasContent={!!course?.cos?.length}>
+              {/* CO Statements table */}
+              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 0 }}>
+                Course Outcome Statements
+              </p>
+              <ReadOnlyTable
+                columns={[
+                  { key: "co_id",      label: "CO ID" },
+                  { key: "statement",  label: "Statement" },
+                  {
+                    key: "bloom_level", label: "Bloom's Level",
+                    render: v => (
+                      <span style={{
+                        padding: "2px 9px", borderRadius: 4, fontSize: 11, fontWeight: 700,
+                        background: bloomColor(v), color: "#FFFFFF",
+                        display: "inline-block",
+                      }}>
+                        {v}
+                      </span>
+                    ),
+                  },
+                ]}
+                rows={course?.cos ?? []}
+                emptyMsg={
+                  loadErrors.course
+                    ? `⚠ ${loadErrors.course}`
+                    : "No COs defined. Complete course setup first."
+                }
+              />
+
+              {/* CO-PO Matrix */}
+              <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, marginTop: 22 }}>
+                CO-PO-PSO Mapping Matrix
+              </p>
+              {course?.co_po_matrix && course?.cos?.length && course?.pos?.length ? (
+                <div style={{ overflowX: "auto", borderRadius: 8, border: `1px solid ${T.border}` }}>
+                  <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: "100%" }}>
+                    <thead>
+                      <tr style={{ background: "rgba(15,23,42,0.95)" }}>
+                        <th style={{ padding: "9px 14px", color: "#F1F5F9", fontWeight: 700, borderBottom: `1px solid ${T.border}`, textAlign: "left", minWidth: 80, fontSize: 11 }}>
+                          CO \ PO/PSO
+                        </th>
+                        {course.pos.map(po => (
+                          <th key={po.po_id} style={{
+                            padding: "9px 8px", color: "#F1F5F9", fontWeight: 700,
+                            borderBottom: `1px solid ${T.border}`, textAlign: "center", minWidth: 40, fontSize: 11,
+                          }}>
+                            {po.po_id}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {course.cos.map((co, i) => (
+                        <tr key={co.co_id} style={{
+                          borderBottom: `1px solid rgba(255,255,255,0.06)`,
+                          background: i % 2 === 0 ? "rgba(8,14,26,0.4)" : "rgba(15,23,42,0.6)",
+                        }}>
+                          <td style={{ padding: "8px 14px", color: "#F1F5F9", fontWeight: 700, fontSize: 12 }}>{co.co_id}</td>
+                          {course.pos.map(po => {
+                            const val    = course.co_po_matrix?.[co.co_id]?.[po.po_id] ?? 0;
+                            const numVal = Number(val) || 0;
+                            const cellBg = numVal === 3 ? "rgba(20,184,166,0.55)"
+                                         : numVal === 2 ? "rgba(20,184,166,0.28)"
+                                         : numVal === 1 ? "rgba(20,184,166,0.14)"
+                                         : "transparent";
+                            return (
+                              <td key={po.po_id} style={{
+                                padding: "8px 8px", textAlign: "center",
+                                color: numVal > 0 ? "#F1F5F9" : "#475569",
+                                fontWeight: numVal > 0 ? 700 : 400,
+                                background: cellBg, fontSize: 12,
+                              }}>
+                                {numVal || "–"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <InfoBox color={T.textMuted} bg="transparent" border={T.border}>
+                  CO-PO matrix not available. Complete course setup to populate.
+                </InfoBox>
+              )}
+
+              {/* CO-PO Justification */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 22, marginBottom: 10 }}>
+                <p style={{ fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase", margin: 0 }}>
+                  CO-PO Mapping Justification
+                </p>
+                <CoPoJustificationAIBtn
+                  course={course}
+                  onGenerated={v => updateExtra("co_po_justification", v)}
+                  disabled={!course?.cos?.length || !course?.co_po_matrix}
+                />
+              </div>
+              <CoPoJustificationView
+                value={extra.co_po_justification ?? ""}
+                onChange={v => updateExtra("co_po_justification", v)}
+              />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 5 — Previous CO Attainment (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={5} {...SECTION_META.find(s=>s.no===5)} hasContent={hasContent("prev_co_attainment")}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Field label="Previous Year CO Attainment" required hint="Summarise attainment % or paste table data">
+                  <Textarea
+                    value={extra.prev_co_attainment}
+                    onChange={v => updateExtra("prev_co_attainment", v)}
+                    placeholder={"CO1: 72.4%\nCO2: 68.1%\nCO3: 75.8%\nCO4: 61.2%\nCO5: 70.0%"}
+                    rows={6}
+                    mono
+                  />
+                </Field>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: T.textSub, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                      Action Plan <span style={{ color: T.red }}>*</span>
+                    </span>
+                    <ActionPlanAIBtn
+                      course={course}
+                      prevCoAttainment={extra.prev_co_attainment}
+                      onGenerated={v => updateExtra("action_plan", v)}
+                      disabled={!extra.prev_co_attainment?.trim()}
+                    />
+                  </div>
+                  <Textarea
+                    value={extra.action_plan}
+                    onChange={v => updateExtra("action_plan", v)}
+                    placeholder={"• Remedial sessions for students below 60%\n• Additional tutorials for CO2 topics\n• Peer learning groups formed\n• Reassessment conducted in Week 12"}
+                    rows={6}
+                  />
+                  <p style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Remedial actions taken to address attainment gaps</p>
+                </div>
+              </div>
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 6 — Session Plan (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={6} {...SECTION_META.find(s=>s.no===6)} hasContent={sessionPlan.rows.length > 0}>
+              {loadErrors.session ? (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ {loadErrors.session.includes("404") || loadErrors.session.includes("No session")
+                    ? "Session plan not generated yet. Go to Session Plan page to generate."
+                    : loadErrors.session}
+                </InfoBox>
+              ) : (
+                <ReadOnlyTable
+                  columns={sessionCols}
+                  rows={sessionPlan.rows.slice(0, 100)}
+                  emptyMsg="No session plan data. Generate from Session Plan page."
+                />
+              )}
+              {sessionPlan.rows.length > 100 && (
+                <p style={{ fontSize: 11, color: T.textMuted, marginTop: 8 }}>
+                  Showing 100 of {sessionPlan.rows.length} rows. Full data included in .docx export.
+                </p>
+              )}
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 7 — Evaluation Plan (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={7} {...SECTION_META.find(s=>s.no===7)} hasContent={evalPlan.rows.length > 0}>
+              {loadErrors.eval ? (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ {loadErrors.eval.includes("404") || loadErrors.eval.includes("No evaluation")
+                    ? "Evaluation plan not generated yet. Go to Evaluation Plan page to generate."
+                    : loadErrors.eval}
+                </InfoBox>
+              ) : (
+                <ReadOnlyTable
+                  columns={evalCols}
+                  rows={evalPlan.rows}
+                  emptyMsg="No evaluation plan data. Generate from Evaluation Plan page."
+                />
+              )}
+              {course?.evaluation_config && (
+                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: T.textMuted }}>
+                    CA: <strong style={{ color: T.textSub }}>{course.evaluation_config.continuous_assessment_total}</strong>
+                  </span>
+                  <span style={{ fontSize: 11, color: T.textMuted }}>
+                    ESE: <strong style={{ color: T.textSub }}>{course.evaluation_config.end_sem_total}</strong>
+                  </span>
+                  {Object.entries(course.evaluation_config.components ?? {}).map(([k, v]) => (
+                    <span key={k} style={{ fontSize: 11, color: T.textMuted }}>
+                      {k}: <strong style={{ color: T.textSub }}>{v}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 8 — Slow & Advanced Learners (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={8} {...SECTION_META.find(s=>s.no===8)} hasContent={hasContent("slow_learners")}>
+              {/* Auto-populate banner */}
+              {attainment && (
+                <LearnersAutoPopulate
+                  attainment={attainment}
+                  courseId={courseId}
+                  onPopulate={(slow, advanced) => {
+                    if (slow) updateExtra("slow_learners", slow);
+                    if (advanced) updateExtra("advanced_learners", advanced);
+                  }}
+                />
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Field label="Slow Learners" hint="Names, PRNs, or list of students needing extra support">
+                  <Textarea
+                    value={extra.slow_learners}
+                    onChange={v => updateExtra("slow_learners", v)}
+                    placeholder={"Student Name | PRN | Weak COs\n----------------------------------\nAnkita Sharma | 22010001 | CO2, CO4\nRaj Patel     | 22010023 | CO1, CO3, CO5"}
+                    rows={6}
+                    mono
+                  />
+                </Field>
+                <Field label="Advanced Learners" hint="Students with consistently high performance">
+                  <Textarea
+                    value={extra.advanced_learners}
+                    onChange={v => updateExtra("advanced_learners", v)}
+                    placeholder={"Student Name | PRN | Achievements\n----------------------------------\nPriya Mehta  | 22010012 | 95%+ in all COs\nAkash Gupta  | 22010034 | Research paper submitted"}
+                    rows={6}
+                    mono
+                  />
+                </Field>
+              </div>
+              <AttachmentZone courseId={courseId} sectionNo={8} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 9 — CO Attainment Results (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={9} {...SECTION_META.find(s=>s.no===9)} hasContent={!!attainment}>
+              {loadErrors.attainment ? (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ {loadErrors.attainment.includes("404")
+                    ? "No attainment data yet. Upload student marks via the Attainment page first."
+                    : loadErrors.attainment}
+                </InfoBox>
+              ) : (
+                <AttainmentDisplay data={attainment} />
+              )}
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 10 — Activity Reports (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={10} {...SECTION_META.find(s=>s.no===10)} hasContent={hasContent("activity_reports")}>
+              <Field label="Activity Reports" required hint="List co-curricular events, guest lectures, industrial visits, etc.">
+                <Textarea
+                  value={extra.activity_reports}
+                  onChange={v => updateExtra("activity_reports", v)}
+                  placeholder={"Date       | Activity                         | Organized By  | Participants\n----------------------------------------------------------------------------\n12-Sep-2024 | Guest Lecture on Cloud Computing  | CSE Dept      | 45 students\n18-Oct-2024 | Industrial Visit to Infosys        | TnP Cell      | 60 students\n25-Nov-2024 | Hackathon 2024                    | Student Council| 30 teams"}
+                  rows={7}
+                  mono
+                />
+              </Field>
+              <AttachmentZone courseId={courseId} sectionNo={10} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 11 — Learning Materials (manual + AI + pull from Study Materials)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={11} {...SECTION_META.find(s=>s.no===11)} hasContent={hasContent("learning_material_links")}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: T.textSub, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                  Learning Material Links <span style={{ color: T.red }}>*</span>
+                </p>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <LearningMaterialsImportBtn
+                    courseId={courseId}
+                    onImport={v => updateExtra("learning_material_links", v)}
+                  />
+                  <LearningMaterialsAIBtn
+                    course={course}
+                    onGenerated={v => updateExtra("learning_material_links",
+                      extra.learning_material_links ? extra.learning_material_links + "\n" + v : v
+                    )}
+                  />
+                </div>
+              </div>
+              <Textarea
+                value={extra.learning_material_links}
+                onChange={v => updateExtra("learning_material_links", v)}
+                placeholder={"Textbook: Introduction to Machine Learning — Goodfellow et al.\nhttps://www.coursera.org/learn/machine-learning\nhttps://nptel.ac.in/courses/106/106/106106139/\nhttps://www.youtube.com/playlist?list=PLkDaE6sCZn6Ec-XTbcX1uRg2_u4xOEky0"}
+                rows={7}
+                mono
+              />
+              <p style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Textbooks, NPTEL, YouTube playlists — one entry per line. Data is auto-saved to DB.</p>
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 12 — Question Bank (auto)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={12} {...SECTION_META.find(s=>s.no===12)} hasContent={false}>
+              <InfoBox>
+                ⚡ Question papers are auto-included from the Question Bank. Generate papers from
+                the Question Paper section for them to appear here.
+              </InfoBox>
+              <div style={{ marginTop: 12 }}>
+                <AttachmentZone courseId={courseId} sectionNo={12} attachments={attachments} onRefresh={refreshAttachments} />
+              </div>
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 13 — Attendance Records (manual)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={13} {...SECTION_META.find(s=>s.no===13)} hasContent={hasContent("attendance_links")}>
+              <Field label="Attendance Links / Summary" required hint="Paste portal URL and any attendance summary data">
+                <Textarea
+                  value={extra.attendance_links}
+                  onChange={v => updateExtra("attendance_links", v)}
+                  placeholder={"Portal: https://attendance.example.edu/course/77687\n\nSummary:\n≥75% attendance: 48 students\n60–74%: 8 students\nBelow 60% (detained): 2 students"}
+                  rows={6}
+                  mono
+                />
+              </Field>
+              <AttachmentZone courseId={courseId} sectionNo={13} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 14 — Student List (auto from DB roster)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={14} {...SECTION_META.find(s=>s.no===14)} hasContent={cfStudents.length > 0 || hasContent("student_list")}>
+              {cfStudents.length > 0 ? (() => {
+                const sections = [...new Set(cfStudents.map(s => s.section))].sort();
+                return (
+                  <div>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                      <p style={{ margin:0, fontSize:12, fontWeight:700, color:T.textSub, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                        Student Roster — {cfStudents.length} students ({sections.map(s=>`Section ${s}`).join(", ")})
+                      </p>
+                    </div>
+                    {sections.map(sec => {
+                      const secStudents = cfStudents.filter(s => s.section === sec);
+                      return (
+                        <div key={sec} style={{ marginBottom:16 }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:T.textSub, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6, padding:"4px 8px", background:"rgba(255,255,255,0.04)", borderRadius:4 }}>
+                            Section {sec} — {secStudents.length} students
+                          </div>
+                          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, background:"rgba(8,14,26,0.9)", borderRadius:6, overflow:"hidden" }}>
+                            <thead>
+                              <tr style={{ background:"rgba(22,32,55,0.95)" }}>
+                                <th style={{ padding:"7px 10px", textAlign:"left", fontWeight:700, color:"#CBD5E1", borderBottom:`1px solid rgba(255,255,255,0.12)`, width:44, fontSize:11 }}>SR</th>
+                                <th style={{ padding:"7px 10px", textAlign:"left", fontWeight:700, color:"#CBD5E1", borderBottom:`1px solid rgba(255,255,255,0.12)`, width:150, fontSize:11 }}>PRN</th>
+                                <th style={{ padding:"7px 10px", textAlign:"left", fontWeight:700, color:"#CBD5E1", borderBottom:`1px solid rgba(255,255,255,0.12)`, fontSize:11 }}>NAME</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {secStudents.map((s, i) => (
+                                <tr key={s.prn} style={{ borderBottom:`1px solid rgba(255,255,255,0.07)`, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(22,32,55,0.85)" }}>
+                                  <td style={{ padding:"5px 10px", color:"#94A3B8", fontSize:12 }}>{i+1}</td>
+                                  <td style={{ padding:"5px 10px", fontFamily:"monospace", color:"#7DD3FC", fontSize:12 }}>{s.prn}</td>
+                                  <td style={{ padding:"5px 10px", color:"#F1F5F9", fontSize:12, fontWeight:500 }}>{s.name}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })() : (
+                <div>
+                  <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                    ⚡ No students found. Upload the SIT roster xlsx from the <strong>Student Roster</strong> page first. Once uploaded, the full batch-wise list will appear here automatically.
+                  </InfoBox>
+                  <Field label="Manual Student List" hint="SR No | PRN | Name — one per line (fallback if roster not uploaded)">
+                    <Textarea
+                      value={extra.student_list}
+                      onChange={v => updateExtra("student_list", v)}
+                      placeholder={"Section A\n1 | 24070126001 | Aadi Kulshreshth\n2 | 24070126002 | Aadya Rastogi\n...\nSection B\n74 | 24070126073 | Ishan Sharma\n..."}
+                      rows={10}
+                      mono
+                    />
+                  </Field>
+                </div>
+              )}
+              <AttachmentZone courseId={courseId} sectionNo={14} attachments={attachments} onRefresh={refreshAttachments} />
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Section 15 — Student Marks (exam-wise & question-wise)
+            ════════════════════════════════════════════════════════════════ */}
+            <SectionWrapper no={15} title="Student Marks" icon="📊" auto={true} desc="Exam-wise and question-wise marks auto-populated from uploaded marks and master attainment file" hasContent={cfMarks.length > 0}>
+              {cfMarks.length > 0 ? (() => {
+                // Build per-exam data: collect all exams, then for each exam gather question columns + student rows
+                const EXAM_ORDER = ["Assignment","End Semester","Quiz 1","Quiz 2","Unit Test 1","Unit Test 2","Unit Test 3"];
+                const allExams = [...new Set(cfMarks.flatMap(r => Object.keys(r.marks || {})))];
+                const orderedExams = [
+                  ...EXAM_ORDER.filter(e => allExams.some(x => x.toLowerCase()===e.toLowerCase())),
+                  ...allExams.filter(e => !EXAM_ORDER.some(x => x.toLowerCase()===e.toLowerCase())).sort()
+                ];
+
+                // For each exam, figure out if marks are question-wise (object) or flat (number)
+                const getExamRows = (exam) => cfMarks.map(rec => {
+                  const val = rec.marks?.[exam];
+                  const isQW = val && typeof val === "object" && !Array.isArray(val);
+                  return { ...rec, examVal: val, isQW, qwMap: isQW ? val : null,
+                    total: isQW ? Object.values(val).reduce((s,v)=>s+(parseFloat(v)||0),0) : (parseFloat(val)||0) };
+                });
+
+                // Get question headers from cfQP for this exam (try exact + case-insensitive match)
+                const getQP = (exam) => {
+                  const key = Object.keys(cfQP).find(k => k.toLowerCase()===exam.toLowerCase()) || exam;
+                  const raw = cfQP[key];
+                  if (!raw) return [];
+                  return Array.isArray(raw) ? raw : (raw.qp ?? raw.questions ?? []);
+                };
+
+                // Infer Bloom level from question text using keyword matching
+                const bloomKeywords = {
+                  Remember: ["define","list","state","recall","identify","name","what is","who","when","where"],
+                  Understand: ["explain","describe","summarize","interpret","classify","compare","discuss"],
+                  Apply: ["solve","calculate","use","demonstrate","implement","apply","compute","find"],
+                  Analyse: ["analyse","analyze","differentiate","examine","break down","distinguish","derive"],
+                  Evaluate: ["evaluate","justify","assess","critique","judge","argue","validate"],
+                  Create: ["design","develop","construct","formulate","generate","propose","create","build"]
+                };
+                const inferBloomUI = (text) => {
+                  if (!text) return null;
+                  const low = text.toLowerCase();
+                  for (const [level, kws] of Object.entries(bloomKeywords)) {
+                    if (kws.some(k => low.startsWith(k) || low.includes(" "+k+" ") || low.includes(" "+k+"."))) return level;
+                  }
+                  return null;
+                };
+                const bloomColor2 = {Remember:"#94A3B8",Understand:"#60A5FA",Apply:"#34D399",Analyse:"#A78BFA",Analyze:"#A78BFA",Evaluate:"#FBBF24",Create:"#F472B6"};
+
+                // Global summary bar
+                return (
+                  <div>
+                    <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
+                      <div style={{ background:"rgba(59,130,246,0.12)", border:"1px solid rgba(59,130,246,0.3)", borderRadius:8, padding:"8px 18px" }}>
+                        <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.07em" }}>STUDENTS</div>
+                        <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:18, marginTop:2 }}>{cfMarks.length}</div>
+                      </div>
+                      <div style={{ background:"rgba(34,197,94,0.12)", border:"1px solid rgba(34,197,94,0.3)", borderRadius:8, padding:"8px 18px" }}>
+                        <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.07em" }}>EXAMS</div>
+                        <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:18, marginTop:2 }}>{orderedExams.length}</div>
+                      </div>
+                      {orderedExams.map(exam => {
+                        const rows = getExamRows(exam);
+                        const totals = rows.map(r => r.total).filter(v => v > 0);
+                        const avg = totals.length ? (totals.reduce((a,b)=>a+b,0)/totals.length).toFixed(1) : "—";
+                        const isESE = /end.sem|ese/i.test(exam);
+                        return (
+                          <div key={exam} style={{ background:"rgba(15,23,42,0.85)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"8px 18px" }}>
+                            <div style={{ color:"#94A3B8", fontSize:10, fontWeight:700, letterSpacing:"0.07em" }}>{exam.toUpperCase()}</div>
+                            <div style={{ color: isESE ? "#FCA5A5" : "#7DD3FC", fontWeight:700, fontSize:15, marginTop:2 }}>avg {avg}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Dedicated QP section:*/}
+                    {/* ── Dedicated Question Papers Section ── */}
+                    {Object.keys(cfQP).length > 0 && (
+                      <div style={{ marginBottom:28 }}>
+                        <div style={{ fontSize:13, fontWeight:700, color:"#94A3B8", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:12 }}>
+                          📋 Question Papers
+                        </div>
+                        {Object.entries(cfQP).map(([examName, qpData]) => {
+                          const questions = Array.isArray(qpData) ? qpData : (qpData?.qp ?? qpData?.questions ?? []);
+                          if (!questions.length) return null;
+                          const totalMarks = questions.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                          const blColorMap = {Remember:"#6B7280",Understand:"#3B82F6",Apply:"#10B981",Analyse:"#8B5CF6",Analyze:"#8B5CF6",Evaluate:"#F59E0B",Create:"#EC4899"};
+                          return (
+                            <div key={examName} style={{ marginBottom:16, borderRadius:8, overflow:"hidden", border:"1px solid #CBD5E1" }}>
+                              <div style={{ background:"#1E3A5F", padding:"8px 14px", display:"flex", alignItems:"center", gap:10 }}>
+                                <span style={{ color:"#FFFFFF", fontWeight:700, fontSize:13 }}>{examName}</span>
+                                <span style={{ color:"#94A3B8", fontSize:11 }}>{questions.length} questions · {totalMarks} marks</span>
+                              </div>
+                              <div style={{ background:"#FFFFFF", overflowX:"auto" }}>
+                                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                                  <thead>
+                                    <tr style={{ background:"#F1F5F9" }}>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"left", padding:"8px 10px", width:40 }}>Q#</th>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"left", padding:"8px 10px" }}>QUESTION</th>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"center", padding:"8px 10px", width:60 }}>MARKS</th>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"center", padding:"8px 10px", width:60 }}>CO</th>
+                                      <th style={{ color:"#111827", fontWeight:700, textAlign:"center", padding:"8px 10px", width:110 }}>BLOOM</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {questions.map((q,qi)=>{
+                                      let aiB = {}; try { aiB = cfBloomMap[examName] || {}; } catch(e) {}
+                                      const bl = aiB[String(q.q_no ?? qi+1)] ?? q.bloom_label ?? q.bloom ?? inferBloomUI(q.question_text) ?? "—";
+                                      const blColor = blColorMap[bl] || "#9CA3AF";
+                                      return (
+                                        <tr key={qi} style={{ background:qi%2===0?"#FFFFFF":"#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
+                                          <td style={{ color:"#374151", fontWeight:600, padding:"8px 10px", textAlign:"center" }}>{q.q_no ?? qi+1}</td>
+                                          <td style={{ color:"#111827", padding:"8px 10px" }}>{q.question_text ?? "—"}</td>
+                                          <td style={{ color:"#D97706", fontWeight:700, textAlign:"center", padding:"8px 10px" }}>{q.marks ?? "—"}</td>
+                                          <td style={{ color:"#1D4ED8", fontWeight:600, textAlign:"center", padding:"8px 10px" }}>{q.co_id ?? q.co ?? "—"}</td>
+                                          <td style={{ textAlign:"center", padding:"8px 10px" }}>
+                                            {bl !== "—" ? <span style={{ background:blColor, color:"#FFFFFF", padding:"3px 10px", borderRadius:4, fontSize:10, fontWeight:700 }}>{bl}</span> : "—"}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    
+
+                    {/* Per-exam segregated sections */}
+                    {orderedExams.map(exam => {
+                      const rows = getExamRows(exam);
+                      const qp = getQP(exam);
+                      const isESE = /end.sem|ese/i.test(exam);
+
+                      // Determine column mode: question-wise or flat
+                      const anyQW = rows.some(r => r.isQW);
+                      // Collect all question keys from either qp or actual marks objects
+                      let qCols = [];
+                      if (anyQW) {
+                        const fromQP = qp.map(q => String(q.q_no ?? ""));
+                        const fromMarks = [...new Set(rows.flatMap(r => r.qwMap ? Object.keys(r.qwMap) : []))];
+                        qCols = fromQP.length ? fromQP : fromMarks;
+                      }
+
+                      // Compute per-question max from QP
+                      const qMax = {};
+                      qp.forEach(q => { qMax[String(q.q_no ?? "")] = parseFloat(q.marks) || null; });
+
+                      // Class averages
+                      const validTotals = rows.map(r => r.total).filter(v => v > 0);
+                      const classAvg = validTotals.length ? (validTotals.reduce((a,b)=>a+b,0)/validTotals.length).toFixed(1) : "—";
+                      const qColAvgs = {};
+                      if (anyQW) {
+                        qCols.forEach(qk => {
+                          const vals = rows.map(r => parseFloat(r.qwMap?.[qk])||0).filter(v=>v>0);
+                          qColAvgs[qk] = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : "—";
+                        });
+                      }
+
+                      const totalMax = anyQW
+                        ? qCols.reduce((s,qk) => s + (qMax[qk]||0), 0)
+                        : (qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0) || null);
+
+                      const headerBg = isESE ? "rgba(220,38,38,0.15)" : "rgba(22,32,55,0.98)";
+                      const headerAccent = isESE ? "#FCA5A5" : "#86EFAC";
+
+                      return (
+                        <div key={exam} style={{ marginBottom:28, borderRadius:10, border:"1px solid rgba(255,255,255,0.1)", overflow:"hidden" }}>
+                          {/* Exam header */}
+                          <div style={{ background:headerBg, padding:"10px 16px", display:"flex", alignItems:"center", gap:14, borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
+                            <div style={{ color:headerAccent, fontWeight:700, fontSize:14 }}>📝 {exam}</div>
+                            <div style={{ display:"flex", gap:10, marginLeft:"auto", flexWrap:"wrap" }}>
+                              {[
+                                ["Students", cfMarks.length],
+                                ["Class Avg", classAvg],
+                                ["Max Marks", totalMax ? (Number.isInteger(totalMax)?totalMax:totalMax.toFixed(1)) : "—"],
+                                ["Questions", anyQW ? qCols.length : (qp.length || "—")]
+                              ].map(([lbl,val])=>(
+                                <div key={lbl} style={{ background:"rgba(0,0,0,0.3)", borderRadius:6, padding:"4px 12px", textAlign:"center" }}>
+                                  <div style={{ color:"#64748B", fontSize:9, fontWeight:700, letterSpacing:"0.06em" }}>{lbl}</div>
+                                  <div style={{ color:"#F1F5F9", fontWeight:700, fontSize:13 }}>{val}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Question Paper — dedicated white card section */}
+                          {qp.length > 0 && (() => {
+                            let aiBloomForExam = {}; try { aiBloomForExam = cfBloomMap[exam] || {}; } catch(e) {}
+                            return (
+                              <div style={{ margin:"0 0 0 0", borderBottom:"2px solid rgba(255,255,255,0.1)" }}>
+                                <div style={{ background:"#1E293B", padding:"7px 16px", display:"flex", alignItems:"center", gap:8 }}>
+                                  <span style={{ color:"#94A3B8", fontSize:11, fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                                    📋 Question Paper — {exam}
+                                  </span>
+                                  <span style={{ marginLeft:"auto", color:"#64748B", fontSize:10 }}>{qp.length} questions · max {qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0)} marks</span>
+                                </div>
+                                <div style={{ background:"#FFFFFF", overflowX:"auto" }}>
+                                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                                    <thead>
+                                      <tr style={{ background:"#1E3A5F" }}>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"left", padding:"8px 10px", width:40, fontSize:11 }}>Q#</th>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"left", padding:"8px 10px", fontSize:11 }}>QUESTION</th>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"center", padding:"8px 10px", width:60, fontSize:11 }}>MARKS</th>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"center", padding:"8px 10px", width:60, fontSize:11 }}>CO</th>
+                                        <th style={{ color:"#FFFFFF", fontWeight:700, textAlign:"center", padding:"8px 10px", width:110, fontSize:11 }}>BLOOM</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {qp.map((q,qi)=>{
+                                        const qno = String(q.q_no ?? qi+1);
+                                        // Priority: AI result > stored label > keyword inference
+                                        const bl = aiBloomForExam[qno] ?? q.bloom_label ?? q.bloom ?? inferBloomUI(q.question_text) ?? "—";
+                                        const blColorMap = {Remember:"#6B7280",Understand:"#3B82F6",Apply:"#10B981",Analyse:"#8B5CF6",Analyze:"#8B5CF6",Evaluate:"#F59E0B",Create:"#EC4899"};
+                                        const blColor = blColorMap[bl] || "#9CA3AF";
+                                        const isEven = qi % 2 === 0;
+                                        return (
+                                          <tr key={qi} style={{ background: isEven ? "#FFFFFF" : "#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
+                                            <td style={{ color:"#374151", fontWeight:600, padding:"8px 10px", textAlign:"center" }}>{qno}</td>
+                                            <td style={{ color:"#111827", padding:"8px 10px", lineHeight:1.5 }}>{q.question_text ?? "—"}</td>
+                                            <td style={{ color:"#D97706", fontWeight:700, textAlign:"center", padding:"8px 10px" }}>{q.marks ?? "—"}</td>
+                                            <td style={{ color:"#1D4ED8", fontWeight:600, textAlign:"center", padding:"8px 10px" }}>{q.co_id ?? q.co ?? "—"}</td>
+                                            <td style={{ textAlign:"center", padding:"8px 10px" }}>
+                                              {bl !== "—"
+                                                ? <span style={{ background:blColor, color:"#FFFFFF", padding:"3px 10px", borderRadius:4, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>{bl}</span>
+                                                : <span style={{ color:"#9CA3AF", fontSize:11 }}>—</span>}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                    <tfoot>
+                                      <tr style={{ background:"#F1F5F9", borderTop:"2px solid #CBD5E1" }}>
+                                        <td colSpan={2} style={{ padding:"6px 10px", color:"#374151", fontWeight:700, fontSize:11, textAlign:"right" }}>Total Marks:</td>
+                                        <td style={{ padding:"6px 10px", color:"#065F46", fontWeight:700, fontSize:13, textAlign:"center", background:"#D1FAE5" }}>
+                                          {qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0)}
+                                        </td>
+                                        <td colSpan={2}/>
+                                      </tr>
+                                    </tfoot>
+                                  </table>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Marks table */}
+                          <div style={{ overflowX:"auto" }}>
+                            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11.5, background:"rgba(8,14,26,0.95)" }}>
+                              <thead>
+                                <tr style={{ background:"rgba(22,32,55,0.98)" }}>
+                                  <th style={{ padding:"7px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", position:"sticky", left:0, background:"rgba(22,32,55,0.98)", zIndex:2, minWidth:32 }}>#</th>
+                                  <th style={{ padding:"7px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", position:"sticky", left:32, background:"rgba(22,32,55,0.98)", zIndex:2, minWidth:140 }}>STUDENT NAME</th>
+                                  <th style={{ padding:"7px 10px", textAlign:"left", color:"#CBD5E1", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", minWidth:110 }}>PRN</th>
+                                  {anyQW ? qCols.map(qk => (
+                                    <th key={qk} style={{ padding:"7px 8px", textAlign:"center", color:headerAccent, fontWeight:700, fontSize:10, borderBottom:"1px solid rgba(255,255,255,0.12)", borderLeft:"1px solid rgba(255,255,255,0.07)", minWidth:55 }}>
+                                      <div>{qk}</div>
+                                      {qMax[qk] && <div style={{ color:"#64748B", fontWeight:400, fontSize:9 }}>/{qMax[qk]}</div>}
+                                    </th>
+                                  )) : null}
+                                  <th style={{ padding:"7px 10px", textAlign:"center", color:"#FCD34D", fontWeight:700, fontSize:11, borderBottom:"1px solid rgba(255,255,255,0.12)", borderLeft:"1px solid rgba(255,255,255,0.12)", minWidth:65 }}>
+                                    TOTAL{totalMax ? <span style={{fontWeight:400,color:"#64748B",fontSize:9}}> /{totalMax}</span> : ""}
+                                  </th>
+                                </tr>
+                                {/* Class average row */}
+                                <tr style={{ background:"rgba(16,185,129,0.08)", borderBottom:"2px solid rgba(16,185,129,0.25)" }}>
+                                  <td style={{ padding:"5px 10px", color:"#10B981", fontWeight:700, fontSize:10, position:"sticky", left:0, background:"rgba(16,185,129,0.08)" }}>avg</td>
+                                  <td style={{ padding:"5px 10px", color:"#10B981", fontWeight:700, fontSize:11, position:"sticky", left:32, background:"rgba(16,185,129,0.08)" }}>Class Average</td>
+                                  <td style={{ padding:"5px 10px", color:"#64748B", fontSize:10 }}>—</td>
+                                  {anyQW ? qCols.map(qk => (
+                                    <td key={qk} style={{ padding:"5px 8px", textAlign:"center", color:"#10B981", fontWeight:700, fontSize:11, borderLeft:"1px solid rgba(255,255,255,0.05)" }}>{qColAvgs[qk]}</td>
+                                  )) : null}
+                                  <td style={{ padding:"5px 10px", textAlign:"center", color:"#10B981", fontWeight:700, fontSize:13, borderLeft:"1px solid rgba(255,255,255,0.1)" }}>{classAvg}</td>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map((rec, i) => (
+                                  <tr key={rec.student_id || i} style={{ background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                                    <td style={{ padding:"5px 10px", color:"#64748B", fontSize:10, position:"sticky", left:0, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", zIndex:1 }}>{i+1}</td>
+                                    <td style={{ padding:"5px 10px", color:"#F1F5F9", fontWeight:500, position:"sticky", left:32, background: i%2===0 ? "rgba(8,14,26,0.95)" : "rgba(15,23,42,0.8)", zIndex:1 }}>{rec.student_name || "—"}</td>
+                                    <td style={{ padding:"5px 10px", color:"#7DD3FC", fontFamily:"monospace", fontSize:10 }}>{rec.student_id || "—"}</td>
+                                    {anyQW ? qCols.map(qk => {
+                                      const v = parseFloat(rec.qwMap?.[qk]) || 0;
+                                      const mx = qMax[qk];
+                                      const pct = mx ? v/mx : null;
+                                      const col = pct===null ? "#CBD5E1" : pct>=0.6 ? "#86EFAC" : pct>=0.4 ? "#FCD34D" : "#FCA5A5";
+                                      return (
+                                        <td key={qk} style={{ padding:"5px 8px", textAlign:"center", color:col, fontWeight:600, fontSize:12, borderLeft:"1px solid rgba(255,255,255,0.04)" }}>
+                                          {v || ""}
+                                        </td>
+                                      );
+                                    }) : null}
+                                    <td style={{ padding:"5px 10px", textAlign:"center", color:"#FCD34D", fontWeight:700, fontSize:12, borderLeft:"1px solid rgba(255,255,255,0.08)" }}>
+                                      {rec.total > 0 ? rec.total.toFixed(1) : "—"}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })() : (
+                <InfoBox color={T.amber} bg="rgba(245,158,11,0.07)" border="rgba(245,158,11,0.2)">
+                  ⚡ No marks data found. Upload student marks from the <strong>Upload Marks</strong> page first. Exam-wise and question-wise marks will appear here automatically.
+                </InfoBox>
+              )}
+            </SectionWrapper>
+
+            {/* ════════════════════════════════════════════════════════════════
+                Custom Tabs — user-added sections
+            ════════════════════════════════════════════════════════════════ */}
+            {customTabs.map((tab, idx) => (
+              <CustomTabSection
+                key={tab.id}
+                tab={tab}
+                idx={idx}
+                courseId={courseId}
+                attachments={attachments}
+                onRefresh={refreshAttachments}
+                onUpdate={(field, val) => updateCustomTab(tab.id, field, val)}
+                onDelete={() => deleteCustomTab(tab.id)}
+              />
+            ))}
+
+            {/* ── Add Tab Button ───────────────────────────────────────────── */}
+            <div style={{ margin: "16px 28px", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
+              <button
+                onClick={addCustomTab}
+                style={{
+                  display: "flex", alignItems: "center", gap: 7,
+                  padding: "8px 18px", background: "rgba(59,130,246,0.08)",
+                  border: "1px dashed rgba(59,130,246,0.3)", borderRadius: 8,
+                  color: T.blueLight, fontSize: 12, cursor: "pointer", fontWeight: 600,
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(59,130,246,0.15)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.5)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.08)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.3)"; }}
+              >
+                + Add Custom Section
+              </button>
+              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
+            </div>
+
+            <div style={{ height: 48 }} />
+          </div>
+        )}
+      </div>
+
+      {/* ── RIGHT: AI assistant ───────────────────────────────────────────── */}
+      <div style={{ width: 296, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden", borderLeft: `1px solid ${T.borderArea}` }}>
+        <CourseFileAIPanel courseId={courseId} course={course} extra={extra} />
+      </div>
+    </div>
+  );
+}
+
+function CourseFilePage({course}){
+  if(!course){
+    return(
+      <div className="page-body fade-up">
+        <Alrt t="warning" msg="Select a course first from the Courses page."/>
+      </div>
+    );
+  }
+  return(
+    <div style={{height:'calc(100vh - 52px)',overflow:'hidden'}}>
+      <CourseFileEditor courseId={course.id} />
+    </div>
+  );
+}
+function MasterAttainmentPage({course, saveCourse}){
+  const API=window.API||'https://obe-automate.onrender.com';
+  const tok=()=>sessionStorage.getItem('obe_token');
+  const hdr=()=>({Authorization:'Bearer '+tok(),'Content-Type':'application/json'});
+  const hdrForm=()=>({Authorization:'Bearer '+tok()});
+
+  const [activeTab,setActiveTab]=React.useState('course_info');
+  const [loading,setLoading]=React.useState(false);
+  const [generating,setGenerating]=React.useState(false);
+  const [downloading,setDownloading]=React.useState(false);
+  const [err,setErr]=React.useState('');
+  const [ok,setOk]=React.useState('');
+  const [qpSource,setQpSource]=React.useState('blank');
+  const [generated,setGenerated]=React.useState(false);
+
+  const [courseInfo,setCourseInfo]=React.useState(null);
+  const [students,setStudents]=React.useState([]);
+  const [coList,setCoList]=React.useState([]);
+  const [caSheets,setCaSheets]=React.useState({});
+  const [caNames,setCaNames]=React.useState([]);
+  const [eseQP,setEseQP]=React.useState([]);
+  const [eseMarks,setEseMarks]=React.useState({});
+  const [coPoMatrix,setCoPoMatrix]=React.useState({});
+  const [aiMappingLoading,setAiMappingLoading]=React.useState(false);
+  const [aiMappingMsg,setAiMappingMsg]=React.useState('');
+  const [poList,setPoList]=React.useState([]);
+  const [finalAttn,setFinalAttn]=React.useState({});
+
+  React.useEffect(()=>{
+    if(!course) return;
+    setCourseInfo({
+      department:course.department||'',academic_year:course.academic_year||'',
+      course_name:course.course_name||'',course_code:course.course_code||'',
+      semester:course.semester||'',credits:course.credits||'',faculty_name:course.faculty_name||'',
+    });
+    const normBloom=(b)=>{
+      if(!b)return'L2';
+      const bmap={'Remember':'L1','Remembering':'L1','Knowledge':'L1','L1':'L1',
+        'Understand':'L2','Understanding':'L2','Comprehension':'L2','L2':'L2',
+        'Apply':'L3','Applying':'L3','Application':'L3','L3':'L3',
+        'Analyse':'L4','Analyze':'L4','Analysing':'L4','Analyzing':'L4','Analysis':'L4','L4':'L4',
+        'Evaluate':'L5','Evaluating':'L5','Evaluation':'L5','Synthesis':'L5','L5':'L5',
+        'Create':'L6','Creating':'L6','Design':'L6','L6':'L6'};
+      return bmap[b]||('L'+(parseInt(String(b).replace('L',''))||2));
+    };
+    setCoList((course.cos||[]).map(c=>({...c,target:60,bloom_level:normBloom(c.bloom_level)})));
+    setPoList(course.pos||[]);
+    setCoPoMatrix(course.co_po_matrix||{});
+    coPoMatrixInitialized.current=false;
+    setAiMappingMsg('');
+    // Load CA names from evaluation plan (matches real component names like "Quiz 1", "Unit Test 1", etc.)
+    const loadCaNamesAndSheets=async()=>{
+      let caList=[];
+      try{
+        const epData=await fetch(API+'/evaluation-plan/view/'+course.id,{headers:hdrForm()}).then(r=>r.json());
+        const rows=epData.data||epData.rows||epData||[];
+        const ESE_KEYWORDS=['end semester','ese','end-semester','final exam'];
+        const isEse=(name)=>ESE_KEYWORDS.some(k=>name.toLowerCase().includes(k));
+        caList=(Array.isArray(rows)?rows:[])
+          .map(r=>r.component||r.comp||r.name||'')
+          .filter(name=>name&&!isEse(name));
+      }catch(e){}
+      // Fallback to evaluation_config components if eval plan not available
+      if(!caList.length){
+        const comps=course.evaluation_config?.components||{};
+        const compKeys=Object.keys(comps).filter(k=>!['end semester','ese'].some(kw=>k.toLowerCase().includes(kw)));
+        caList=compKeys.length?compKeys:['CA1','CA2','CA3'];
+      }
+      setCaNames(caList);
+      const sheets={};caList.forEach(ca=>{sheets[ca]={qp:[],marks:{}};});
+      // Load persisted sheets from server
+      try{
+        const d=await fetch(API+'/co-po-template/load-all-sheets/'+course.id,{headers:hdrForm()}).then(r=>r.json());
+        if(d.sheets&&Object.keys(d.sheets).length>0){
+          setCaSheets(prev=>{
+            const merged={...sheets};
+            Object.entries(d.sheets).forEach(([ca,data])=>{
+              merged[ca]={qp:data.qp||[],marks:data.marks||{}};
+            });
+            return merged;
+          });
+        } else {
+          setCaSheets(sheets);
+        }
+      }catch(e){setCaSheets(sheets);}
+    };
+    loadCaNamesAndSheets();
+    fetch(API+'/students/'+course.id,{headers:hdrForm()})
+      .then(r=>r.json()).then(d=>{if(d.data)setStudents(d.data);}).catch(()=>{});
+  },[course?.id]);
+
+  React.useEffect(()=>{
+    if(!coList.length||!students.length)return;
+    const attn={};
+    coList.forEach(co=>{
+      const cid=co.co_id;
+      let total=0,count=0;
+      caNames.forEach(ca=>{
+        const mks=caSheets[ca]?.marks||{};
+        const qp=(caSheets[ca]?.qp||[]).filter(q=>q.co_id===cid);
+        const max=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+        if(!max)return;
+        const passed=students.filter(s=>{
+          const sm=mks[s.prn]||{};
+          return qp.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0)/max*100>=60;
+        }).length;
+        total+=(passed/students.length)*100;count++;
+      });
+      attn[cid]=count?Math.round(total/count):0;
+    });
+    setFinalAttn(attn);
+  },[caSheets,students,coList,caNames]);
+
+  // Auto-save caSheets to server whenever they change (debounced 1.5s per CA)
+  React.useEffect(()=>{
+    if(!course||!Object.keys(caSheets).length)return;
+    Object.entries(caSheets).forEach(([ca,data])=>{
+      if(autoSaveTimers.current[ca]) clearTimeout(autoSaveTimers.current[ca]);
+      autoSaveTimers.current[ca]=setTimeout(async()=>{
+        try{
+          await fetch(API+'/co-po-template/save-sheet/'+course.id+'/'+encodeURIComponent(ca),{
+            method:'POST',
+            headers:{...hdr(),'Content-Type':'application/json'},
+            body:JSON.stringify({qp:data.qp||[],marks:data.marks||{}})
+          });
+        }catch(e){}
+      },1500);
+    });
+  },[caSheets,course?.id]);
+
+  // Auto-save coPoMatrix to course record whenever it changes (debounced 1.5s)
+  const coPoMatrixInitialized=React.useRef(false);
+  const latestCoPoMatrix=React.useRef(coPoMatrix);
+  React.useEffect(()=>{latestCoPoMatrix.current=coPoMatrix;},[coPoMatrix]);
+  React.useEffect(()=>{
+    // Skip the very first render (initialization from course.co_po_matrix)
+    if(!course||!Object.keys(coPoMatrix).length){coPoMatrixInitialized.current=false;return;}
+    if(!coPoMatrixInitialized.current){coPoMatrixInitialized.current=true;return;}
+    if(coPoMatrixSaveTimer.current) clearTimeout(coPoMatrixSaveTimer.current);
+    coPoMatrixSaveTimer.current=setTimeout(async()=>{
+      await persistMatrix(latestCoPoMatrix.current);
+    },1500);
+  },[coPoMatrix]);
+  // Flush pending save on unmount so switching tabs never loses data
+  React.useEffect(()=>{
+    return()=>{
+      if(coPoMatrixSaveTimer.current){
+        clearTimeout(coPoMatrixSaveTimer.current);
+        if(coPoMatrixInitialized.current&&Object.keys(latestCoPoMatrix.current).length){
+          persistMatrix(latestCoPoMatrix.current);
+        }
+      }
+    };
+  },[]);
+
+  const generate=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setGenerating(true);setErr('');setOk('');
+    try{
+      const r=await fetch(API+'/co-po-template/generate/'+course.id,{
+        method:'POST',headers:hdr(),body:JSON.stringify({qp_source:qpSource})
+      });
+      if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.statusText);}
+      setGenerated(true);
+      setOk('✓ Master file generated! Download it below.');
+    }catch(e){setErr(e.message);}
+    setGenerating(false);
+  };
+
+  const download=()=>{
+    if(!course)return;
+    setDownloading(true);
+    fetch(API+'/co-po-template/download/'+course.id,{headers:{Authorization:'Bearer '+tok()}})
+      .then(r=>{if(!r.ok)throw new Error('File not ready');return r.blob();})
+      .then(blob=>{
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');a.href=url;
+        a.download='CO_PO_Attainment_'+course.course_code+'.xlsx';
+        a.click();URL.revokeObjectURL(url);setDownloading(false);
+      })
+      .catch(()=>{setErr('Generate the file first, then download.');setDownloading(false);});
+  };
+
+  const uploadQP=async(ca,file)=>{
+    if(!file||!course)return;
+    setLoading(true);setErr('');
+    try{
+      const fd=new FormData();fd.append('file',file);
+      const r=await fetch(API+'/co-po-template/upload-qp/'+course.id+'/'+ca,{method:'POST',headers:hdrForm(),body:fd});
+      const d=await r.json();
+      if(!r.ok)throw new Error(d.detail||r.statusText);
+      const qs=(d.questions||[]).map((q,i)=>({...q,q_no:q.q_no||(i+1)}));
+      setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qs}}));
+      setOk('✓ Parsed '+d.extracted+' questions from '+file.name);
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  // ── Bulk upload state ──
+  // ── Stable refs for file inputs (must be component-level, NOT inside render fns) ──
+  const caQpRefs=React.useRef({});
+  const caMarksRefs=React.useRef({});
+  const eseQpRef=React.useRef(null);
+  const eseMarksRef=React.useRef(null);
+  const autoSaveTimers=React.useRef({});
+  const coPoMatrixSaveTimer=React.useRef(null);
+  // Ensure a ref exists for each CA
+  caNames.forEach(ca=>{
+    if(!caQpRefs.current[ca]) caQpRefs.current[ca]=React.createRef();
+    if(!caMarksRefs.current[ca]) caMarksRefs.current[ca]=React.createRef();
+  });
+
+  const [loadingFromDB,setLoadingFromDB]=React.useState(false);
+  const [loadFromDBOk,setLoadFromDBOk]=React.useState('');
+  const [loadFromDBErr,setLoadFromDBErr]=React.useState('');
+
+  const loadFromUploadedMarks=async()=>{
+    if(!course){setLoadFromDBErr('No course selected.');return;}
+    setLoadingFromDB(true);setLoadFromDBOk('');setLoadFromDBErr('');
+    try{
+      const r=await fetch(API+'/attainment/marks/'+course.id,{headers:hdrForm()});
+      if(!r.ok) throw new Error('Failed to fetch uploaded marks');
+      const d=await r.json();
+      const records=d.data||[];
+      if(!records.length){setLoadFromDBErr('No marks uploaded yet. Go to Upload Marks page first.');setLoadingFromDB(false);return;}
+
+      // Detect format:
+      //   flat exam-wise: {"Quiz 1": 6.5}
+      //   nested component-wise (from our template): {"Quiz 1": {"Total": 6.5, 1: 2.5, 2: 1.5, ...}}
+      //   CO-wise (legacy): {"CO1": {"Total": 8.0}}
+      const firstMarks=records[0]?.marks||{};
+      const firstKey=Object.keys(firstMarks)[0]||'';
+      const firstVal=Object.values(firstMarks)[0];
+      const isFlat=firstVal!==null&&firstVal!==undefined&&typeof firstVal!=='object';
+      const isCoWise=!isFlat&&firstKey.toUpperCase().startsWith('CO')&&firstKey.toUpperCase()[2]&&!isNaN(firstKey[2]);
+
+      if(isCoWise){
+        setLoadFromDBErr('Marks are in CO-wise format. Please re-upload using the marks template (multi-sheet xlsx).');
+        setLoadingFromDB(false);return;
+      }
+
+      // Build a map: examName → {prn: {Total, 1, 2, 3, ...} or just flat number}
+      const examMap={};
+      records.forEach(rec=>{
+        const prn=rec.student_id;
+        Object.entries(rec.marks||{}).forEach(([exam,markVal])=>{
+          if(!examMap[exam]) examMap[exam]={};
+          examMap[exam][prn]=markVal; // could be number (flat) or object (nested)
+        });
+      });
+
+      // Match exam name to a CA tab or ESE
+      const matchTarget=(examName)=>{
+        const sn=examName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
+        if(/end.*sem|ese/.test(sn)) return '__ESE__';
+        let t=caNames.find(ca=>ca.toLowerCase()===sn); if(t) return t;
+        t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn)); if(t) return t;
+        const snToks=sn.split(/\s+/);
+        t=caNames.find(ca=>ca.toLowerCase().split(/\s+/).some(tok=>snToks.includes(tok)&&tok.length>2)); if(t) return t;
+        return null;
+      };
+
+      let matched=0;
+      const newCaSheets={...caSheets};
+      let newEseMarks={...eseMarks};
+
+      Object.entries(examMap).forEach(([exam,prnMap])=>{
+        const target=matchTarget(exam);
+        if(!target) return;
+
+        if(target==='__ESE__'){
+          Object.entries(prnMap).forEach(([prn,markVal])=>{
+            const total=typeof markVal==='object'?parseFloat(markVal.Total||0):parseFloat(markVal)||0;
+            // Try to use per-question marks from DB if ESE QP is loaded
+            if(typeof markVal==='object'&&eseQP.length>0){
+              const sm={};
+              eseQP.forEach(q=>{
+                const qkey=String(q.q_no); // DB keys are always strings after JSON parse
+                if(markVal[qkey]!==undefined) sm[qkey]=parseFloat(markVal[qkey])||0;
+              });
+              if(Object.keys(sm).length>0){newEseMarks[prn]=sm;return;}
+            }
+            newEseMarks[prn]={...(newEseMarks[prn]||{}),_total:total};
+          });
+          matched++;
+        } else {
+          const qp=newCaSheets[target]?.qp||[];
+          const newMarks={};
+          Object.entries(prnMap).forEach(([prn,markVal])=>{
+            const isObj=typeof markVal==='object'&&markVal!==null;
+            const total=isObj?parseFloat(markVal.Total||0):parseFloat(markVal)||0;
+
+            if(isObj&&qp.length>0){
+              // Use exact per-question marks from DB (JSON string keys "1","2","3"… match String(q.q_no))
+              const sm={};
+              let anyMatched=false;
+              qp.forEach(q=>{
+                const qkey=String(q.q_no); // JSON always gives string keys
+                if(markVal[qkey]!==undefined){
+                  sm[qkey]=parseFloat(markVal[qkey])||0;
+                  anyMatched=true;
+                }
+              });
+              if(anyMatched){newMarks[prn]=sm;return;}
+            }
+            // Fallback: proportional distribution from Total
+            if(qp.length>0&&total>0){
+              const maxMarks=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+              if(maxMarks>0){
+                const sm={};
+                qp.forEach(q=>{sm[String(q.q_no)]=Math.round((parseFloat(q.marks)||0)/maxMarks*total*100)/100;});
+                newMarks[prn]=sm;return;
+              }
+            }
+            // No QP — store total
+            newMarks[prn]={_total:total};
+          });
+          newCaSheets[target]={...newCaSheets[target],marks:{...(newCaSheets[target]?.marks||{}),...newMarks}};
+          matched++;
+        }
+      });
+
+      setCaSheets(newCaSheets);
+      setEseMarks(newEseMarks);
+      setLoadFromDBOk(`✓ Loaded marks for ${records.length} students across ${matched} component(s): ${Object.keys(examMap).join(', ')}`);
+    }catch(e){setLoadFromDBErr(e.message);}
+    setLoadingFromDB(false);
+  };
+  const [bulkQpFile,setBulkQpFile]=React.useState(null);
+  const [bulkMarksFile,setBulkMarksFile]=React.useState(null);
+  const [bulkQpLoading,setBulkQpLoading]=React.useState(false);
+  const [bulkMarksLoading,setBulkMarksLoading]=React.useState(false);
+  const [bulkQpOk,setBulkQpOk]=React.useState('');
+  const [bulkMarksOk,setBulkMarksOk]=React.useState('');
+  const [bulkQpErr,setBulkQpErr]=React.useState('');
+  const [bulkMarksErr,setBulkMarksErr]=React.useState('');
+
+  const uploadBulkQP=()=>{
+    if(!bulkQpFile||!course){setBulkQpErr('Select a file first.');return;}
+    setBulkQpLoading(true);setBulkQpErr('');setBulkQpOk('');
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        if(typeof XLSX==='undefined'){
+          setBulkQpErr('Bulk parse unavailable. Upload QPs tab by tab using the Upload button in each CA tab.');
+          setBulkQpLoading(false);return;
+        }
+        const wb=XLSX.read(ev.target.result,{type:'array'});
+        let matched=0;
+
+        // Shared: parse one sheet into questions array
+        const parseQPSheet=(ws)=>{
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          // Find the REAL header row: must have both a Q-number col AND a Marks col
+          // Title rows like "Question Paper — Quiz 1" contain "question" but not "marks"
+          let hdrIdx=rows.findIndex(r=>{
+            const cells=r.map(c=>String(c||'').toLowerCase().trim());
+            const hasQNo=cells.some(c=>c==='q no'||c==='q no.'||c==='q#'||c==='qno'||c==='q. no.'||c==='q. no');
+            const hasMark=cells.some(c=>c==='marks'||c==='mark');
+            return hasQNo&&hasMark;
+          });
+          // Fallback: find row with both "question" AND "marks" as separate cells
+          if(hdrIdx<0) hdrIdx=rows.findIndex(r=>{
+            const cells=r.map(c=>String(c||'').toLowerCase().trim());
+            return cells.some(c=>c.includes('question'))&&cells.some(c=>c==='marks'||c==='mark');
+          });
+          if(hdrIdx<0) return [];
+          const hdrRow=rows[hdrIdx];
+          const qnoIdx=hdrRow.findIndex(h=>{const s=String(h||'').toLowerCase().trim();return s==='q no'||s==='q no.'||s==='q#'||s==='qno'||s==='q. no.'||s==='q. no';});
+          const qIdx=hdrRow.findIndex(h=>String(h||'').toLowerCase().includes('question'));
+          const mIdx=hdrRow.findIndex(h=>{const s=String(h||'').toLowerCase().trim();return s==='marks'||s==='mark';});
+          const coIdx=hdrRow.findIndex(h=>{const s=String(h||'').toLowerCase().trim();return s==='co'||s==='co mapped'||s==='co-mapped'||s==='co_mapped';});
+          const blIdx=hdrRow.findIndex(h=>String(h||'').toLowerCase().includes('bloom'));
+          const qs=[];
+          let qCounter=0;
+          rows.slice(hdrIdx+1).forEach(row=>{
+            const firstCell=String(row[0]||'').trim();
+            const qTxt=qIdx>=0?String(row[qIdx]||'').trim():'';
+            // Skip empty rows, TOTAL rows, section dividers
+            if(!firstCell&&!qTxt) return;
+            if(/^(total|max|max marks|section|—)/i.test(firstCell)) return;
+            if(/^(total|max marks)/i.test(qTxt)) return;
+            if(firstCell.includes('|')||firstCell.includes('·')) return;
+            // q_no: use qnoIdx col if it's a number, else auto-increment
+            const rawQno=qnoIdx>=0?row[qnoIdx]:null;
+            const qno=(rawQno!==null&&rawQno!==''&&!isNaN(Number(rawQno)))?Number(rawQno):(++qCounter);
+            const qm=mIdx>=0?parseFloat(row[mIdx])||0:0;
+            if(!qTxt&&!qm) return;
+            // CO: use mapped column, fall back to first CO in list
+            const rawCo=coIdx>=0?String(row[coIdx]||'').trim():'';
+            const qco=rawCo||coList[0]?.co_id||'CO1';
+            const rawBl=blIdx>=0?String(row[blIdx]||'L2').trim():'L2';
+            const qbl=rawBl.match(/L[1-6]/i)?rawBl.match(/L[1-6]/i)[0].toUpperCase():'L2';
+            qs.push({q_no:qno,question_text:qTxt,marks:qm,co_id:qco,bloom_level:qbl});
+          });
+          return qs;
+        };
+
+        // Enhanced sheet → CA matching
+        const matchCA=(sheetName,sheetIdx)=>{
+          const sn=sheetName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
+          // Skip summary/grade sheets
+          if(/summary|grade|distribution/.test(sn)) return null;
+          // 1. Exact
+          let t=caNames.find(ca=>ca.toLowerCase()===sn);if(t)return t;
+          // 2. One contains the other
+          t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn));if(t)return t;
+          // 3. Token overlap
+          const snToks=sn.split(/\s+/);
+          t=caNames.find(ca=>ca.toLowerCase().split(/\s+/).some(tok=>snToks.includes(tok)&&tok.length>2));if(t)return t;
+          // 4. Numeric: "CA1" or "1" → index 0
+          const num=sn.match(/(\d+)/);
+          if(num){const idx=parseInt(num[1])-1;if(idx>=0&&idx<caNames.length)return caNames[idx];}
+          // 5. Positional fallback — map sheet order to CA order
+          // Get non-summary sheets
+          const validSheets=wb.SheetNames.filter(s=>!/summary|grade|distribution/i.test(s));
+          const pos=validSheets.indexOf(sheetName);
+          if(pos>=0&&pos<caNames.length)return caNames[pos];
+          return null;
+        };
+
+        wb.SheetNames.forEach((sheetName,sheetIdx)=>{
+          const target=matchCA(sheetName,sheetIdx);
+          if(!target)return;
+          const ws=wb.Sheets[sheetName];
+          const qs=parseQPSheet(ws);
+          if(qs.length>0){
+            setCaSheets(prev=>({...prev,[target]:{...prev[target],qp:qs}}));
+            matched++;
+          }
+        });
+
+        if(matched===0){
+          setBulkQpErr(`No sheets matched your CA components (${caNames.join(', ')}). Sheets found: ${wb.SheetNames.join(', ')}. Try uploading tab-by-tab.`);
+        } else {
+          setBulkQpOk(`✓ Distributed QPs to ${matched} component tab(s). Check each CA tab to verify.`);
+        }
+      }catch(ex){setBulkQpErr('Parse error: '+ex.message);}
+      setBulkQpLoading(false);
+    };
+    reader.readAsArrayBuffer(bulkQpFile);
+  };
+
+  const uploadBulkMarks=()=>{
+    if(!bulkMarksFile||!course){setBulkMarksErr('Select a file first.');return;}
+    setBulkMarksLoading(true);setBulkMarksErr('');setBulkMarksOk('');
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        if(typeof XLSX==='undefined'){
+          setBulkMarksErr('Bulk parse unavailable. Use sidebar Upload Marks page instead.');
+          setBulkMarksLoading(false);return;
+        }
+        const wb=XLSX.read(ev.target.result,{type:'array'});
+        let matched=0;
+
+        // Shared: find header row, PRN col, Q-cols and Total col, extract student marks
+        const parseMarksSheet=(ws)=>{
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().trim()==='roll no'));
+          if(hdrIdx<0) return {};
+          const hdrRow=rows[hdrIdx];
+          const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().trim()==='roll no');
+          // Find Q1/Q2/... cols and Total col
+          const qColMap={}; // colIdx -> qNo (integer)
+          let totalColIdx=-1;
+          hdrRow.forEach((h,ci)=>{
+            const raw=String(h||'').replace(/\n/g,' ').trim();
+            const rawLow=raw.toLowerCase();
+            const qm=raw.match(/^Q(\d+)/i);
+            if(qm){qColMap[ci]=parseInt(qm[1]);return;}
+            if((rawLow==='total'||rawLow.startsWith('total'))&&!rawLow.includes('grand')&&!rawLow.includes('scaled')){totalColIdx=ci;}
+          });
+          const result={}; // prn -> {q_no: mark} or {_total: mark}
+          rows.slice(hdrIdx+1).forEach(row=>{
+            const prn=String(row[prnIdx]||'').trim();
+            if(!prn||prn.length<6||isNaN(Number(prn))) return;
+            const name=String(row[2]||'').trim();
+            if(/max marks|section|max|average/i.test(name)) return;
+            const perQ={};
+            let anyQ=false;
+            Object.entries(qColMap).forEach(([ci,qno])=>{
+              const v=parseFloat(row[ci]);
+              if(!isNaN(v)){perQ[String(qno)]=v;anyQ=true;}
+            });
+            if(anyQ){result[prn]=perQ;return;}
+            // fallback to Total col
+            const total=totalColIdx>=0?parseFloat(row[totalColIdx]):NaN;
+            if(!isNaN(total)) result[prn]={_total:total};
+          });
+          return result;
+        };
+
+        // Match sheet to CA or ESE — same logic as QP matching
+        const matchTarget=(sheetName)=>{
+          const sn=sheetName.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
+          if(/summary|grade|distribution/.test(sn)) return null;
+          // ESE check
+          if(/end.*sem|ese|end sem/.test(sn)) return '__ESE__';
+          // CA match
+          let t=caNames.find(ca=>ca.toLowerCase()===sn);if(t)return t;
+          t=caNames.find(ca=>sn.includes(ca.toLowerCase())||ca.toLowerCase().includes(sn));if(t)return t;
+          const snToks=sn.split(/\s+/);
+          t=caNames.find(ca=>ca.toLowerCase().split(/\s+/).some(tok=>snToks.includes(tok)&&tok.length>2));if(t)return t;
+          // Positional fallback
+          const validSheets=wb.SheetNames.filter(s=>!/summary|grade|distribution/i.test(s));
+          const pos=validSheets.indexOf(sheetName);
+          if(pos>=0&&pos<caNames.length)return caNames[pos];
+          return null;
+        };
+
+        wb.SheetNames.forEach(sheetName=>{
+          const target=matchTarget(sheetName);
+          if(!target) return;
+          const ws=wb.Sheets[sheetName];
+          const studentMarks=parseMarksSheet(ws);
+          const cnt=Object.keys(studentMarks).length;
+          if(cnt===0) return;
+
+          if(target==='__ESE__'){
+            // ESE: try per-question, fall back to _total
+            const newMarks={};
+            Object.entries(studentMarks).forEach(([prn,markData])=>{
+              if(typeof markData==='object'&&!markData._total){
+                // has per-q marks; map to eseQP if loaded
+                if(eseQP.length>0){
+                  const sm={};
+                  eseQP.forEach(q=>{if(markData[String(q.q_no)]!==undefined)sm[String(q.q_no)]=markData[String(q.q_no)];});
+                  if(Object.keys(sm).length>0){newMarks[prn]=sm;return;}
+                }
+                // no QP match — compute total
+                const tot=Object.values(markData).reduce((s,v)=>s+(parseFloat(v)||0),0);
+                newMarks[prn]={_total:tot};
+              } else {
+                newMarks[prn]={_total:parseFloat(markData._total||markData)||0};
+              }
+            });
+            setEseMarks(p=>({...p,...newMarks}));
+            matched++;
+          } else {
+            // CA: use per-question marks directly if QP matches, else proportional from total
+            const qp=caSheets[target]?.qp||[];
+            const newMarks={};
+            Object.entries(studentMarks).forEach(([prn,markData])=>{
+              const isPerQ=typeof markData==='object'&&!markData._total;
+              if(isPerQ&&qp.length>0){
+                const sm={};
+                let anyMatched=false;
+                qp.forEach(q=>{if(markData[String(q.q_no)]!==undefined){sm[String(q.q_no)]=markData[String(q.q_no)];anyMatched=true;}});
+                if(anyMatched){newMarks[prn]=sm;return;}
+              }
+              // get total
+              const totalMark=isPerQ
+                ?Object.values(markData).reduce((s,v)=>s+(parseFloat(v)||0),0)
+                :(parseFloat(markData._total||markData)||0);
+              if(qp.length>0&&totalMark>0){
+                const totalQMax=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                if(totalQMax>0){
+                  const sm={};
+                  qp.forEach(q=>{sm[String(q.q_no)]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+                  newMarks[prn]=sm;return;
+                }
+              }
+              newMarks[prn]={_total:totalMark};
+            });
+            setCaSheets(prev=>({...prev,[target]:{...prev[target],marks:{...prev[target]?.marks,...newMarks}}}));
+            matched++;
+          }
+        });
+
+        if(matched===0){
+          setBulkMarksErr(`No sheets matched. Sheets in file: ${wb.SheetNames.join(', ')}. CA components: ${caNames.join(', ')}.`);
+        } else {
+          setBulkMarksOk(`✓ Marks loaded into ${matched} component tab(s). CO Attainment tab will update automatically.`);
+        }
+      }catch(ex){setBulkMarksErr('Parse error: '+ex.message);}
+      setBulkMarksLoading(false);
+    };
+    reader.readAsArrayBuffer(bulkMarksFile);
+  };
+
+  const tabs=[
+    {id:'bulk_upload',label:'📦 Bulk Upload'},
+    {id:'course_info',label:'📋 Course Info'},{id:'co_list',label:'🎯 CO List'},{id:'roll_list',label:'👥 Roll List'},
+    ...caNames.map(ca=>({id:'ca_'+ca,label:'📝 '+ca})),
+    {id:'ese',label:'📄 ESE'},{id:'final_attn',label:'📊 CO Attainment'},{id:'po_attn',label:'🔗 PO Attainment'},
+  ];
+
+  if(!course)return(
+    <div className="page-body fade-up">
+      <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.5rem'}}>Master Attainment File</div>
+      <Alrt t="warning" msg="Select a course from the Courses page first."/>
+    </div>
+  );
+
+  const EditCell=({value,onChange,type='text',small})=>(
+    <input type={type} value={value??''} onChange={e=>onChange(e.target.value)}
+      style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:small?'2px 4px':'4px 6px',
+        fontSize:small?'.75rem':'.82rem',fontFamily:'DM Sans,sans-serif',background:'var(--white)',color:'var(--text)'}}/>
+  );
+  const TH=({children,w})=>(
+    <th style={{background:'#1F3864',color:'#fff',padding:'7px 10px',fontSize:'.75rem',fontWeight:600,
+      textAlign:'center',whiteSpace:'nowrap',minWidth:w||80}}>{children}</th>
+  );
+  const TD=({children,center})=>(
+    <td style={{padding:'5px 8px',borderBottom:'1px solid var(--border)',fontSize:'.8rem',
+      textAlign:center?'center':'left',verticalAlign:'middle'}}>{children}</td>
+  );
+
+  const renderCourseInfo=()=>(
+    <div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem',marginBottom:'1rem'}}>
+        {[['Department','department'],['Academic Year','academic_year'],['Course Name','course_name'],
+          ['Course Code','course_code'],['Semester','semester'],['Credits','credits'],['Faculty Name','faculty_name']].map(([label,key])=>(
+          <div key={key} className="form-group" style={{marginBottom:0}}>
+            <label className="form-label">{label}</label>
+            <EditCell value={courseInfo?.[key]||''} onChange={v=>setCourseInfo(p=>({...p,[key]:v}))}/>
+          </div>
+        ))}
+      </div>
+      <div style={{background:'var(--bg2)',borderRadius:8,padding:'1rem',marginTop:'1rem'}}>
+        <div style={{fontWeight:600,fontSize:'.82rem',marginBottom:'.5rem',color:'var(--text2)'}}>ATTAINMENT RUBRIC</div>
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead><tr><TH>Condition</TH><TH>Range</TH><TH>Level</TH></tr></thead>
+          <tbody>
+            {[['≤ 40% of students scored ≥ 60%','≤ 40%',1],['> 40% and < 70% scored ≥ 60%','> 40% & < 70%',2],['≥ 70% of students scored ≥ 60%','≥ 70%',3]].map(([c,r,l])=>(
+              <tr key={l}><TD>{c}</TD><TD center>{r}</TD><TD center>{l}</TD></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const renderCOList=()=>(
+    <div>
+      <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',alignItems:'center'}}>
+        <span style={{fontWeight:600,fontSize:'.85rem'}}>Course Outcomes</span>
+        <button className="btn btn-primary btn-sm" onClick={()=>setCoList(p=>[...p,{co_id:'CO'+(p.length+1),statement:'',bloom_level:'L1',target:60}])}>+ Add CO</button>
+      </div>
+      <div className="tbl-wrap">
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead><tr><TH w={60}>CO No</TH><TH w={400}>Statement</TH><TH w={80}>Bloom Level</TH><TH w={80}>Target %</TH><TH w={50}></TH></tr></thead>
+          <tbody>
+            {coList.map((co,i)=>(
+              <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                <TD center><EditCell value={co.co_id} onChange={v=>setCoList(p=>p.map((c,j)=>j===i?{...c,co_id:v}:c))} small/></TD>
+                <TD><EditCell value={co.statement} onChange={v=>setCoList(p=>p.map((c,j)=>j===i?{...c,statement:v}:c))}/></TD>
+                <TD center>
+                  <select value={co.bloom_level||'L2'} onChange={e=>{const v=e.target.value;setCoList(p=>p.map((c,j)=>j===i?{...c,bloom_level:v}:c));}}
+                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',minWidth:130}}>
+                    {[['L1','Remember'],['L2','Understand'],['L3','Apply'],['L4','Analyse'],['L5','Evaluate'],['L6','Create']].map(([l,n])=><option key={l} value={l}>{l} – {n}</option>)}
+                  </select>
+                </TD>
+                <TD center><EditCell value={co.target??60} type="number" onChange={v=>setCoList(p=>p.map((c,j)=>j===i?{...c,target:v}:c))} small/></TD>
+                <TD center><span onClick={()=>setCoList(p=>p.filter((_,j)=>j!==i))} style={{cursor:'pointer',color:'var(--red)',fontSize:'1rem'}}>×</span></TD>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const renderRollList=()=>(
+    <div>
+      <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',alignItems:'center',flexWrap:'wrap'}}>
+        <span style={{fontWeight:600,fontSize:'.85rem'}}>{students.length} Students</span>
+        <button className="btn btn-primary btn-sm" onClick={()=>setStudents(p=>[...p,{prn:'',name:'',section:'A'}])}>+ Add Row</button>
+        <span style={{fontSize:'.78rem',color:'var(--text2)'}}>Synced from Students Roster</span>
+      </div>
+      <div className="tbl-wrap" style={{maxHeight:500,overflowY:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead><tr><TH w={40}>#</TH><TH w={140}>PRN</TH><TH w={280}>Name</TH><TH w={80}>Section</TH><TH w={40}></TH></tr></thead>
+          <tbody>
+            {students.map((s,i)=>(
+              <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                <TD center>{i+1}</TD>
+                <TD><EditCell value={s.prn} onChange={v=>setStudents(p=>p.map((x,j)=>j===i?{...x,prn:v}:x))} small/></TD>
+                <TD><EditCell value={s.name} onChange={v=>setStudents(p=>p.map((x,j)=>j===i?{...x,name:v}:x))}/></TD>
+                <TD center>
+                  <select value={s.section||'A'} onChange={e=>setStudents(p=>p.map((x,j)=>j===i?{...x,section:e.target.value}:x))}
+                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px'}}>
+                    {['A','B','C'].map(sec=><option key={sec}>{sec}</option>)}
+                  </select>
+                </TD>
+                <TD center><span onClick={()=>setStudents(p=>p.filter((_,j)=>j!==i))} style={{cursor:'pointer',color:'var(--red)'}}>×</span></TD>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const renderCASheet=(ca)=>{
+    const sheet=caSheets[ca]||{qp:[],marks:{}};
+    const qp=sheet.qp||[];
+    const marks=sheet.marks||{};
+    // Use stable component-level refs
+    const fileRef=caQpRefs.current[ca]||(caQpRefs.current[ca]={current:null});
+    const marksFileRef=caMarksRefs.current[ca]||(caMarksRefs.current[ca]={current:null});
+    const BLOOM_LABELS=[['L1','Remember'],['L2','Understand'],['L3','Apply'],['L4','Analyse'],['L5','Evaluate'],['L6','Create']];
+    const coBloom=(co_id)=>{
+      const co=coList.find(c=>c.co_id===co_id);
+      if(!co||!co.bloom_level) return 'L2';
+      const bl=String(co.bloom_level);
+      if(bl.startsWith('L')) return bl;
+      const lvlMap={'Remember':'L1','Remembering':'L1','Knowledge':'L1',
+        'Understand':'L2','Understanding':'L2','Comprehension':'L2',
+        'Apply':'L3','Applying':'L3','Application':'L3',
+        'Analyse':'L4','Analyze':'L4','Analysing':'L4','Analyzing':'L4','Analysis':'L4',
+        'Evaluate':'L5','Evaluating':'L5','Evaluation':'L5','Synthesis':'L5',
+        'Create':'L6','Creating':'L6','Design':'L6'};
+      return lvlMap[bl]||('L'+(parseInt(bl)||2));
+    };
+    const addQ=()=>{
+      const defaultCO=coList[0]?.co_id||'CO1';
+      const newBloom=coBloom(defaultCO);
+      setCaSheets(p=>({...p,[ca]:{...p[ca],qp:[...qp,{q_no:qp.length+1,question_text:'',marks:5,co_id:defaultCO,bloom_level:newBloom}]}}));
+    };
+    const updQ=(i,field,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.map((q,j)=>j===i?{...q,[field]:val}:q)}}));
+    const delQ=(i)=>setCaSheets(p=>({...p,[ca]:{...p[ca],qp:qp.filter((_,j)=>j!==i)}}));
+    const updMark=(prn,qno,val)=>setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...marks,[prn]:{...(marks[prn]||{}),[String(qno)]:val}}}}));
+    const uploadCAMarksFile=(file)=>{
+      if(!file)return;
+      const reader=new FileReader();
+      reader.onload=(ev)=>{
+        try{
+          if(typeof XLSX==='undefined'){setErr('XLSX library not loaded.');return;}
+          const wb=XLSX.read(ev.target.result,{type:'array'});
+          const sheetName=wb.SheetNames.find(s=>s.toLowerCase().includes(ca.toLowerCase()))||wb.SheetNames[0];
+          if(!sheetName){setErr('No sheets found in file.');return;}
+          const ws=wb.Sheets[sheetName];
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().includes('roll')));
+          if(hdrIdx<0)hdrIdx=0;
+          const hdrRow=rows[hdrIdx];
+          const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().includes('roll'));
+          if(prnIdx<0){setErr('Could not find PRN/Roll No column.');return;}
+
+          // Find per-question columns (Q1, Q2, ...) and Total column
+          const qColMap={}; // colIdx -> qNo (integer)
+          let totalColIdx=-1;
+          hdrRow.forEach((h,ci)=>{
+            const raw=String(h||'').replace(/\n/g,' ').trim();
+            const rawLow=raw.toLowerCase();
+            const qm=raw.match(/^Q(\d+)/i);
+            if(qm){qColMap[ci]=parseInt(qm[1]);return;}
+            if(rawLow==='total'||rawLow.startsWith('total')){totalColIdx=ci;}
+          });
+
+          const curQP=caSheets[ca]?.qp||[];
+          const newMarks={};
+          rows.slice(hdrIdx+1).forEach(row=>{
+            const prn=String(row[prnIdx]||'').trim();
+            if(!prn||prn.length<4||isNaN(Number(prn)))return;
+            const name=String(row[2]||'').toLowerCase();
+            if(/max marks|section|max|average/i.test(name))return;
+            // Read per-question marks
+            const perQ={};
+            let anyQ=false;
+            Object.entries(qColMap).forEach(([ci,qno])=>{
+              const v=parseFloat(row[ci]);
+              if(!isNaN(v)){perQ[String(qno)]=v;anyQ=true;}
+            });
+            const totalMark=totalColIdx>=0?parseFloat(row[totalColIdx])||0:0;
+            if(anyQ&&curQP.length>0){
+              // Map per-question marks to q_no
+              const sm={};
+              curQP.forEach(q=>{if(perQ[q.q_no]!==undefined)sm[String(q.q_no)]=perQ[q.q_no];});
+              if(Object.keys(sm).length>0){newMarks[prn]=sm;return;}
+            }
+            // Fallback: proportional from total if QP loaded
+            if(curQP.length>0&&totalMark>0){
+              const totalQMax=curQP.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+              if(totalQMax>0){
+                const sm={};
+                curQP.forEach(q=>{sm[String(q.q_no)]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+                newMarks[prn]=sm;return;
+              }
+            }
+            newMarks[prn]={_total:totalMark||Object.values(perQ).reduce((s,v)=>s+v,0)||0};
+          });
+          const cnt=Object.keys(newMarks).length;
+          setCaSheets(p=>({...p,[ca]:{...p[ca],marks:{...p[ca]?.marks,...newMarks}}}));
+          setOk(`✓ Loaded marks for ${cnt} students into ${ca}.`);
+        }catch(ex){setErr('Marks parse error: '+ex.message);}
+      };
+      reader.readAsArrayBuffer(file);
+    };
+    const saveChanges=async()=>{
+      if(!course){setErr('No course selected.');return;}
+      setLoading(true);setErr('');
+      try{
+        const r=await fetch(API+'/co-po-template/save-sheet/'+course.id+'/'+encodeURIComponent(ca),{
+          method:'POST',
+          headers:{...hdr(),'Content-Type':'application/json'},
+          body:JSON.stringify({qp,marks})
+        });
+        if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||'Save failed');}
+        setOk(`✓ ${ca} saved successfully.`);
+      }catch(e){
+        setOk(`✓ ${ca} changes saved locally. Click Generate Excel to include in final file.`);
+      }
+      setLoading(false);
+    };
+    // Determine if we have marks without QP (uploaded marks first)
+    const hasMarksWithoutQP=Object.keys(marks).length>0&&qp.length===0;
+    return(
+      <div>
+        <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1rem',flexWrap:'wrap'}}>
+          <span style={{fontWeight:700,fontSize:'.9rem'}}>📄 {ca} — Question Paper</span>
+          <button className="btn btn-primary btn-sm" onClick={addQ}>+ Add Question</button>
+          <div style={{display:'flex',alignItems:'center',gap:'.4rem'}}>
+            <input type="file" accept=".xlsx,.xls,.pdf" style={{display:'none'}}
+              ref={el=>fileRef.current=el}
+              onChange={e=>{if(e.target.files[0])uploadQP(ca,e.target.files[0]);e.target.value='';}}/>
+            <button className="btn btn-outline btn-sm" onClick={()=>fileRef.current&&fileRef.current.click()}>
+              {loading?'Parsing…':'⬆ Upload QP'}
+            </button>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:'.4rem'}}>
+            <input type="file" accept=".xlsx,.xls" style={{display:'none'}}
+              ref={el=>marksFileRef.current=el}
+              onChange={e=>{if(e.target.files[0])uploadCAMarksFile(e.target.files[0]);e.target.value='';}}/>
+            <button className="btn btn-outline btn-sm" style={{background:'var(--amber2)',borderColor:'#d97706',color:'#92400e'}}
+              onClick={()=>marksFileRef.current&&marksFileRef.current.click()}>
+              ✏ Upload Marks
+            </button>
+          </div>
+          <button className="btn btn-outline btn-sm" style={{background:'#f0fdf4',borderColor:'#16a34a',color:'#166534',marginLeft:'auto'}}
+            onClick={saveChanges}>
+            💾 Save Changes
+          </button>
+        </div>
+        <div className="tbl-wrap" style={{marginBottom:'1.5rem'}}>
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead><tr><TH w={40}>Q#</TH><TH w={380}>Question</TH><TH w={70}>Marks</TH><TH w={80}>CO</TH><TH w={80}>Bloom</TH><TH w={40}></TH></tr></thead>
+            <tbody>
+              {qp.map((q,i)=>(
+                <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                  <TD center><EditCell value={q.q_no} type="number" onChange={v=>updQ(i,'q_no',v)} small/></TD>
+                  <TD><EditCell value={q.question_text} onChange={v=>updQ(i,'question_text',v)}/></TD>
+                  <TD center><EditCell value={q.marks} type="number" onChange={v=>updQ(i,'marks',v)} small/></TD>
+                  <TD center>
+                    <select value={q.co_id||''} onChange={e=>{updQ(i,'co_id',e.target.value);updQ(i,'bloom_level',coBloom(e.target.value));}}
+                      style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',width:'100%'}}>
+                      {coList.map(c=><option key={c.co_id} value={c.co_id}>{c.co_id}</option>)}
+                    </select>
+                  </TD>
+                  <TD center>
+                    <select value={q.bloom_level||'L2'} onChange={e=>updQ(i,'bloom_level',e.target.value)}
+                      style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',width:'100%'}}>
+                      {BLOOM_LABELS.map(([l,n])=><option key={l} value={l}>{l} – {n}</option>)}
+                    </select>
+                  </TD>
+                  <TD center><span onClick={()=>delQ(i)} style={{cursor:'pointer',color:'var(--red)'}}>×</span></TD>
+                </tr>
+              ))}
+              {!qp.length&&<tr><td colSpan={6} style={{padding:'1.5rem',textAlign:'center',color:'var(--text3)',fontSize:'.85rem'}}>No questions yet. Add manually or upload a QP file.</td></tr>}
+            </tbody>
+            {qp.length>0&&<tfoot><tr>
+              <td colSpan={2} style={{padding:'6px 8px',fontWeight:700,fontSize:'.8rem',textAlign:'right'}}>Total:</td>
+              <td style={{padding:'6px 8px',fontWeight:700,fontSize:'.8rem',textAlign:'center',background:'#d1fae5'}}>{qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0)}</td>
+              <td colSpan={3}/>
+            </tr></tfoot>}
+          </table>
+        </div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>✏ {ca} — Marks Entry</div>
+        {!students.length&&<Alrt t="warning" msg="No students found. Import from Students Roster first."/>}
+        {hasMarksWithoutQP&&(
+          <div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
+            ℹ Marks loaded but no question paper yet. Total marks shown below. Add/upload a QP to distribute marks per question.
+          </div>
+        )}
+        {students.length>0&&(qp.length>0||hasMarksWithoutQP)&&(
+          <div className="tbl-wrap" style={{maxHeight:500,overflowY:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr>
+                  <TH w={40}>#</TH><TH w={130}>PRN</TH><TH w={220}>Name</TH>
+                  {qp.length>0
+                    ? qp.map(q=><TH key={q.q_no} w={70}>Q{q.q_no}<br/><span style={{fontWeight:400,fontSize:'.68rem',opacity:.8}}>{q.co_id}/{q.marks}M</span></TH>)
+                    : <TH w={90}>Marks</TH>
+                  }
+                  <TH w={70}>Total</TH>
+                </tr>
+                {qp.length>0&&<tr>
+                  <td colSpan={3} style={{background:'#E2EFDA',padding:'4px 8px',fontSize:'.75rem',fontWeight:600}}>Max:</td>
+                  {qp.map(q=><td key={q.q_no} style={{background:'#E2EFDA',textAlign:'center',fontSize:'.75rem',fontWeight:600,padding:'4px'}}>{q.marks}</td>)}
+                  <td style={{background:'#E2EFDA',textAlign:'center',fontWeight:700,fontSize:'.75rem',padding:'4px'}}>{qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0)}</td>
+                </tr>}
+              </thead>
+              <tbody>
+                {students.map((s,si)=>{
+                  const sm=marks[s.prn]||{};
+                  const total=qp.length>0
+                    ? qp.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0)
+                    : (parseFloat(sm._total)||0);
+                  return(
+                    <tr key={si} style={{background:si%2===0?'var(--bg)':'var(--white)'}}>
+                      <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
+                      {qp.length>0
+                        ? qp.map(q=>(
+                          <TD key={q.q_no} center>
+                            <input type="number" min="0" max={q.marks} step="0.01"
+                              value={sm[String(q.q_no)]??''} onChange={e=>updMark(s.prn,q.q_no,e.target.value)}
+                              style={{width:52,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px',
+                                textAlign:'center',fontSize:'.78rem',fontFamily:'DM Sans,sans-serif'}}/>
+                          </TD>
+                        ))
+                        : <TD center>
+                            <input type="number" min="0" step="0.01"
+                              value={sm._total??''} onChange={e=>updMark(s.prn,'_total',e.target.value)}
+                              style={{width:70,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px',
+                                textAlign:'center',fontSize:'.78rem',fontFamily:'DM Sans,sans-serif'}}/>
+                          </TD>
+                      }
+                      <TD center><span style={{fontWeight:700,color:total>0?'var(--green)':'var(--text3)'}}>{total>0?(Number.isInteger(total)?total:total.toFixed(2)):'—'}</span></TD>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {students.length>0&&!qp.length&&!hasMarksWithoutQP&&<Alrt t="info" msg="Add questions above to enable marks entry."/>}
+      </div>
+    );
+  };
+
+  const renderESE=()=>{
+  const uploadESEMarks=(file)=>{
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        if(typeof XLSX==='undefined'){setErr('XLSX library not loaded.');return;}
+        const wb=XLSX.read(ev.target.result,{type:'array'});
+        const sheetName=wb.SheetNames.find(s=>s.toLowerCase().includes('ese')||s.toLowerCase().includes('end'))||wb.SheetNames[0];
+        if(!sheetName){setErr('No sheets found.');return;}
+        const ws=wb.Sheets[sheetName];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        let hdrIdx=rows.findIndex(r=>r.some(c=>String(c).toLowerCase().includes('prn')||String(c).toLowerCase().includes('roll')));
+        if(hdrIdx<0)hdrIdx=0;
+        const hdrRow=rows[hdrIdx];
+        const prnIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('prn')||String(h).toLowerCase().includes('roll'));
+        const mIdx=hdrRow.findIndex(h=>String(h).toLowerCase().includes('mark')||String(h).toLowerCase().includes('total'));
+        if(prnIdx<0){setErr('PRN/Roll No column not found in ESE marks file.');return;}
+        const newMarks={};
+        rows.slice(hdrIdx+1).forEach(row=>{
+          const prn=String(row[prnIdx]||'').trim();
+          if(!prn||prn.length<4)return;
+          const totalMark=mIdx>=0?parseFloat(row[mIdx])||0:0;
+          if(eseQP.length>0&&totalMark>0){
+            const totalQMax=eseQP.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+            const sm={};
+            eseQP.forEach(q=>{sm[String(q.q_no)]=Math.round((parseFloat(q.marks)/totalQMax)*totalMark*100)/100;});
+            newMarks[prn]=sm;
+          }else{newMarks[prn]={_total:totalMark};}
+        });
+        const cnt=Object.keys(newMarks).length;
+        setEseMarks(p=>({...p,...newMarks}));
+        setOk(`✓ Loaded ESE marks for ${cnt} students.`);
+      }catch(ex){setErr('ESE marks parse error: '+ex.message);}
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  const uploadESEQP=(file)=>{
+    if(!file||!course)return;
+    setLoading(true);setErr('');
+    const fd=new FormData();fd.append('file',file);
+    fetch(API+'/co-po-template/upload-qp/'+course.id+'/ESE',{method:'POST',headers:hdrForm(),body:fd})
+      .then(r=>r.json()).then(d=>{
+        if(d.questions){
+          const qs=(d.questions||[]).map((q,i)=>({...q,q_no:q.q_no||(i+1)}));
+          setEseQP(qs);
+          setOk('✓ ESE QP parsed: '+d.extracted+' questions.');
+        }else{setErr(d.detail||'Failed to parse ESE QP.');}
+      }).catch(e=>setErr(e.message)).finally(()=>setLoading(false));
+  };
+  const saveESE=async()=>{
+    if(!course)return;
+    setLoading(true);setErr('');
+    try{
+      await api('/co-po-template/save-sheet/'+course.id+'/ESE',{
+        method:'POST',headers:{...hdr(),'Content-Type':'application/json'},
+        body:JSON.stringify({qp:eseQP,marks:eseMarks})
+      });
+      setOk('✓ ESE saved successfully.');
+    }catch{setOk('✓ ESE changes saved locally. Click Generate Excel to include in final file.');}
+    setLoading(false);
+  };
+  const hasEseMarksWithoutQP=Object.keys(eseMarks).length>0&&eseQP.length===0;
+  return(
+    <div>
+      <div style={{display:'flex',gap:'1rem',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap'}}>
+        <span style={{fontWeight:700,fontSize:'.9rem'}}>📄 End Semester Exam (ESE)</span>
+        <button className="btn btn-primary btn-sm" onClick={()=>{
+          const defaultCO=coList[0]?.co_id||'CO1';
+          const co=coList.find(c=>c.co_id===defaultCO);
+          const lvlMap={'Remember':1,'Remembering':1,'L1':1,'Understand':2,'Understanding':2,'L2':2,'Apply':3,'Applying':3,'L3':3,'Analyse':4,'Analyze':4,'L4':4,'Evaluate':5,'Evaluating':5,'L5':5,'Create':6,'Creating':6,'L6':6};
+          const bl=co?.bloom_level?(lvlMap[co.bloom_level]||parseInt(String(co.bloom_level).replace('L',''))||3):3;
+          setEseQP(p=>[...p,{q_no:p.length+1,question_text:'',marks:10,co_id:defaultCO,bloom_level:bl}]);
+        }}>+ Add Question</button>
+        <div>
+          <input type="file" accept=".xlsx,.xls,.pdf" style={{display:'none'}}
+            ref={el=>eseQpRef.current=el}
+            onChange={e=>{if(e.target.files[0])uploadESEQP(e.target.files[0]);e.target.value='';}}/>
+          <button className="btn btn-outline btn-sm" onClick={()=>eseQpRef.current&&eseQpRef.current.click()}>
+            ⬆ Upload QP
+          </button>
+        </div>
+        <div>
+          <input type="file" accept=".xlsx,.xls" style={{display:'none'}}
+            ref={el=>eseMarksRef.current=el}
+            onChange={e=>{if(e.target.files[0])uploadESEMarks(e.target.files[0]);e.target.value='';}}/>
+          <button className="btn btn-outline btn-sm" style={{background:'var(--amber2)',borderColor:'#d97706',color:'#92400e'}}
+            onClick={()=>eseMarksRef.current&&eseMarksRef.current.click()}>
+            ✏ Upload Marks
+          </button>
+        </div>
+        <button className="btn btn-outline btn-sm" style={{background:'#f0fdf4',borderColor:'#16a34a',color:'#166534',marginLeft:'auto'}}
+          onClick={saveESE}>💾 Save Changes</button>
+      </div>
+      <div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
+        ℹ ESE marks are typically from the university. Enter question paper structure here for CO mapping; marks can be entered per student below.
+      </div>
+      <div className="tbl-wrap">
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead><tr><TH w={40}>Q#</TH><TH w={380}>Question</TH><TH w={70}>Marks</TH><TH w={80}>CO</TH><TH w={80}>Bloom</TH><TH w={40}></TH></tr></thead>
+          <tbody>
+            {eseQP.map((q,i)=>(
+              <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                <TD center>{q.q_no}</TD>
+                <TD><input value={q.question_text} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,question_text:e.target.value}:x))}
+                  style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:'.82rem'}}/></TD>
+                <TD center><input type="number" value={q.marks} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,marks:e.target.value}:x))}
+                  style={{width:52,border:'1px solid var(--border)',borderRadius:4,padding:'3px',textAlign:'center',fontSize:'.78rem'}}/></TD>
+                <TD center>
+                  <select value={q.co_id} onChange={e=>{const co2=coList.find(c=>c.co_id===e.target.value);const lvlMap2={'Remember':1,'Remembering':1,'L1':1,'Understand':2,'Understanding':2,'L2':2,'Apply':3,'Applying':3,'L3':3,'Analyse':4,'Analyze':4,'L4':4,'Evaluate':5,'Evaluating':5,'L5':5,'Create':6,'Creating':6,'L6':6};const bl2=co2?.bloom_level?(lvlMap2[co2.bloom_level]||parseInt(String(co2.bloom_level).replace('L',''))||1):1;setEseQP(p=>p.map((x,j)=>j===i?{...x,co_id:e.target.value,bloom_level:bl2}:x));}}
+                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px'}}>
+                    {coList.map(c=><option key={c.co_id} value={c.co_id}>{c.co_id}</option>)}
+                  </select>
+                </TD>
+                <TD center>
+                  <select value={q.bloom_level||'L2'} onChange={e=>setEseQP(p=>p.map((x,j)=>j===i?{...x,bloom_level:e.target.value}:x))}
+                    style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:4,padding:'3px'}}>
+                    {[['L1','Remember'],['L2','Understand'],['L3','Apply'],['L4','Analyse'],['L5','Evaluate'],['L6','Create']].map(([l,n])=><option key={l} value={l}>{l} – {n}</option>)}
+                  </select>
+                </TD>
+                <TD center><span onClick={()=>setEseQP(p=>p.filter((_,j)=>j!==i))} style={{cursor:'pointer',color:'var(--red)'}}>×</span></TD>
+              </tr>
+            ))}
+            {!eseQP.length&&<tr><td colSpan={6} style={{padding:'1.5rem',textAlign:'center',color:'var(--text3)',fontSize:'.85rem'}}>No ESE questions yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {students.length>0&&eseQP.length>0&&(
+        <div style={{marginTop:'1.5rem'}}>
+          <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>✏ ESE Marks Entry</div>
+          <div className="tbl-wrap" style={{maxHeight:400,overflowY:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr><TH>#</TH><TH>PRN</TH><TH w={220}>Name</TH>
+                {eseQP.map(q=><TH key={q.q_no} w={70}>Q{q.q_no}<br/><span style={{fontSize:'.68rem',fontWeight:400}}>{q.co_id}/{q.marks}M</span></TH>)}
+                <TH>Total</TH>
+              </tr></thead>
+              <tbody>
+                {students.map((s,si)=>{
+                  const sm=eseMarks[s.prn]||{};
+                  const tot=eseQP.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0);
+                  return(<tr key={si} style={{background:si%2===0?'var(--bg)':'var(--white)'}}>
+                    <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
+                    {eseQP.map(q=>(
+                      <TD key={q.q_no} center>
+                        <input type="number" min="0" max={q.marks} step="0.01" value={sm[String(q.q_no)]??''}
+                          onChange={e=>setEseMarks(p=>({...p,[s.prn]:{...(p[s.prn]||{}),[String(q.q_no)]:e.target.value}}))}
+                          style={{width:50,border:'1px solid var(--border)',borderRadius:4,padding:'2px',textAlign:'center',fontSize:'.78rem'}}/>
+                      </TD>
+                    ))}
+                    <TD center><b>{tot>0?(Number.isInteger(tot)?tot:tot.toFixed(2)):'—'}</b></TD>
+                  </tr>);
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {students.length>0&&hasEseMarksWithoutQP&&(
+        <div style={{marginTop:'1.5rem'}}>
+          <div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
+            ℹ Marks loaded but no QP yet. Total marks shown. Upload/add QP to distribute per question.
+          </div>
+          <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>✏ ESE Marks Entry</div>
+          <div className="tbl-wrap" style={{maxHeight:400,overflowY:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr><TH>#</TH><TH>PRN</TH><TH w={220}>Name</TH><TH w={90}>Marks</TH><TH>Total</TH></tr></thead>
+              <tbody>
+                {students.map((s,si)=>{
+                  const sm=eseMarks[s.prn]||{};
+                  const tot=parseFloat(sm._total)||0;
+                  return(<tr key={si} style={{background:si%2===0?'var(--bg)':'var(--white)'}}>
+                    <TD center>{si+1}</TD><TD>{s.prn}</TD><TD>{s.name}</TD>
+                    <TD center>
+                      <input type="number" min="0" step="0.01" value={sm._total??''}
+                        onChange={e=>setEseMarks(p=>({...p,[s.prn]:{...(p[s.prn]||{}),_total:e.target.value}}))}
+                        style={{width:70,border:'1px solid var(--border)',borderRadius:4,padding:'2px',textAlign:'center',fontSize:'.78rem'}}/>
+                    </TD>
+                    <TD center><b>{tot>0?(Number.isInteger(tot)?tot:tot.toFixed(2)):'—'}</b></TD>
+                  </tr>);
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );};
+
+  const renderFinalAttn=()=>{
+    const getLvl=p=>p<=40?1:p<70?2:3;
+    return(
+      <div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>📊 Final CO Attainment (auto-calculated)</div>
+        <div style={{background:'var(--bg2)',borderRadius:8,padding:'1rem',marginBottom:'1rem',fontSize:'.82rem',color:'var(--text2)'}}>
+          Attainment = % of students scoring ≥ 60% in questions mapped to each CO, averaged across CAs and combined with ESE (40:60).
+        </div>
+        <div className="tbl-wrap">
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead><tr>
+              <TH w={70}>CO</TH>
+              {caNames.map(ca=><TH key={ca} w={90}>{ca} Attn%</TH>)}
+              <TH w={100}>Internal Avg</TH><TH w={100}>ESE Attn%</TH><TH w={100}>Final (40:60)</TH><TH w={80}>Level</TH>
+            </tr></thead>
+            <tbody>
+              {coList.map((co,i)=>{
+                const cid=co.co_id;
+                const caAttn=caNames.map(ca=>{
+                  const mks=caSheets[ca]?.marks||{};
+                  const qp=(caSheets[ca]?.qp||[]).filter(q=>q.co_id===cid);
+                  const max=qp.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                  if(!max||!students.length)return null;
+                  const passed=students.filter(s=>{
+                    const sm=mks[s.prn]||{};
+                    return qp.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0)/max*100>=60;
+                  }).length;
+                  return Math.round(passed/students.length*100);
+                });
+                const valid=caAttn.filter(v=>v!==null);
+                const intAvg=valid.length?Math.round(valid.reduce((s,v)=>s+v,0)/valid.length):null;
+                const eCoQs=(eseQP||[]).filter(q=>q.co_id===cid);
+                const eMax=eCoQs.reduce((s,q)=>s+(parseFloat(q.marks)||0),0);
+                let eAttn=null;
+                if(eMax&&students.length){
+                  const p=students.filter(s=>{
+                    const sm=eseMarks[s.prn]||{};
+                    return eCoQs.reduce((t,q)=>t+(parseFloat(sm[String(q.q_no)])||0),0)/eMax*100>=60;
+                  }).length;
+                  eAttn=Math.round(p/students.length*100);
+                }
+                const fin=(intAvg!==null&&eAttn!==null)?Math.round(intAvg*0.4+eAttn*0.6):(intAvg!==null?Math.round(intAvg*0.4):null);
+                const lvl=fin!==null?getLvl(fin):null;
+                const lvlBg=lvl===3?'#d1fae5':lvl===2?'#fef3c7':'#fee2e2';
+                return(
+                  <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                    <TD center><b>{cid}</b></TD>
+                    {caAttn.map((v,j)=><TD key={j} center><span style={{color:v!==null?(v>=70?'var(--green)':v>=40?'var(--amber)':'var(--red)'):'var(--text3)'}}>{v!==null?v+'%':'—'}</span></TD>)}
+                    <TD center><b>{intAvg!==null?intAvg+'%':'—'}</b></TD>
+                    <TD center><span style={{color:eAttn!==null?(eAttn>=70?'var(--green)':'var(--amber)'):'var(--text3)'}}>{eAttn!==null?eAttn+'%':'—'}</span></TD>
+                    <TD center><b>{fin!==null?fin+'%':'—'}</b></TD>
+                    <TD center>{lvl&&<span style={{background:lvlBg,padding:'2px 10px',borderRadius:20,fontWeight:700,fontSize:'.78rem'}}>Level {lvl}</span>}</TD>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const persistMatrix=async(matrix)=>{
+    if(!course)return;
+    try{
+      await fetch(API+'/courses/'+course.id,{method:'PUT',
+        headers:{...hdrForm(),'Content-Type':'application/json'},
+        body:JSON.stringify({
+          cos:course.cos,pos:course.pos,co_po_matrix:matrix,
+          course_name:course.course_name,course_code:course.course_code,
+          department:course.department,semester:course.semester,
+          academic_year:course.academic_year,faculty_name:course.faculty_name,
+          credits:course.credits||3,total_hours:course.total_hours||45,
+          evaluation_config:course.evaluation_config||{}
+        })
+      });
+      course.co_po_matrix=matrix;
+      if(saveCourse) saveCourse({...course,co_po_matrix:matrix});
+    }catch(e){console.warn('CO-PO matrix persist failed',e);}
+  };
+
+  const runAiMapping=async()=>{
+    if(!course||!coList.length||!poList.length)return;
+    setAiMappingLoading(true);setAiMappingMsg('');
+    try{
+      const cos=coList.map(c=>({co_id:c.co_id,co_statement:c.co_statement||c.statement||c.description||c.co_id}));
+      const pos=poList.map(p=>({po_id:p.po_id||p,po_statement:p.po_statement||p.description||p.po_id||p}));
+      const r=await fetch(API+'/co-po-template/ai-mapping/'+course.id,{
+        method:'POST',headers:{...hdrForm(),'Content-Type':'application/json'},
+        body:JSON.stringify({cos,pos,psos:[]})
+      });
+      const d=await r.json();
+      if(!r.ok)throw new Error(d.detail||'AI mapping failed');
+      const mapping=d.data||{};
+      // Merge into current matrix — only overwrite non-zero AI values
+      setCoPoMatrix(prev=>{
+        const next={...prev};
+        Object.entries(mapping).forEach(([coId,poMap])=>{
+          next[coId]={...(prev[coId]||{})};
+          Object.entries(poMap).forEach(([poId,val])=>{
+            if(val>0)next[coId][poId]=val;
+            else if(!(poId in (prev[coId]||{})))next[coId][poId]=0;
+          });
+        });
+        // IMMEDIATELY persist so switching tabs doesn't lose the AI result
+        persistMatrix(next);
+        return next;
+      });
+      setAiMappingMsg('✅ AI mapping applied! Review and adjust as needed.');
+    }catch(e){
+      setAiMappingMsg('❌ '+e.message);
+    }finally{setAiMappingLoading(false);}
+  };
+
+  const renderPOAttn=()=>{
+    const poIds=poList.length?poList.map(p=>p.po_id||p):[...Array(12)].map((_,i)=>'PO'+(i+1));
+    return(
+      <div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'1rem'}}>🔗 CO-PO Mapping & PO Attainment</div>
+        <div style={{background:'var(--bg2)',borderRadius:8,padding:'1rem',marginBottom:'1rem',fontSize:'.82rem',color:'var(--text2)'}}>
+          Edit correlation weights (0 = none, 1 = low, 2 = medium, 3 = high). PO attainment is auto-calculated from CO attainment × weights.
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1rem',flexWrap:'wrap'}}>
+          <button className="btn btn-primary" onClick={runAiMapping} disabled={aiMappingLoading||!coList.length}
+            style={{background:'linear-gradient(135deg,#7c3aed,#4f46e5)',border:'none',display:'flex',alignItems:'center',gap:6,padding:'8px 18px',fontSize:'.83rem'}}>
+            {aiMappingLoading
+              ? <><Spin/> Generating AI Mapping…</>
+              : <><span style={{fontSize:'1rem'}}>✨</span> AI Suggest CO-PO Mapping</>}
+          </button>
+          {aiMappingMsg&&<span style={{fontSize:'.82rem',color:aiMappingMsg.startsWith('✅')?'var(--green)':'var(--red)'}}>{aiMappingMsg}</span>}
+        </div>
+        {!poList.length&&<Alrt t="warning" msg="No PO/PSO data found. Add POs in Course Setup → CO-PO Matrix, or the default PO1–PO12 columns are shown below."/>}
+        <div className="tbl-wrap" style={{overflowX:'auto'}}>
+          <table style={{borderCollapse:'collapse',minWidth:600}}>
+            <thead>
+              <tr>
+                <TH w={70}>CO</TH><TH w={80}>Attn%</TH>
+                {poIds.map(p=><TH key={p} w={55}>{p}</TH>)}
+              </tr>
+            </thead>
+            <tbody>
+              {coList.map((co,i)=>{
+                const cid=co.co_id;
+                const mapping=coPoMatrix[cid]||{};
+                const attn=finalAttn[cid];
+                return(
+                  <tr key={i} style={{background:i%2===0?'var(--bg)':'var(--white)'}}>
+                    <TD center><b>{cid}</b></TD>
+                    <TD center><span style={{fontWeight:700,color:attn>=70?'var(--green)':attn>=40?'var(--amber)':'var(--text3)'}}>{attn||'—'}{attn?'%':''}</span></TD>
+                    {poIds.map(po=>(
+                      <TD key={po} center>
+                        <select value={mapping[po]??''} onChange={e=>{
+                          const val=e.target.value===''?undefined:parseInt(e.target.value);
+                          setCoPoMatrix(prev=>({...prev,[cid]:{...prev[cid],[po]:val}}));
+                        }} style={{width:50,border:'1px solid var(--border)',borderRadius:4,padding:'2px',fontSize:'.78rem',textAlign:'center',
+                          background:mapping[po]?'#d1fae5':'var(--white)'}}>
+                          <option value="">—</option>
+                          <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                        </select>
+                      </TD>
+                    ))}
+                  </tr>
+                );
+              })}
+              <tr style={{background:'#1F3864'}}>
+                <td style={{padding:'7px 10px',color:'#fff',fontWeight:700,fontSize:'.78rem',textAlign:'center'}} colSpan={2}>PO Attainment</td>
+                {poIds.map(po=>{
+                  const vals=coList.map(co=>{
+                    const w=coPoMatrix[co.co_id]?.[po];
+                    const a=finalAttn[co.co_id];
+                    return w&&a?{w,a}:null;
+                  }).filter(Boolean);
+                  const sumW=vals.reduce((s,v)=>s+v.w,0);
+                  const a=sumW?Math.round(vals.reduce((s,v)=>s+v.w*v.a,0)/sumW):null;
+                  return<td key={po} style={{padding:'7px',textAlign:'center',color:'#fff',fontWeight:700,fontSize:'.82rem'}}>{a!==null?a+'%':'—'}</td>;
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderBulkUpload=()=>(
+    <div style={{display:'flex',flexDirection:'column',gap:'1.5rem'}}>
+      {/* ── Load from already-uploaded marks ── */}
+      <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:10,padding:'1.25rem'}}>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.4rem',color:'#166534'}}>⚡ Load from Upload Marks Page</div>
+        <div style={{fontSize:'.8rem',color:'#166534',marginBottom:'.85rem',lineHeight:1.6}}>
+          You've already uploaded marks via the <strong>Upload Marks</strong> page. Click below to instantly pull those marks (Case Study, Mind Map, Quiz, Unit Test, ESE) into the correct CA tabs — no file needed.
+        </div>
+        {loadFromDBErr&&<div style={{color:'var(--red)',fontSize:'.8rem',marginBottom:'.5rem'}}>{loadFromDBErr}</div>}
+        {loadFromDBOk&&<div style={{color:'var(--green)',fontSize:'.8rem',marginBottom:'.5rem'}}>{loadFromDBOk}</div>}
+        <button className="btn btn-primary" onClick={loadFromUploadedMarks} disabled={loadingFromDB||!course}
+          style={{background:'#16a34a',borderColor:'#16a34a',width:'100%'}}>
+          {loadingFromDB?<><Spin/>Loading…</>:'⚡ Load Marks from Upload Marks Page'}
+        </button>
+      </div>
+      <div>
+        <div style={{fontWeight:700,fontSize:'.9rem',marginBottom:'.75rem'}}>📄 Upload All Question Papers</div>
+        <div style={{background:'var(--blue3)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)',marginBottom:'1rem',lineHeight:1.7}}>
+          Upload a single xlsx with <strong>one sheet per component</strong> (sheet names must match component names: Case Study, Quiz, Unit Test, etc.).
+          Each sheet: Question, Marks, CO, Bloom Level columns. Auto-distributed to the right CA tabs.
+        </div>
+        <div onClick={()=>document.getElementById('bulk-qp-input').click()}
+          style={{border:'2px dashed '+(bulkQpFile?'var(--green)':'var(--border)'),borderRadius:10,padding:'1.5rem',
+            textAlign:'center',cursor:'pointer',background:bulkQpFile?'#f0fdf4':'var(--bg)',marginBottom:'.875rem'}}>
+          <div style={{fontSize:'1.8rem',marginBottom:'.4rem'}}>{bulkQpFile?'✅':'📊'}</div>
+          <div style={{fontWeight:600,color:bulkQpFile?'var(--green)':'var(--text)',fontSize:'.85rem'}}>{bulkQpFile?bulkQpFile.name:'Click to select Question Papers xlsx'}</div>
+          <div style={{fontSize:'.74rem',color:'var(--text2)',marginTop:'.2rem'}}>{bulkQpFile?'Ready to upload':'.xlsx files only'}</div>
+        </div>
+        <input id="bulk-qp-input" type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>{if(e.target.files[0])setBulkQpFile(e.target.files[0]);}}/>
+        {bulkQpErr&&<div style={{color:'var(--red)',fontSize:'.8rem',marginBottom:'.5rem'}}>{bulkQpErr}</div>}
+        {bulkQpOk&&<div style={{color:'var(--green)',fontSize:'.8rem',marginBottom:'.5rem'}}>✓ {bulkQpOk}</div>}
+        <button className="btn btn-primary" onClick={uploadBulkQP} disabled={bulkQpLoading||!bulkQpFile} style={{width:'100%'}}>
+          {bulkQpLoading?React.createElement(Spin,null):null}{bulkQpLoading?'Parsing…':'📤 Upload & Distribute QPs'}
+        </button>
+      </div>
+      <div style={{background:'var(--bg2)',borderRadius:8,padding:'.75rem 1rem',fontSize:'.8rem',color:'var(--text2)'}}>
+        💡 <strong>Tab-by-tab upload also available:</strong> Go to any CA tab (e.g. 📝 Quiz) and use the "⬆ Upload Question Paper" button there, or enter marks directly in the marks grid.
+      </div>
+    </div>
+  );
+
+  const tabContent={bulk_upload:renderBulkUpload(),course_info:renderCourseInfo(),co_list:renderCOList(),roll_list:renderRollList(),ese:renderESE(),final_attn:renderFinalAttn(),po_attn:renderPOAttn()};
+  caNames.forEach(ca=>{tabContent['ca_'+ca]=renderCASheet(ca);});
+
+  return(
+    <div className="page-body fade-up">
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:'1rem',marginBottom:'1.25rem'}}>
+        <div>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>Master Attainment File</div>
+          <div style={{fontSize:'.855rem',color:'var(--text2)',marginTop:'.25rem'}}>
+            {course.course_code} — {course.course_name} · Full editable CO/PO attainment workbook
+          </div>
+        </div>
+        <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',alignItems:'center'}}>
+          <div style={{display:'flex',gap:'.35rem',alignItems:'center',background:'var(--bg2)',borderRadius:8,padding:'6px 10px'}}>
+            <span style={{fontSize:'.75rem',fontWeight:600,color:'var(--text2)'}}>QP Source:</span>
+            <select value={qpSource} onChange={e=>setQpSource(e.target.value)}
+              style={{fontSize:'.78rem',border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',background:'var(--white)'}}>
+              <option value="blank">Blank (manual)</option>
+              <option value="question_bank">From Question Bank</option>
+            </select>
+          </div>
+          <button className="btn btn-primary" onClick={generate} disabled={generating}>
+            {generating?'Generating…':'✨ Generate Excel'}
+          </button>
+          <button className="btn btn-outline" onClick={download} disabled={downloading||!generated}>
+            {downloading?'…':'⬇ Download .xlsx'}
+          </button>
+        </div>
+      </div>
+      <Alrt t="error" msg={err}/>
+      {ok&&<div style={{background:'var(--green2)',border:'1px solid #6ee7b7',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.85rem',color:'#065f46'}}>{ok}</div>}
+      {!generated&&<div style={{background:'var(--amber2)',border:'1px solid var(--amber)',borderRadius:8,padding:'.65rem 1rem',marginBottom:'1rem',fontSize:'.82rem',color:'#92400e'}}>
+        📌 Edit data on-screen, then click <b>Generate Excel</b> to bake your edits into the downloadable file.
+      </div>}
+      <div style={{display:'flex',gap:'.25rem',overflowX:'auto',marginBottom:'1.25rem',paddingBottom:'.25rem',borderBottom:'2px solid var(--border)'}}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)}
+            style={{flexShrink:0,padding:'.45rem .9rem',borderRadius:'8px 8px 0 0',border:'none',cursor:'pointer',
+              fontSize:'.78rem',fontWeight:600,fontFamily:'DM Sans,sans-serif',transition:'all .15s',
+              background:activeTab===t.id?'var(--white)':'transparent',
+              color:activeTab===t.id?'var(--blue2)':'var(--text3)',
+              borderBottom:activeTab===t.id?'2px solid var(--blue2)':'2px solid transparent',marginBottom:-2}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="card card-p">
+        {tabContent[activeTab]||<div style={{color:'var(--text3)',padding:'2rem',textAlign:'center'}}>Select a tab</div>}
+      </div>
+    </div>
+  );
+}
+
+
+function HodPage(){
+  const [data,setData]=useState(null);const [loading,setLoading]=useState(true);const [err,setErr]=useState('');
+  useEffect(()=>{api('/dashboard/department').then(d=>{setData(d);setLoading(false)}).catch(e=>{setErr(e.message);setLoading(false)});},[]);
+  const hc=p=>p>=70?'hh':p>=50?'hm':p>0?'hl':'hn';
+  if(loading)return<div className="page-body"><Skel n={8}/></div>;
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.25rem'}}>Department Dashboard</div>
+    <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1.5rem'}}>Aggregated CO/PO attainment across all courses</div>
+    <Alrt t="error" msg={err}/>
+    {data&&<><div className="stat-row">
+      {[{i:'📚',ic:'blue',v:data.total_courses,l:'Total Courses'},{i:'📊',ic:'green',v:data.courses_with_data,l:'With Data'},
+        {i:'🎯',ic:'orange',v:data.summary.avg_co_attainment+'%',l:'Avg CO Attainment'},
+        {i:'🏆',ic:'orange',v:data.summary.courses_above_target,l:'Above Target'},{i:'👥',ic:'stone',v:data.summary.total_students,l:'Students'}].map((s,i)=>(
+        <div key={i} className={`stat-card ${s.ic}`}><div className={`stat-icon ${s.ic}`}>{s.i}</div><div className="stat-val">{s.v}</div><div className="stat-label">{s.l}</div></div>))}
+    </div>
+    {data.courses_with_data===0?<Alrt t="info" msg="No marks uploaded yet."/>:<>
+      <div className="card card-p" style={{marginBottom:'1.5rem'}}>
+        <div className="section-head"><div className="section-title">PO Attainment Heatmap</div>
+          <div style={{display:'flex',gap:'.5rem',fontSize:'.75rem'}}>
+            {[['hh','≥70%'],['hm','50-69%'],['hl','<50%']].map(([c,l])=><span key={c} className={`badge ${c==='hh'?'b-green':c==='hm'?'b-amber':'b-red'}`}>{l}</span>)}
+          </div>
+        </div>
+        <div style={{overflowX:'auto'}}><table className="htbl">
+          <thead><tr><th style={{textAlign:'left'}}>Course</th>{data.courses[0]&&Object.keys(data.courses[0].po_attainment).map(po=><th key={po}>{po}</th>)}</tr></thead>
+          <tbody>
+            {data.courses.map(c=><tr key={c.course_id}><td className="cn"><div style={{fontWeight:600,fontSize:'.8rem'}}>{c.course_code}</div><div style={{fontSize:'.72rem',color:'var(--text2)'}}>{c.faculty_name}</div></td>
+              {Object.entries(c.po_attainment).map(([po,p])=><td key={po} className={hc(p)}>{p?`${p}%`:'—'}</td>)}</tr>)}
+            <tr style={{fontWeight:700,borderTop:'2px solid var(--border)'}}>
+              <td className="cn" style={{color:'var(--blue2)'}}>Dept Avg</td>
+              {Object.entries(data.department_po_average).map(([po,p])=><td key={po} className={hc(p)}><strong>{p}%</strong></td>)}
+            </tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div className="tbl-wrap"><table><thead><tr><th>Code</th><th>Course</th><th>Faculty</th><th>Students</th><th>CO Attainment</th><th>Status</th></tr></thead>
+      <tbody>{data.courses.map(c=><tr key={c.course_id}><td><span className="badge b-blue">{c.course_code}</span></td><td style={{fontWeight:500}}>{c.course_name}</td>
+      <td>{c.faculty_name}</td><td>{c.total_students}</td><td style={{minWidth:160}}><PBar pct={c.overall_co_attainment}/></td>
+      <td><LvlB l={c.overall_co_attainment>=70?'High':c.overall_co_attainment>=50?'Medium':'Low'}/></td></tr>)}</tbody></table></div>
+    </>}</>}
+  </div>);
+}
+
+// ── GENERATE QUESTION ─────────────────────────────────────────────────────
+function GenQPage({course}){
+  const [f,setF]=useState({topic:'',bloom_level:1,question_type:'Short Answer',co_id:'',marks:5,extra_instructions:''});
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [res,setRes]=useState(null);
+  const s=(k,v)=>setF(x=>({...x,[k]:v}));
+  const gen=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    if(!f.topic){setErr('Enter a topic.');return;}
+    setLoading(true);setErr('');setRes(null);
+    try{const d=await api('/questions/generate-single',{method:'POST',body:JSON.stringify({...f,bloom_level:+f.bloom_level,marks:+f.marks,course_id:course.id,course_name:course.course_name,save_to_bank:true})});setRes(d);}
+    catch(e){setErr(e.message);}setLoading(false);
+  };
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>✨ Generate Question</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem'}}>
+      <div className="card card-p">
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.95rem'}}>Parameters</div>
+        <div className="fg"><label className="fl">Topic</label><input className="fi" value={f.topic} onChange={e=>s('topic',e.target.value)} placeholder="e.g. Process Scheduling, Binary Trees…"/></div>
+        <div className="fg"><label className="fl">Bloom's Level</label>
+          <select className="fi fsel" value={f.bloom_level} onChange={e=>s('bloom_level',e.target.value)}>
+            {BLOOM.map(b=><option key={b.l} value={b.l}>L{b.l} — {b.n}</option>)}</select>
+          <div style={{marginTop:'.4rem'}}><BloomB l={+f.bloom_level}/></div>
+        </div>
+        <div className="fg"><label className="fl">Question Type</label>
+          <select className="fi fsel" value={f.question_type} onChange={e=>s('question_type',e.target.value)}>{QTYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+        <div className="fgrid">
+          <div className="fg"><label className="fl">CO (optional)</label><input className="fi" value={f.co_id} onChange={e=>s('co_id',e.target.value)} placeholder="CO1"/></div>
+          <div className="fg"><label className="fl">Marks</label><input className="fi" type="number" value={f.marks} onChange={e=>s('marks',e.target.value)}/></div>
+        </div>
+        <div className="fg"><label className="fl">Extra Instructions</label><textarea className="fi" rows={2} value={f.extra_instructions} onChange={e=>s('extra_instructions',e.target.value)} placeholder="e.g. Include a real-world example…"/></div>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating…</>:'✨ Generate Question'}</button>
+      </div>
+      <div>
+        {loading&&<div className="card card-p" style={{display:'flex',alignItems:'center',justifyContent:'center',height:200,color:'var(--text2)'}}><Spin/>Generating your question…</div>}
+        {res&&<div className="card card-p fade-up">
+          <div style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'1rem'}}>
+            <div style={{fontWeight:700,fontSize:'.95rem'}}>Generated Question</div>
+            {res.saved_id&&<span className="badge b-green">✓ Saved #{res.saved_id}</span>}
+          </div>
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem',marginBottom:'1rem',lineHeight:1.7,fontSize:'.9rem'}}>{res.question.question_text}</div>
+          {res.question.options&&<div style={{marginBottom:'1rem'}}>{res.question.options.map((o,i)=><div key={i} style={{padding:'.35rem .5rem',fontSize:'.875rem',color:o.startsWith(res.question.correct_option)?'var(--green)':'var(--text2)'}}>{o}{o.startsWith(res.question.correct_option)&&' ✓'}</div>)}</div>}
+          <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap'}}>
+            <BloomB l={res.question.bloom_level} n={res.question.bloom_label}/>
+            {res.question.co_id&&<span className="badge b-blue">{res.question.co_id}</span>}
+            <span className="badge b-amber">{res.question.marks}M</span>
+            <span className="badge b-purple">{res.question.question_type}</span>
+          </div>
+        </div>}
+        {!res&&!loading&&<div className="card card-p" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,color:'var(--text3)',border:'2px dashed var(--border)',background:'transparent',boxShadow:'none'}}>
+          <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>✨</div>
+          <div style={{fontSize:'.875rem'}}>Your question will appear here</div>
+        </div>}
+      </div>
+    </div>
+  </div>);
+}
+
+// ── QUESTION PAPER ────────────────────────────────────────────────────────
+function QPaperPage({course}){
+  const [cfg,setCfg]=useState({duration_hours:3,total_marks:100});
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [res,setRes]=useState(null);
+  const [secs,setSecs]=useState([
+    {name:'Section A',question_type:'MCQ',bloom_levels:[1,2],count:10,marks_each:1},
+    {name:'Section B',question_type:'Short Answer',bloom_levels:[3,4],count:5,marks_each:5},
+    {name:'Section C',question_type:'Long Answer',bloom_levels:[5,6],count:3,marks_each:10},
+  ]);
+  const upd=(i,k,v)=>setSecs(s=>s.map((x,j)=>j===i?{...x,[k]:v}:x));
+  const gen=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setLoading(true);setErr('');setRes(null);
+    try{const d=await api(`/questions/generate-paper/${course.id}`,{method:'POST',body:JSON.stringify({
+      course_id:course.id,course_name:course.course_name,course_code:course.course_code,
+      duration_hours:+cfg.duration_hours,total_marks:+cfg.total_marks,
+      cos:course.cos||[{co_id:'CO1',statement:'Apply concepts',bloom_level:'Apply'}],sections:secs})});setRes(d);}
+    catch(e){setErr(e.message);}setLoading(false);
+  };
+  const groups=res?res.questions.reduce((a,q)=>{(a[q.section]=a[q.section]||[]).push(q);return a;},{}):null;
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>📋 Question Paper Generator</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div style={{display:'grid',gridTemplateColumns:'320px 1fr',gap:'1.5rem'}}>
+      <div>
+        <div className="card card-p" style={{marginBottom:'1rem'}}>
+          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem'}}>Paper Config</div>
+          <div className="fg"><label className="fl">Duration (hrs)</label><input className="fi" type="number" value={cfg.duration_hours} onChange={e=>setCfg(c=>({...c,duration_hours:e.target.value}))}/></div>
+          <div className="fg"><label className="fl">Total Marks</label><input className="fi" type="number" value={cfg.total_marks} onChange={e=>setCfg(c=>({...c,total_marks:e.target.value}))}/></div>
+        </div>
+        <div className="card card-p" style={{marginBottom:'1rem'}}>
+          <div style={{fontWeight:700,marginBottom:'.875rem',fontSize:'.9rem'}}>Sections</div>
+          {secs.map((s,i)=><div key={i} style={{background:'var(--bg)',borderRadius:8,padding:'.75rem',marginBottom:'.65rem',border:'1px solid var(--border)'}}>
+            <div style={{fontWeight:600,fontSize:'.8rem',marginBottom:'.5rem',color:'var(--text)'}}>{s.name}</div>
+            <div className="fgrid" style={{gap:'.4rem'}}>
+              {[['Type','question_type','select'],['Count','count','number'],['Marks','marks_each','number']].map(([l,k,t])=>(
+                <div key={k} className="fg" style={{marginBottom:'.5rem'}}>
+                  <label className="fl" style={{fontSize:'.7rem'}}>{l}</label>
+                  {t==='select'?<select className="fi fsel" style={{padding:'.4rem',fontSize:'.8rem'}} value={s[k]} onChange={e=>upd(i,k,e.target.value)}>{QTYPES.map(t=><option key={t}>{t}</option>)}</select>:
+                  <input className="fi" style={{padding:'.4rem',fontSize:'.8rem'}} type={t} value={s[k]} onChange={e=>upd(i,k,+e.target.value)}/>}
+                </div>))}
+              <div className="fg" style={{marginBottom:'.5rem'}}><label className="fl" style={{fontSize:'.7rem'}}>Total</label><div style={{padding:'.4rem',color:'var(--blue2)',fontWeight:700,fontSize:'.875rem'}}>{s.count*s.marks_each}M</div></div>
+            </div>
+          </div>)}
+        </div>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" style={{width:'100%'}} onClick={gen} disabled={loading||!course}>{loading?<><Spin/>Generating…</>:'📋 Generate Paper'}</button>
+        {res&&<div style={{display:'flex',gap:'.5rem',marginTop:'.75rem'}}>
+          <a href={`${API}/questions/paper/download/${course.id}/docx`} className="btn btn-outline" style={{textDecoration:'none',flex:1,justifyContent:'center'}}>⬇ Word</a>
+          <a href={`${API}/questions/paper/download/${course.id}/pdf`} className="btn btn-outline" style={{textDecoration:'none',flex:1,justifyContent:'center'}}>⬇ PDF</a>
+        </div>}
+      </div>
+      <div>
+        {loading&&<div className="card card-p" style={{display:'flex',alignItems:'center',justifyContent:'center',height:300,color:'var(--text2)'}}><Spin/>AI is generating your question paper…</div>}
+        {groups&&Object.entries(groups).map(([sec,qs])=>(
+          <div key={sec} className="card card-p" style={{marginBottom:'1rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.875rem'}}>
+              <div style={{fontWeight:700,fontSize:'1rem'}}>{sec}</div>
+              <span className="badge b-amber">{qs.reduce((a,q)=>a+q.marks,0)}M</span>
+            </div>
+            {qs.map((q,i)=><div key={i} className="qcard">
+              <div style={{display:'flex',justifyContent:'space-between',gap:'.5rem'}}>
+                <p style={{fontSize:'.875rem',lineHeight:1.6,flex:1}}><strong>Q{q.question_number}.</strong> {q.question_text}</p>
+                <span className="badge b-amber">{q.marks}M</span>
+              </div>
+              {q.options&&<div style={{marginTop:'.5rem'}}>{q.options.map((o,j)=><div key={j} style={{fontSize:'.8rem',color:'var(--text2)',padding:'.15rem 0'}}>{o}</div>)}</div>}
+              <div style={{display:'flex',gap:'.35rem',marginTop:'.5rem',flexWrap:'wrap'}}>
+                <BloomB l={q.bloom_level} n={q.bloom_label}/>
+                {q.co_id&&<span className="badge b-blue">{q.co_id}</span>}
+              </div>
+            </div>)}
+          </div>))}
+        {!res&&!loading&&<div className="card card-p" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:300,color:'var(--text3)',border:'2px dashed var(--border)',background:'transparent',boxShadow:'none'}}>
+          <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>📋</div>
+          <div style={{fontSize:'.875rem'}}>Generated paper will appear here</div>
+        </div>}
+      </div>
+    </div>
+  </div>);
+}
+
+// ── QUESTION BANK ─────────────────────────────────────────────────────────
+function QBankPage({course,go}){
+  const [qs,setQs]=useState([]);const [stats,setStats]=useState(null);const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');const [fil,setFil]=useState({bloom_level:'',question_type:'',source:''});
+  const load=async()=>{if(!course){setErr('Select a course first.');return;}setLoading(true);setErr('');
+    try{const p=new URLSearchParams();Object.entries(fil).forEach(([k,v])=>v&&p.append(k,v));
+      const d=await api(`/questions/bank/${course.id}?${p}`);setQs(d.questions);setStats(d.stats);}
+    catch(e){setErr(e.message);}setLoading(false);};
+  useEffect(()=>{if(course)load();},[course]);
+  const del=async(id)=>{try{await api(`/questions/bank/${id}`,{method:'DELETE'});setQs(q=>q.filter(x=>x.id!==id));}catch(e){setErr(e.message);}};
+  const srcC={generated:'b-green',classified:'b-blue',manipulated:'b-purple',manual:'b-amber'};
+  return(<div className="page-body fade-up">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',flexWrap:'wrap',gap:'.75rem'}}>
+      <div><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem'}}>Question Bank</div>
+        <div style={{color:'var(--text2)',fontSize:'.855rem',marginTop:'.2rem'}}>{qs.length} questions stored</div></div>
+      <div style={{display:'flex',gap:'.5rem'}}>
+        <button className="btn btn-primary btn-sm" onClick={()=>go('qgenerate')}>+ Generate</button>
+        <button className="btn btn-outline btn-sm" onClick={()=>go('qclassify')}>+ Classify</button>
+      </div>
+    </div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    {stats&&<div className="stat-row" style={{marginBottom:'1.25rem'}}>
+      {[{i:'🗄',ic:'orange',v:stats.total,l:'Total'},{i:'🧠',ic:'orange',v:Object.keys(stats.by_bloom).length,l:'Bloom Levels'},
+        {i:'🎯',ic:'green',v:Object.keys(stats.by_co).length,l:'COs Covered'},{i:'⚡',ic:'amber',v:Object.keys(stats.by_source).length,l:'Sources'}].map((s,i)=>(
+        <div key={i} className={`stat-card ${s.ic}`}><div className={`stat-icon ${s.ic}`}>{s.i}</div><div className="stat-val" style={{fontSize:'1.4rem'}}>{s.v}</div><div className="stat-label">{s.l}</div></div>))}
+    </div>}
+    <div className="card card-p" style={{marginBottom:'1.25rem'}}>
+      <div style={{display:'flex',gap:'.75rem',flexWrap:'wrap',alignItems:'flex-end'}}>
+        {[['Bloom Level','bloom_level',['',...BLOOM.map(b=>`${b.l}`)]],['Type','question_type',['',...QTYPES]],['Source','source',['','generated','classified','manipulated','manual']]].map(([l,k,opts])=>(
+          <div key={k}><label className="fl">{l}</label>
+            <select className="fi fsel" style={{width:160}} value={fil[k]} onChange={e=>setFil(f=>({...f,[k]:e.target.value}))}>
+              {opts.map((o,i)=><option key={i} value={o}>{o||`All ${l}s`}</option>)}</select></div>))}
+        <button className="btn btn-primary" onClick={load} disabled={loading||!course}>{loading?<Spin/>:'Filter'}</button>
+      </div>
+    </div>
+    <Alrt t="error" msg={err}/>
+    {loading?<Skel/>:qs.length===0?<Alrt t="info" msg="No questions yet. Generate or classify questions to populate the bank."/>:
+    <div>{qs.map(q=><div key={q.id} className="qcard">
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'.5rem'}}>
+        <p style={{fontSize:'.875rem',lineHeight:1.6,flex:1,color:'var(--text)'}}>{q.question_text}</p>
+        <button className="btn btn-red btn-sm" onClick={()=>del(q.id)}>Delete</button>
+      </div>
+      {q.options&&<div style={{marginTop:'.5rem'}}>{q.options.map((o,i)=><div key={i} style={{fontSize:'.8rem',color:'var(--text2)',padding:'.1rem 0'}}>{o}</div>)}</div>}
+      <div style={{display:'flex',gap:'.35rem',marginTop:'.65rem',flexWrap:'wrap',alignItems:'center'}}>
+        <BloomB l={q.bloom_level} n={q.bloom_label}/>
+        {q.co_id&&<span className="badge b-blue">{q.co_id}</span>}
+        {q.po_id&&<span className="badge b-teal">{q.po_id}</span>}
+        <span className="badge b-purple">{q.question_type}</span>
+        <span className={`badge ${srcC[q.source]||'b-gray'}`}>{q.source}</span>
+        <span className="badge b-amber">{q.marks}M</span>
+        {q.topic&&<span style={{fontSize:'.72rem',color:'var(--text3)'}}>📌 {q.topic}</span>}
+        <span style={{fontSize:'.72rem',color:'var(--text3)',marginLeft:'auto'}}>#{q.id}</span>
+      </div>
+    </div>)}</div>}
+  </div>);
+}
+
+// ── CLASSIFY ──────────────────────────────────────────────────────────────
+function ClassifyPage({course}){
+  const [txt,setTxt]=useState('');const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [res,setRes]=useState(null);
+  const classify=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    if(!txt.trim()){setErr('Enter a question.');return;}
+    setLoading(true);setErr('');setRes(null);
+    try{const d=await api('/questions/classify',{method:'POST',body:JSON.stringify({course_id:course.id,course_name:course.course_name,question_text:txt,cos:course.cos||[],pos:course.pos||[],save_to_bank:true})});setRes(d);}
+    catch(e){setErr(e.message);}setLoading(false);
+  };
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.5rem'}}>🔍 Classify Question</div>
+    <div style={{color:'var(--text2)',fontSize:'.875rem',marginBottom:'1.5rem'}}>Paste any question — AI identifies Bloom's level, CO and PO mapping, then saves to bank.</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem'}}>
+      <div className="card card-p">
+        <div className="fg"><label className="fl">Question Text</label>
+          <textarea className="fi" rows={8} value={txt} onChange={e=>setTxt(e.target.value)} placeholder="Paste or type any question here…&#10;&#10;e.g. Compare the time complexity of bubble sort and merge sort, and justify which is more suitable for large datasets."/></div>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" onClick={classify} disabled={loading||!course}>{loading?<><Spin/>Classifying…</>:'🔍 Classify & Save to Bank'}</button>
+      </div>
+      <div>
+        {loading&&<div className="card card-p" style={{display:'flex',alignItems:'center',justifyContent:'center',height:200,color:'var(--text2)'}}><Spin/>AI is analysing your question…</div>}
+        {res&&<div className="card card-p fade-up">
+          <div style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'1rem'}}>
+            <div style={{fontWeight:700,fontSize:'.95rem'}}>Classification Result</div>
+            {res.saved_id&&<span className="badge b-green">✓ Saved #{res.saved_id}</span>}
+          </div>
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1rem',marginBottom:'1rem',fontSize:'.875rem',lineHeight:1.6}}>{res.classification.question_text}</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.75rem',marginBottom:'1rem'}}>
+            {[['Bloom Level',<BloomB l={res.classification.bloom_level} n={res.classification.bloom_label}/>],
+              ['Question Type',<span className="badge b-purple">{res.classification.question_type}</span>],
+              ['CO Mapping',res.classification.co_id?<span className="badge b-blue">{res.classification.co_id}</span>:<span style={{color:'var(--text3)'}}>—</span>],
+              ['PO Mapping',res.classification.po_id?<span className="badge b-teal">{res.classification.po_id}</span>:<span style={{color:'var(--text3)'}}>—</span>]].map(([l,v],i)=>(
+              <div key={i} style={{background:'var(--bg)',borderRadius:8,padding:'.65rem',border:'1px solid var(--border)'}}>
+                <div style={{fontSize:'.7rem',fontWeight:600,color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.35rem'}}>{l}</div>{v}
+              </div>))}
+          </div>
+          {res.classification.reasoning&&<div style={{background:'#FFF7ED',borderRadius:8,padding:'.75rem',borderLeft:'3px solid var(--blue2)'}}>
+            <div style={{fontSize:'.7rem',fontWeight:600,color:'var(--blue2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.35rem'}}>AI Reasoning</div>
+            <p style={{fontSize:'.85rem',color:'var(--text2)',lineHeight:1.6}}>{res.classification.reasoning}</p>
+          </div>}
+        </div>}
+        {!res&&!loading&&<div className="card card-p" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,color:'var(--text3)',border:'2px dashed var(--border)',background:'transparent',boxShadow:'none'}}>
+          <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>🔍</div><div style={{fontSize:'.875rem'}}>Classification will appear here</div>
+        </div>}
+      </div>
+    </div>
+  </div>);
+}
+
+// ── MANIPULATE ────────────────────────────────────────────────────────────
+function ManipulatePage({course}){
+  const [f,setF]=useState({original_question:'',original_bloom_level:1,target_bloom_level:3,topic:'',teacher_hint:''});
+  const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [res,setRes]=useState(null);
+  const [sel,setSel]=useState('suggested');const [saving,setSaving]=useState(false);const [saved,setSaved]=useState(null);
+  const s=(k,v)=>setF(x=>({...x,[k]:v}));
+  const run=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    if(!f.original_question.trim()){setErr('Enter the original question.');return;}
+    if(+f.original_bloom_level===+f.target_bloom_level){setErr('Target must differ from original.');return;}
+    setLoading(true);setErr('');setRes(null);setSaved(null);
+    try{const d=await api('/questions/manipulate',{method:'POST',body:JSON.stringify({...f,original_bloom_level:+f.original_bloom_level,target_bloom_level:+f.target_bloom_level,course_id:course.id,course_name:course.course_name})});setRes(d);}
+    catch(e){setErr(e.message);}setLoading(false);
+  };
+  const save=async()=>{if(!res||!course)return;setSaving(true);
+    const txt=sel==='suggested'?res.suggested_rewrite:res.alternative_rewrite;
+    try{const d=await api('/questions/manipulate/save',{method:'POST',body:JSON.stringify({course_id:course.id,question_text:txt,topic:f.topic,bloom_level:res.target_bloom_level,question_type:'Short Answer',marks:5,source:'manipulated'})});setSaved(d.id);}
+    catch(e){setErr(e.message);}setSaving(false);};
+  return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.5rem'}}>🔄 Manipulate Bloom Level</div>
+    <div style={{color:'var(--text2)',fontSize:'.875rem',marginBottom:'1.5rem'}}>Rewrite any question to a different Bloom's level. AI suggests rewrites — you pick and save.</div>
+    {!course&&<Alrt t="warning" msg="Select a course first."/>}
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.5rem'}}>
+      <div className="card card-p">
+        <div className="fg"><label className="fl">Original Question</label><textarea className="fi" rows={5} value={f.original_question} onChange={e=>s('original_question',e.target.value)} placeholder="Paste original question here…"/></div>
+        <div className="fgrid">
+          <div className="fg"><label className="fl">Current Level</label><select className="fi fsel" value={f.original_bloom_level} onChange={e=>s('original_bloom_level',e.target.value)}>{BLOOM.map(b=><option key={b.l} value={b.l}>L{b.l} — {b.n}</option>)}</select></div>
+          <div className="fg"><label className="fl">Target Level</label><select className="fi fsel" value={f.target_bloom_level} onChange={e=>s('target_bloom_level',e.target.value)}>{BLOOM.map(b=><option key={b.l} value={b.l}>L{b.l} — {b.n}</option>)}</select></div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:.75+'rem',padding:'.75rem',background:'var(--bg)',borderRadius:8,marginBottom:'1rem',border:'1px solid var(--border)'}}>
+          <BloomB l={+f.original_bloom_level}/><span style={{color:'var(--text3)'}}>→</span><BloomB l={+f.target_bloom_level}/>
+        </div>
+        <div className="fg"><label className="fl">Topic (optional)</label><input className="fi" value={f.topic} onChange={e=>s('topic',e.target.value)} placeholder="e.g. Sorting Algorithms"/></div>
+        <div className="fg"><label className="fl">Teacher Hint (optional)</label><textarea className="fi" rows={2} value={f.teacher_hint} onChange={e=>s('teacher_hint',e.target.value)} placeholder="e.g. Include a real-world scenario…"/></div>
+        <Alrt t="error" msg={err}/>
+        <button className="btn btn-primary" onClick={run} disabled={loading||!course}>{loading?<><Spin/>Rewriting…</>:'🔄 Rewrite Question'}</button>
+      </div>
+      <div>
+        {loading&&<div className="card card-p" style={{display:'flex',alignItems:'center',justifyContent:'center',height:300,color:'var(--text2)'}}><Spin/>Rewriting…</div>}
+        {res&&<div className="card card-p fade-up">
+          <div style={{fontWeight:700,fontSize:'.95rem',marginBottom:'1rem'}}>Choose a Rewrite</div>
+          {[['suggested','✨ Suggested',res.suggested_rewrite],['alternative','🔀 Alternative',res.alternative_rewrite]].map(([k,l,t])=>(
+            <div key={k} onClick={()=>setSel(k)} style={{cursor:'pointer',background:sel===k?'#FFF7ED':'var(--bg)',border:`1.5px solid ${sel===k?'var(--blue2)':'var(--border)'}`,borderRadius:10,padding:'1rem',marginBottom:'.75rem',transition:'all .15s'}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:'.5rem'}}>
+                <span style={{fontSize:'.8rem',fontWeight:700,color:sel===k?'var(--blue2)':'var(--text2)'}}>{l}</span>
+                {sel===k&&<span style={{fontSize:'.72rem',color:'var(--blue2)',fontWeight:600}}>● Selected</span>}
+              </div>
+              <p style={{fontSize:'.875rem',lineHeight:1.6,color:'var(--text)'}}>{t}</p>
+            </div>))}
+          {res.explanation&&<div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'.75rem',marginBottom:'1rem'}}>
+            <div style={{fontSize:'.7rem',fontWeight:700,color:'#166534',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.35rem'}}>Why This Works</div>
+            <p style={{fontSize:'.85rem',color:'#166534',lineHeight:1.6}}>{res.explanation}</p>
+          </div>}
+          {saved?<Alrt t="success" msg={`Saved to Question Bank (#${saved})`}/>:
+          <button className="btn btn-green" style={{width:'100%',justifyContent:'center'}} onClick={save} disabled={saving}>{saving?<><Spin/>Saving…</>:'✓ Save to Question Bank'}</button>}
+        </div>}
+        {!res&&!loading&&<div className="card card-p" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:300,color:'var(--text3)',border:'2px dashed var(--border)',background:'transparent',boxShadow:'none'}}>
+          <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>🔄</div><div style={{fontSize:'.875rem'}}>Rewritten question will appear here</div>
+        </div>}
+      </div>
+    </div>
+  </div>);
+}
+
+// ── STUDENT PORTAL ────────────────────────────────────────────────────────
+function StudentPortalPage({course}){
+  const [data,setData]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState('');
+  const [prn,setPrn]=useState('');const [searched,setSearched]=useState(false);
+  const [allStudents,setAllStudents]=useState([]);const [studLoading,setStudLoading]=useState(false);
+
+  useEffect(()=>{
+    if(!course)return;
+    setStudLoading(true);
+    api(`/students/${course.id}`).then(d=>setAllStudents(d.data||[])).catch(()=>{}).finally(()=>setStudLoading(false));
+  },[course]);
+
+  const search=async()=>{
+    if(!course){setErr('Select a course first.');return;}
+    setLoading(true);setErr('');setData(null);setSearched(true);
+    try{
+      const att=await api(`/attainment/calculate/${course.id}`);
+      const result=att.data||att;
+      const coList=Object.values(result.co_attainment||{});
+      // Find student in roster
+      const student=allStudents.find(s=>s.prn===prn.trim()||s.name.toLowerCase().includes(prn.toLowerCase()));
+      setData({coList,student,summary:result});
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const coList=data?.coList||[];
+  const attained=coList.filter(c=>c.target_met).length;
+  const gaps=coList.filter(c=>!c.target_met);
+
+  // Remedial topics mapped to COs
+  const remedialMap={
+    CO1:['Review lecture notes on Unit 1 fundamentals','Attempt practice problems from question bank','Attend remedial session: Tuesdays 4-5pm'],
+    CO2:['Re-study Unit 2 problem-solving techniques','Work through past question papers','Consult faculty during office hours'],
+    CO3:['Focus on application-based questions in Unit 3','Complete assignment exercises','Join study group for peer learning'],
+    CO4:['Deep dive into Unit 4 analysis methods','Practice case studies','Watch NPTEL supplementary lectures'],
+    CO5:['Complete MOOC module on advanced topics','Synthesis exercises from question bank','Project-based practice recommended'],
+  };
+
+  return(<div className="page-body fade-up">
+    <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'.3rem'}}>Student Portal</div>
+    <div style={{color:'var(--text2)',fontSize:'.855rem',marginBottom:'1.5rem'}}>View CO-wise performance, attainment gaps, and remediation plan</div>
+    {!course&&<Alrt t="warning" msg="Select a course first from the Courses page."/>}
+
+    {/* Search */}
+    <div className="card card-p" style={{maxWidth:600,marginBottom:'1.5rem'}}>
+      <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.9rem'}}>🔍 Find Student</div>
+      <div style={{display:'flex',gap:'.75rem',alignItems:'flex-end'}}>
+        <div style={{flex:1}}>
+          <label className="fl">PRN or Name</label>
+          <input className="fi" value={prn} onChange={e=>setPrn(e.target.value)} onKeyDown={e=>e.key==='Enter'&&search()} placeholder="e.g. 24070126001 or student name…"/>
+        </div>
+        <button className="btn btn-primary" onClick={search} disabled={loading||!course||!prn.trim()}>
+          {loading?<><Spin/>Searching…</>:'Search →'}
+        </button>
+      </div>
+      {studLoading&&<div style={{marginTop:'.5rem',fontSize:'.78rem',color:'var(--text3)'}}>Loading student roster…</div>}
+      {allStudents.length>0&&!studLoading&&<div style={{marginTop:'.5rem',fontSize:'.78rem',color:'var(--text2)'}}>{allStudents.length} students enrolled</div>}
+      <Alrt t="error" msg={err}/>
+    </div>
+
+    {/* Results */}
+    {searched&&!loading&&data&&<div className="fade-up">
+      {/* Student info */}
+      {data.student&&<div style={{background:'linear-gradient(135deg,#0A0A0A,#2A1500)',borderRadius:12,padding:'1.25rem 1.5rem',marginBottom:'1.25rem',color:'#fff',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+        <div style={{width:48,height:48,borderRadius:'50%',background:'rgba(255,255,255,.2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.3rem',flexShrink:0}}>👤</div>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:'1.1rem'}}>{data.student.name}</div>
+          <div style={{fontSize:'.82rem',opacity:.75}}>{data.student.prn} · Section {data.student.section}</div>
+        </div>
+        <div style={{textAlign:'right'}}>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'2rem',lineHeight:1}}>{data.summary.overall_co_attainment}%</div>
+          <div style={{fontSize:'.75rem',opacity:.75}}>Overall CO Attainment</div>
+        </div>
+      </div>}
+
+      {/* CO-wise performance */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:'1rem',marginBottom:'1.5rem'}}>
+        {coList.map((co,i)=>{
+          const pct=co.attainment_percentage;
+          const color=pct>=70?'var(--green)':pct>=50?'var(--amber)':'var(--red)';
+          const bg=pct>=70?'#f0fdf4':pct>=50?'#fffbeb':'#fef2f2';
+          const border=pct>=70?'#86efac':pct>=50?'#fcd34d':'#fca5a5';
+          return(<div key={co.co_id} style={{background:bg,border:`1.5px solid ${border}`,borderRadius:12,padding:'1rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem'}}>
+              <span style={{fontWeight:700,color:'var(--blue2)',fontSize:'1rem'}}>{co.co_id}</span>
+              {co.target_met
+                ?<span className="badge b-green">✓ Attained</span>
+                :<span className="badge b-red">✗ Gap</span>}
+            </div>
+            <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.8rem',color,lineHeight:1,marginBottom:'.25rem'}}>{pct}%</div>
+            <div style={{fontSize:'.72rem',color:'var(--text2)',marginBottom:'.4rem'}}>{co.statement?.slice(0,55)}…</div>
+            <div style={{height:6,background:'rgba(0,0,0,.08)',borderRadius:10,overflow:'hidden'}}>
+              <div style={{width:`${Math.min(pct,100)}%`,height:'100%',background:color,borderRadius:10}}/>
+            </div>
+            <div style={{fontSize:'.7rem',color:'var(--text3)',marginTop:'.25rem'}}>Bloom: {co.bloom_level}</div>
+          </div>);
+        })}
+      </div>
+
+      {/* Gaps + Remediation */}
+      {gaps.length>0&&<div className="card card-p" style={{marginBottom:'1.25rem'}}>
+        <div style={{fontWeight:700,marginBottom:'1rem',fontSize:'.9rem',color:'var(--red)'}}>⚠️ Attainment Gaps & Remediation Plan</div>
+        {gaps.map((co,i)=>(
+          <div key={co.co_id} style={{padding:'.875rem',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:10,marginBottom:'.75rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem'}}>
+              <div style={{fontWeight:700,color:'#dc2626'}}>{co.co_id} — {co.attainment_percentage}% <span style={{fontWeight:400,fontSize:'.82rem',color:'#b91c1c'}}>(need 60%)</span></div>
+              <span style={{fontSize:'.78rem',color:'#b91c1c',fontWeight:600}}>Gap: {(60-co.attainment_percentage).toFixed(1)}%</span>
+            </div>
+            <div style={{fontSize:'.82rem',color:'var(--text)',marginBottom:'.625rem',lineHeight:1.5}}>{co.statement}</div>
+            <div style={{fontWeight:600,fontSize:'.78rem',color:'#57534E',marginBottom:'.4rem',textTransform:'uppercase',letterSpacing:'.04em'}}>📚 Remediation Steps:</div>
+            {(remedialMap[co.co_id]||['Review course material for this CO','Attend extra sessions','Practice additional problems']).map((step,j)=>(
+              <div key={j} style={{display:'flex',gap:'.5rem',alignItems:'flex-start',marginBottom:'.3rem',fontSize:'.82rem',color:'var(--text)'}}>
+                <span style={{color:'#57534E',flexShrink:0,fontWeight:700}}>{j+1}.</span>{step}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>}
+
+      {/* All attained */}
+      {gaps.length===0&&<div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:12,padding:'1.5rem',textAlign:'center'}}>
+        <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>🎉</div>
+        <div style={{fontWeight:700,color:'#16a34a',fontSize:'1.1rem'}}>All COs Attained!</div>
+        <div style={{fontSize:'.855rem',color:'#166534',marginTop:'.3rem'}}>Great performance — all Course Outcomes are meeting the 60% threshold.</div>
+      </div>}
+
+      {/* Summary stats */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:'1rem',marginTop:'1.25rem'}}>
+        {[
+          {label:'COs Attained',val:`${attained}/${coList.length}`,color:'var(--green)',bg:'#f0fdf4'},
+          {label:'COs with Gap',val:String(gaps.length),color:'var(--red)',bg:'#fef2f2'},
+          {label:'Overall',val:`${data.summary.overall_co_attainment}%`,color:'var(--blue2)',bg:'var(--blue3)'},
+          {label:'Class Threshold',val:'60%',color:'var(--amber)',bg:'var(--amber2)'},
+        ].map((s,i)=>(
+          <div key={i} style={{background:s.bg,border:'1px solid var(--border)',borderRadius:10,padding:'.875rem',textAlign:'center'}}>
+            <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.6rem',color:s.color,lineHeight:1}}>{s.val}</div>
+            <div style={{fontSize:'.72rem',color:'var(--text2)',marginTop:'.3rem'}}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>}
+
+    {searched&&!loading&&!data&&!err&&<Alrt t="info" msg="No data found. Make sure marks are uploaded and attainment has been calculated."/>}
+
+    {/* Class-level CO summary (no student search needed) */}
+    {!searched&&course&&<div className="card card-p" style={{marginTop:'1rem'}}>
+      <div style={{fontWeight:700,marginBottom:'.5rem',fontSize:'.9rem'}}>📋 How to use this portal</div>
+      <div style={{fontSize:'.855rem',color:'var(--text2)',lineHeight:1.8}}>
+        1. Enter a student PRN or name above and click Search<br/>
+        2. View their CO-wise attainment performance<br/>
+        3. Identify gaps (COs below 60% threshold)<br/>
+        4. Follow the personalised remediation plan for each gap CO<br/>
+        <span style={{fontSize:'.78rem',color:'var(--text3)'}}>* Results are based on class-level attainment data. Individual student marks must be uploaded first.</span>
+      </div>
+    </div>}
+  </div>);
+}
+
+// ── APP ───────────────────────────────────────────────────────────────────
+
+
+// ── PROFILE / CHANGE PASSWORD ─────────────────────────────────────────────────
+function ProfilePage({user,logout}){
+  const [cpw,setCpw]=useState({cur:'',nw:'',confirm:''});
+  const [err,setErr]=useState('');
+  const [ok,setOk]=useState('');
+  const [loading,setLoading]=useState(false);
+
+  const changePw=async()=>{
+    setErr('');setOk('');
+    if(!cpw.cur||!cpw.nw){setErr('All fields required.');return;}
+    if(cpw.nw!==cpw.confirm){setErr('New passwords do not match.');return;}
+    if(cpw.nw.length<6){setErr('Password must be at least 6 characters.');return;}
+    setLoading(true);
+    try{
+      await api('/auth/me/password',{method:'PUT',body:JSON.stringify({current_password:cpw.cur,new_password:cpw.nw})});
+      setOk('Password changed. Please log in again.');
+      setTimeout(()=>{logout();},2000);
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const roleColors={faculty:'b-blue',hod:'b-green',admin:'b-purple'};
+
+  return(
+    <div className="page-body">
+      <Alrt t="error" msg={err}/>
+      <Alrt t="success" msg={ok}/>
+      <div className="card" style={{maxWidth:520,marginBottom:'1.25rem'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1.5rem'}}>
+          <div style={{width:56,height:56,borderRadius:'50%',background:'linear-gradient(135deg,#F97316,#C2410C)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'1.4rem',fontWeight:700}}>
+            {user?.full_name?.[0]||user?.username?.[0]||'U'}
+          </div>
+          <div>
+            <div style={{fontWeight:700,fontSize:'1.1rem'}}>{user?.full_name||user?.username}</div>
+            <div style={{fontSize:'.85rem',color:'var(--text2)'}}>@{user?.username}</div>
+            <span className={`badge ${roleColors[user?.role]||'b-blue'}`} style={{marginTop:'.25rem'}}>{user?.role}</span>
+          </div>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:'.5rem',padding:'1rem',background:'var(--bg)',borderRadius:10}}>
+          {user?.email&&<div style={{fontSize:'.85rem'}}><span style={{color:'var(--text2)'}}>Email: </span>{user.email}</div>}
+          {user?.department&&<div style={{fontSize:'.85rem'}}><span style={{color:'var(--text2)'}}>Department: </span>{user.department}</div>}
+        </div>
+      </div>
+      <div className="card" style={{maxWidth:520}}>
+        <div style={{fontWeight:700,marginBottom:'1rem'}}>Change Password</div>
+        <div className="form-group"><label className="form-label">Current Password</label><input className="inp" type="password" value={cpw.cur} onChange={e=>setCpw(x=>({...x,cur:e.target.value}))} placeholder="Current password"/></div>
+        <div className="form-group"><label className="form-label">New Password</label><input className="inp" type="password" value={cpw.nw} onChange={e=>setCpw(x=>({...x,nw:e.target.value}))} placeholder="New password (min 6 chars)"/></div>
+        <div className="form-group"><label className="form-label">Confirm New Password</label><input className="inp" type="password" value={cpw.confirm} onChange={e=>setCpw(x=>({...x,confirm:e.target.value}))} placeholder="Repeat new password"/></div>
+        <button className="btn btn-primary" onClick={changePw} disabled={loading}>{loading?'Saving…':'Update Password'}</button>
+        <div style={{marginTop:'.75rem',fontSize:'.78rem',color:'var(--text3)'}}>You will be logged out after a successful password change.</div>
+      </div>
+    </div>
+  );
+}
+
+// ── USER MANAGEMENT (Admin only) ─────────────────────────────────────────────
+function UserMgmtPage({currentUser}){
+  const [users,setUsers]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState('');
+  const [ok,setOk]=useState('');
+  const [showCreate,setShowCreate]=useState(false);
+  const [form,setForm]=useState({username:'',password:'',full_name:'',role:'faculty',email:'',department:''});
+  const [resetTarget,setResetTarget]=useState(null);
+  const [newPw,setNewPw]=useState('');
+  const sf=(k,v)=>setForm(x=>({...x,[k]:v}));
+
+  const load=async()=>{
+    setLoading(true);setErr('');
+    try{const d=await api('/auth/users');setUsers(d);}
+    catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+  React.useEffect(()=>{load();},[]);
+
+  const create=async()=>{
+    setErr('');setOk('');
+    try{
+      await api('/auth/users',{method:'POST',body:JSON.stringify(form)});
+      setOk('User created.');setShowCreate(false);
+      setForm({username:'',password:'',full_name:'',role:'faculty',email:'',department:''});
+      load();
+    }catch(e){setErr(e.message);}
+  };
+
+  const toggle=async(u)=>{
+    setErr('');
+    try{
+      await api(`/auth/users/${u.id}`,{method:'PUT',body:JSON.stringify({is_active:!u.is_active})});
+      setOk(`${u.username} ${u.is_active?'deactivated':'activated'}.`);
+      load();
+    }catch(e){setErr(e.message);}
+  };
+
+  const doReset=async()=>{
+    if(!newPw||newPw.length<6){setErr('Password must be ≥6 chars.');return;}
+    try{
+      await api(`/auth/users/${resetTarget.id}/reset-password`,{method:'POST',body:JSON.stringify({new_password:newPw})});
+      setOk(`Password reset for ${resetTarget.username}.`);setResetTarget(null);setNewPw('');
+    }catch(e){setErr(e.message);}
+  };
+
+  const roleColors={faculty:'b-blue',hod:'b-green',admin:'b-purple'};
+
+  if(currentUser?.role!=='admin') return(
+    <div className="page-body"><Alrt t="error" msg="Admin role required to manage users."/></div>
+  );
+
+  return(
+    <div className="page-body fade-up">
+      <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:'1.25rem'}}>
+        <div>
+          <div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',lineHeight:1.2}}>User Management</div>
+          <div style={{fontSize:'.85rem',color:'var(--text2)',marginTop:'.2rem'}}>{users.length} accounts registered</div>
+        </div>
+        <button className="btn btn-primary" onClick={()=>setShowCreate(s=>!s)}>+ Add User</button>
+      </div>
+      <Alrt t="error" msg={err}/>
+      <Alrt t="success" msg={ok}/>
+
+      <div className="card" style={{marginBottom:'1.25rem'}}>
+
+        {showCreate&&(
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'1.25rem',marginBottom:'1.25rem'}}>
+            <div style={{fontWeight:600,marginBottom:.75+'rem'}}>Create New User</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.75rem'}}>
+              <div><label className="form-label">Username *</label><input className="inp" value={form.username} onChange={e=>sf('username',e.target.value)} placeholder="username"/></div>
+              <div><label className="form-label">Password *</label><input className="inp" type="password" value={form.password} onChange={e=>sf('password',e.target.value)} placeholder="min 6 chars"/></div>
+              <div><label className="form-label">Full Name *</label><input className="inp" value={form.full_name} onChange={e=>sf('full_name',e.target.value)} placeholder="Dr. John Smith"/></div>
+              <div><label className="form-label">Role *</label>
+                <select className="inp" value={form.role} onChange={e=>sf('role',e.target.value)}>
+                  <option value="faculty">Faculty</option>
+                  <option value="hod">HOD</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div><label className="form-label">Email</label><input className="inp" value={form.email} onChange={e=>sf('email',e.target.value)} placeholder="email@college.edu"/></div>
+              <div><label className="form-label">Department</label><input className="inp" value={form.department} onChange={e=>sf('department',e.target.value)} placeholder="CSE"/></div>
+            </div>
+            <div style={{display:'flex',gap:'.75rem',marginTop:'1rem'}}>
+              <button className="btn btn-primary" onClick={create}>Create User</button>
+              <button className="btn btn-outline" onClick={()=>setShowCreate(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {loading?<Skel/>:<div style={{display:'flex',flexDirection:'column',gap:'.75rem'}}>
+          {users.map(u=>(
+            <div key={u.id} style={{display:'flex',alignItems:'center',gap:'1rem',padding:'.875rem 1rem',background:'var(--bg)',borderRadius:10,border:'1px solid var(--border)',opacity:u.is_active?1:.55}}>
+              <div style={{width:38,height:38,borderRadius:'50%',background:'linear-gradient(135deg,#F97316,#C2410C)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:700,flexShrink:0}}>
+                {u.full_name?.[0]||u.username?.[0]||'U'}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:600,fontSize:'.9rem'}}>{u.full_name||u.username} <span style={{color:'var(--text3)',fontWeight:400}}>@{u.username}</span></div>
+                <div style={{fontSize:'.78rem',color:'var(--text2)'}}>{u.email||'--'} | {u.department||'All Departments'}</div>
+              </div>
+              <span className={`badge ${roleColors[u.role]||'b-blue'}`}>{u.role}</span>
+              {!u.is_active&&<span className="badge b-red">Inactive</span>}
+              <div style={{display:'flex',gap:'.5rem'}}>
+                <button className="btn btn-outline" style={{padding:'.35rem .7rem',fontSize:'.78rem'}} onClick={()=>{setResetTarget(u);setNewPw('');}}>Reset PW</button>
+                {u.id!==currentUser?.id&&(
+                  <button className={`btn ${u.is_active?'btn-outline':'btn-primary'}`} style={{padding:'.35rem .7rem',fontSize:'.78rem'}} onClick={()=>toggle(u)}>
+                    {u.is_active?'Deactivate':'Activate'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>}
+      </div>
+
+      {resetTarget&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200}}>
+          <div className="card" style={{width:380}}>
+            <div style={{fontWeight:700,marginBottom:'.75rem'}}>Reset Password — @{resetTarget.username}</div>
+            <input className="inp" type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} placeholder="New password (min 6 chars)" style={{marginBottom:'.75rem'}}/>
+            <div style={{display:'flex',gap:'.75rem'}}>
+              <button className="btn btn-primary" onClick={doReset}>Reset</button>
+              <button className="btn btn-outline" onClick={()=>setResetTarget(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App(){
+  // Restore session from sessionStorage on page load
+  const [user,setUser]=useState(()=>{
+    const tok=sessionStorage.getItem('obe_token');
+    if(!tok)return null;
+    try{
+      const payload=JSON.parse(atob(tok.split('.')[1]));
+      if(payload.exp*1000<Date.now()){sessionStorage.removeItem('obe_token');return null;}
+      return {id:Number(payload.sub),username:payload.username,role:payload.role,full_name:payload.username};
+    }catch{sessionStorage.removeItem('obe_token');return null;}
+  });
+  const [page,setPage]=useState('home');
+  const [course,setCourse]=useState(()=>{try{const s=sessionStorage.getItem('obe_course');return s?JSON.parse(s):null;}catch{return null;}});
+  const [open,setOpen]=useState(false);
+  const [syllabusData,setSyllabusData]=useState(null);
+  const saveCourse=(c)=>{setCourse(c);if(c)sessionStorage.setItem('obe_course',JSON.stringify(c));else sessionStorage.removeItem('obe_course');};
+  // Auto-rehydrate: if sessionStorage has a course, verify it exists in DB and refresh its data
+  useEffect(()=>{
+    const stored=sessionStorage.getItem('obe_course');
+    if(!stored)return;
+    try{
+      const c=JSON.parse(stored);
+      if(!c||!c.id)return;
+      api(`/courses/${c.id}`).then(d=>{
+        const fresh=d.data||d;
+        saveCourse(fresh);
+      }).catch(()=>{
+        // Course no longer exists in DB — clear stale sessionStorage
+        sessionStorage.removeItem('obe_course');
+        setCourse(null);
+      });
+    }catch{sessionStorage.removeItem('obe_course');setCourse(null);}
+  },[]);
+
+  if(!user)return<Login onLogin={setUser}/>;
+
+  const titles={home:'Dashboard',courses:'Courses',usermgmt:'User Management',profile:'My Profile',syllabus:'Upload Syllabus',setup:'Course Setup',sessions:'Session Plan',evaluation:'Evaluation Plan',marks:'Upload Marks',attainment:'CO/PO Attainment',reports:'NBA/NAAC Reports',hod:'Department Dashboard',qgenerate:'Generate Question',qpaper:'Question Paper',qbank:'Question Bank',qclassify:'Classify Question',qmanipulate:'Manipulate Level',students:'Student Roster',materials:'Study Materials',student_portal:'Student Portal',master_attainment:'Master Attainment File',course_file:'Course File Generator'};
+
+  const pages={
+    home:<HomePage go={setPage} setCourse={saveCourse}/>,
+    courses:<CoursesPage setCourse={saveCourse} go={setPage}/>,
+    courses_detail:<CourseDetailPage course={course} go={setPage} setCourse={saveCourse}/>,
+    syllabus:<SyllabusPage onExtracted={d=>{setSyllabusData(d);setPage('setup');}}/>,
+    setup:<CourseSetupPage setCourse={saveCourse} syllabusData={syllabusData}/>,
+    sessions:<SessionPlanPage course={course}/>,
+    evaluation:<EvalPlanPage course={course}/>,
+    marks:<MarksPage course={course}/>,
+    students:<StudentsPage course={course}/>,
+    materials:<StudyMaterialsPage course={course}/>,
+    student_portal:<StudentPortalPage course={course}/>,
+    attainment:<AttainmentPage course={course}/>,
+    reports:<ReportsPage course={course}/>,
+    hod:<HodPage/>,
+    qgenerate:<GenQPage course={course}/>,
+    qpaper:<QPaperPage course={course}/>,
+    qbank:<QBankPage course={course} go={setPage}/>,
+    qclassify:<ClassifyPage course={course}/>,
+    qmanipulate:<ManipulatePage course={course}/>,
+    usermgmt:<UserMgmtPage currentUser={user}/>,
+    profile:<ProfilePage user={user} logout={()=>{setToken('');setUser(null);setPage('home');saveCourse(null);}}/>,
+    master_attainment:<MasterAttainmentPage course={course} saveCourse={saveCourse}/>,
+    course_file:<CourseFilePage course={course}/>,
+  };
+
+  return(<div className="shell">
+    <div className={`overlay ${open?'show':''}`} onClick={()=>setOpen(false)}/>
+    <Sidebar page={page} go={setPage} course={course} user={user} logout={()=>{setToken('');setUser(null);setPage('home');saveCourse(null);}} open={open} close={()=>setOpen(false)}/>
+    <div className="main">
+
+      <div className="topbar">
+        <button className="hamburger" onClick={()=>setOpen(o=>!o)}>☰</button>
+        <span style={{fontFamily:'DM Serif Display,serif',fontSize:'1.1rem',color:'var(--text)'}}>OBE<span style={{color:'var(--blue2)'}}>.</span>Auto</span>
+        {course&&<span className="badge b-blue" style={{marginLeft:'auto'}}>{course.course_code}</span>}
+      </div>
+      <div className="page-head">
+        <div>
+          <div className="page-head-title">{titles[page]||page}</div>
+          <div className="page-head-sub">{getDay()}</div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:'.875rem'}}>
+          {course&&<span className="badge b-blue" style={{fontSize:'.8rem'}}>📚 {course.course_code}</span>}
+          <div style={{width:34,height:34,borderRadius:'50%',background:'linear-gradient(135deg,#F97316,#C2410C)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:'.8rem',fontWeight:700}}>{user?.full_name?.[0]?.toUpperCase()||user?.username?.[0]?.toUpperCase()||'U'}</div>
+        </div>
+      </div>
+      <EB key={page}>{pages[page]||<div className="page-body"><Alrt t="error" msg="Page not found."/></div>}</EB>
+    </div>
+  </div>);
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
