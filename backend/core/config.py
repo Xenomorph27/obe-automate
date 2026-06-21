@@ -15,7 +15,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # File upload settings
-MAX_FILE_SIZE_MB = 10
+MAX_FILE_SIZE_MB = 25
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 ALLOWED_FILE_TYPES = ["application/pdf"]
 
