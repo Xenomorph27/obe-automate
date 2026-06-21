@@ -188,10 +188,24 @@ CRITICAL RULES:
 2. Your entire response must start with {{ and end with }}
 3. Never return null for any field — use empty string "" or empty array [] if not found.
 4. For credits: look for "Course Credit", "Credits", "Credit Hours" — extract the number as a string.
-5. For course_outcomes: Look for sections labelled "Course Outcomes", "COs", or "Learning Objectives". 
-   - If you find "Course Outcomes" or "COs" → use those directly as CO1, CO2, CO3...
-   - If you only find "Learning Objectives" → treat each objective as a CO (CO1, CO2, CO3...).
-   - NEVER leave course_outcomes empty if any objectives or outcomes exist in the text.
+5. There are FOUR distinct outcome types in this document. Do not mix them up, and do not let
+   one bucket "borrow" content that belongs in another:
+   - course_outcomes (COs): SPECIFIC to this one course only. Usually 4-8 items. Found under a
+     heading like "Course Outcomes", "COs", or "Learning Objectives" that is scoped to this
+     course's syllabus (not the department/program in general).
+   - program_outcomes (POs): The standard generic 12-item engineering graduate list (PO1-PO12),
+     found under "Program Outcomes" or "POs". These are IDENTICAL across every course in the
+     department — if you see items like "Engineering Knowledge", "Problem analysis", "Modern
+     tool usage", "Ethics", "Life-long learning" etc., these are POs, NOT course outcomes.
+   - peos (PEOs): 3-5 broad career/professional statements under "Program Educational
+     Objectives" — these describe what graduates will achieve years after graduating, not
+     course-level skills. NOT course outcomes.
+   - psos (PSOs): 2-4 department-specialization statements under "Program Specific Outcomes" —
+     these describe the specific specialization area (e.g. AI/ML, VLSI, etc). NOT course outcomes.
+   - If you only find "Learning Objectives" with no separate PO/PEO/PSO section, treat each
+     objective as a CO (CO1, CO2, CO3...). NEVER put PO/PEO/PSO content into course_outcomes.
+   - If a genuine course_outcomes section is not present in the text at all, return an empty
+     array for course_outcomes — do NOT substitute PO/PEO/PSO content as a fallback.
 6. For bloom_level: infer from the action verb in the statement. 
    - Explain/Describe/List/Define → Understand
    - Apply/Use/Implement/Solve → Apply
@@ -229,6 +243,15 @@ OUTPUT FORMAT (copy this structure exactly):
       "statement": "Full statement as written in the syllabus",
       "bloom_level": "Apply"
     }}
+  ],
+  "program_outcomes": [
+    {{ "po_id": "PO1", "statement": "Full statement as written" }}
+  ],
+  "peos": [
+    {{ "peo_id": "PEO1", "statement": "Full statement as written" }}
+  ],
+  "psos": [
+    {{ "pso_id": "PSO1", "statement": "Full statement as written" }}
   ]
 }}
 
@@ -237,7 +260,7 @@ SYLLABUS TEXT:
 {text_chunk}
 ---
 
-Remember: Start your response with {{ immediately. No preamble. Extract ALL objectives/outcomes — do not skip any."""
+Remember: Start your response with {{ immediately. No preamble. Extract ALL course outcomes — do not skip any — but keep PO/PEO/PSO content strictly out of course_outcomes."""
 
         try:
             logger.info("Sending syllabus to LLM for extraction")
@@ -252,16 +275,22 @@ Remember: Start your response with {{ immediately. No preamble. Extract ALL obje
                 logger.warning("LLM returned empty course_name — attempting repair")
                 parsed["course_name"] = self._fallback_course_name(raw_text)
 
+            for key in ("course_outcomes", "program_outcomes", "peos", "psos", "units"):
+                if not parsed.get(key):
+                    parsed[key] = []
+
             if not parsed.get("course_outcomes"):
                 logger.warning("LLM returned no course outcomes")
-                parsed["course_outcomes"] = []
 
-            if not parsed.get("units"):
-                parsed["units"] = []
-
-            co_count = len(parsed.get("course_outcomes", []))
+            co_count   = len(parsed.get("course_outcomes", []))
+            po_count   = len(parsed.get("program_outcomes", []))
+            peo_count  = len(parsed.get("peos", []))
+            pso_count  = len(parsed.get("psos", []))
             unit_count = len(parsed.get("units", []))
-            logger.info(f"Extraction complete: {co_count} COs, {unit_count} units, course='{parsed.get('course_name')}'")
+            logger.info(
+                f"Extraction complete: {co_count} COs, {po_count} POs, {peo_count} PEOs, "
+                f"{pso_count} PSOs, {unit_count} units, course='{parsed.get('course_name')}'"
+            )
             return parsed
 
         except json.JSONDecodeError as e:

@@ -202,6 +202,30 @@ def _make_header_table(doc, institution_name, institution_address, title, subtit
 
 # ── Key-safe getter (handles camelCase / snake_case) ─────────────────────────
 
+def _parse_id_text_blob(blob: str, prefix: str):
+    """
+    Parses free-text "ID: statement" lines (one per line, as entered in the
+    Course File wizard's PEO/PSO textareas) into [(id, statement), ...].
+    Returns [] if the blob is empty/whitespace so callers can fall back to
+    a standard default list.
+    """
+    import re as _re3
+    if not blob or not blob.strip():
+        return []
+    rows = []
+    for line in blob.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _re3.match(r'^([A-Za-z]+\s*\d+)\s*[:\-]\s*(.+)$', line)
+        if m:
+            rows.append((m.group(1).strip(), m.group(2).strip()))
+        else:
+            # No "ID:" prefix found — auto-number using the given prefix
+            rows.append((f"{prefix}{len(rows) + 1}", line))
+    return rows
+
+
 def _g(row, *keys, default=""):
     """Try multiple key variants; return first non-empty value."""
     for k in keys:
@@ -531,11 +555,12 @@ def _build_docx(data: dict) -> bytes:
             _run(p, str(po_text or ""), size=9)
 
     _heading2(doc, "Program Educational Objectives (PEOs)")
-    peos = [
+    _STANDARD_PEOS = [
         ("PEO1", "Apply the knowledge of the latest trends of AIML and will be engaged in technology development and deployment for engineering systems in their profession."),
         ("PEO2", "To be competent AIML engineers with innovative thinking and research attitude to solve the real-world problems."),
         ("PEO3", "To have enhanced interpersonal and managerial skills to function effectively in their profession with social awareness and responsibility."),
     ]
+    peos = _parse_id_text_blob(data.get("peo_text", ""), "PEO") or _STANDARD_PEOS
     for pid, ptext in peos:
         p = doc.add_paragraph(style="List Bullet")
         p.paragraph_format.space_before = Pt(3)
@@ -547,10 +572,11 @@ def _build_docx(data: dict) -> bytes:
         r2.font.size = Pt(10)
 
     _heading2(doc, "Program-specific outcomes (PSOs)")
-    psos = [
+    _STANDARD_PSOS = [
         ("PSO1", "To apply the concepts of Artificial Intelligence and Machine Learning with practical knowledge in analysis, design and development of intelligent systems and applications to multi-disciplinary problems."),
         ("PSO2", "To provide a concrete foundation to the students in the cutting-edge areas Artificial Intelligence and Machine Learning and excelling in the specialized areas like Natural Language Processing, Computer Vision, Reinforcement Learning, Internet of Things, Cloud computing, Data Security and privacy etc."),
     ]
+    psos = _parse_id_text_blob(data.get("pso_text", ""), "PSO") or _STANDARD_PSOS
     _make_table(doc, ["", "Program specific outcomes"], [[pid, ptext] for pid, ptext in psos], [1.5, 14.5])
 
     # ── 3. Syllabus & Timetable ───────────────────────────────────────────────
@@ -2136,6 +2162,8 @@ class CourseFileService:
             "pos":            course.pos,
             "co_po_matrix":   course.co_po_matrix,
             "co_po_justification": extra.get("co_po_justification", ""),
+            "peo_text":       extra.get("peo_text", ""),
+            "pso_text":       extra.get("pso_text", ""),
             "vision_text":    extra.get("vision_text", ""),
             "mission_text":   extra.get("mission_text", ""),
             "syllabus_units": syllabus_units,
