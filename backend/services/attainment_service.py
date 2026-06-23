@@ -361,6 +361,29 @@ class AttainmentService:
                 "attainment_level": self._attainment_level(po_pct),
             }
 
+        # ── PSO attainment (same weighted-average formula as PO) ──────────
+        psos = course.psos          # [{pso_id, statement}]
+        co_pso_matrix = course.co_pso_matrix
+        pso_attainment: dict[str, dict] = {}
+        for pso in psos:
+            pso_id = pso["pso_id"]
+            weights = []
+            for co_id in all_co_ids:
+                weight = co_pso_matrix.get(co_id, {}).get(pso_id, 0)
+                if weight > 0:
+                    weights.append((co_attainment[co_id]["attainment_percentage"], weight))
+            if weights:
+                total_w = sum(w for _, w in weights)
+                pso_pct = round(sum(p * w for p, w in weights) / total_w, 2)
+            else:
+                pso_pct = 0.0
+            pso_attainment[pso_id] = {
+                "pso_id": pso_id,
+                "statement": pso["statement"],
+                "attainment_percentage": pso_pct,
+                "attainment_level": self._attainment_level(pso_pct),
+            }
+
         return {
             "course_id": course_id,
             "course_name": course.course_name,
@@ -370,6 +393,7 @@ class AttainmentService:
             "marks_format": fmt,
             "co_attainment": co_attainment,
             "po_attainment": po_attainment,
+            "pso_attainment": pso_attainment,
             "overall_co_attainment": round(
                 sum(v["attainment_percentage"] for v in co_attainment.values()) / len(co_attainment), 2
             ) if co_attainment else 0.0,
@@ -523,6 +547,52 @@ class AttainmentService:
                 val = course.co_po_matrix.get(co_id, {}).get(po_id, 0)
                 row[i + 1].text = str(val) if val else "-"
                 row[i + 1].paragraphs[0].runs[0].font.size = Pt(9)
+
+        # ── PSO Attainment Table (skip entirely if no PSOs configured)
+        if data.get("pso_attainment"):
+            doc.add_paragraph()
+            self._heading(doc, "Program Specific Outcome (PSO) Attainment (via CO-PSO Matrix)")
+
+            pso_tbl = doc.add_table(rows=1, cols=4)
+            pso_tbl.style = "Table Grid"
+            for cell, text in zip(
+                pso_tbl.rows[0].cells,
+                ["PSO", "Statement", "Attainment %", "Level"],
+            ):
+                self._hdr_cell(cell, text, color="1F6B3A")
+
+            for pso_id, pso_data in data["pso_attainment"].items():
+                row = pso_tbl.add_row().cells
+                row[0].text = pso_id
+                row[1].text = pso_data["statement"]
+                row[2].text = f"{pso_data['attainment_percentage']}%"
+                row[3].text = pso_data["attainment_level"]
+                for c in row:
+                    c.paragraphs[0].runs[0].font.size = Pt(9)
+
+            doc.add_paragraph()
+            self._heading(doc, "CO-PSO Correlation Matrix (Reference)")
+            psos_list = course.psos
+            pso_ids = [p["pso_id"] for p in psos_list]
+            co_ids_pso = list(data["co_attainment"].keys())
+
+            cpso_tbl = doc.add_table(rows=1, cols=len(pso_ids) + 1)
+            cpso_tbl.style = "Table Grid"
+            hdr = cpso_tbl.rows[0].cells
+            hdr[0].text = "CO \\ PSO"
+            hdr[0].paragraphs[0].runs[0].bold = True
+            for i, pso_id in enumerate(pso_ids):
+                self._hdr_cell(hdr[i + 1], pso_id, color="1F6B3A")
+
+            for co_id in co_ids_pso:
+                row = cpso_tbl.add_row().cells
+                r0 = row[0].paragraphs[0].add_run(co_id)
+                r0.bold = True
+                r0.font.size = Pt(9)
+                for i, pso_id in enumerate(pso_ids):
+                    val = course.co_pso_matrix.get(co_id, {}).get(pso_id, 0)
+                    row[i + 1].text = str(val) if val else "-"
+                    row[i + 1].paragraphs[0].runs[0].font.size = Pt(9)
 
         doc.save(filepath)
         logger.info(f"Attainment report saved → {filepath}")
@@ -728,6 +798,9 @@ Return format (JSON only, no fences):
             if any(kw in heading_lower for kw in ["co attainment", "course outcome"]):
                 self._build_docx_co_table(out_doc, data)
                 out_doc.add_paragraph()
+            elif any(kw in heading_lower for kw in ["pso attainment", "program specific"]):
+                self._build_docx_pso_table(out_doc, data)
+                out_doc.add_paragraph()
             elif any(kw in heading_lower for kw in ["po attainment", "program outcome"]):
                 self._build_docx_po_table(out_doc, data)
                 out_doc.add_paragraph()
@@ -799,6 +872,30 @@ Return format (JSON only, no fences):
             row[1].text = po_data["statement"]
             row[2].text = f"{po_data['attainment_percentage']}%"
             row[3].text = po_data["attainment_level"]
+            for c in row:
+                if c.paragraphs[0].runs:
+                    c.paragraphs[0].runs[0].font.size = _Pt(9)
+
+    def _build_docx_pso_table(self, doc, data: dict):
+        """Shared helper: PSO attainment table — green header to distinguish from PO."""
+        from docx.shared import Pt as _Pt
+        if not data.get("pso_attainment"):
+            p = doc.add_paragraph()
+            p.add_run("No PSOs configured for this course.").italic = True
+            return
+        pso_tbl = doc.add_table(rows=1, cols=4)
+        pso_tbl.style = "Table Grid"
+        for cell, text in zip(
+            pso_tbl.rows[0].cells,
+            ["PSO", "Statement", "Attainment %", "Level"],
+        ):
+            self._hdr_cell(cell, text, color="1F6B3A")
+        for pso_id, pso_data in data["pso_attainment"].items():
+            row = pso_tbl.add_row().cells
+            row[0].text = pso_id
+            row[1].text = pso_data["statement"]
+            row[2].text = f"{pso_data['attainment_percentage']}%"
+            row[3].text = pso_data["attainment_level"]
             for c in row:
                 if c.paragraphs[0].runs:
                     c.paragraphs[0].runs[0].font.size = _Pt(9)

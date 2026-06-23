@@ -102,6 +102,9 @@ async def init_db():
         ("course_file_extra", "custom_tabs",          "TEXT DEFAULT '[]'"),
         # Timetable persisted per-user in DB (survives redeploys)
         ("users",             "timetable_json",          "TEXT DEFAULT NULL"),
+        # PSO columns added in v3 — CO-PSO matrix and PSO list on Course
+        ("courses",           "psos",                    "TEXT DEFAULT '[]'"),
+        ("courses",           "co_pso_matrix",           "TEXT DEFAULT '{}'"),
     ]
     async with engine.begin() as conn:
         for table, column, col_type in _new_columns:

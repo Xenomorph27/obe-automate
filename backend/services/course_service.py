@@ -43,7 +43,9 @@ class CourseService:
         # Use the property setters — they handle JSON serialisation
         course.cos = [co.dict() for co in request.cos]
         course.pos = [po.dict() for po in request.pos]
+        course.psos = [pso.dict() for pso in request.psos] if request.psos else []
         course.co_po_matrix = request.co_po_matrix
+        course.co_pso_matrix = request.co_pso_matrix if request.co_pso_matrix else {}
         course.evaluation_config = request.evaluation_config.dict()
 
         self.db.add(course)
@@ -92,8 +94,12 @@ class CourseService:
             course.cos = [co.dict() for co in request.cos]
         if request.pos is not None:
             course.pos = [po.dict() for po in request.pos]
+        if request.psos is not None:
+            course.psos = [pso.dict() for pso in request.psos]
         if request.co_po_matrix is not None:
             course.co_po_matrix = request.co_po_matrix
+        if request.co_pso_matrix is not None:
+            course.co_pso_matrix = request.co_pso_matrix
         if request.evaluation_config is not None:
             course.evaluation_config = request.evaluation_config.dict()
 

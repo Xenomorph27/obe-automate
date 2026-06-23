@@ -898,7 +898,16 @@ function SyllabusPage({onExtracted}){
   const rmUnit=(i)=>setEditingUnits(u=>u.filter((_,j)=>j!==i));
 
   const proceed=()=>{
-    const merged={...res,...editRes,course_outcomes:editingCos,cos:editingCos,units:editingUnits};
+    const merged={
+      ...res,
+      ...editRes,
+      course_outcomes: editingCos,
+      cos: editingCos,
+      units: editingUnits,
+      program_outcomes: res?.program_outcomes || [],
+      peos: res?.peos || [],
+      psos: res?.psos || [],
+    };
     onExtracted&&onExtracted(merged);
   };
 
@@ -975,6 +984,8 @@ function SyllabusPage({onExtracted}){
 function CourseSetupPage({setCourse,syllabusData}){
   const initCos=(syllabusData?.course_outcomes||[]).map(co=>({...co,bloom_level:inferBloomSync(co.statement||'')}));
   const defaultPos=[{po_id:'PO1',statement:'Engineering Knowledge'},{po_id:'PO2',statement:'Problem Analysis'},{po_id:'PO3',statement:'Design Solutions'},{po_id:'PO4',statement:'Conduct investigations of complex problems'},{po_id:'PO5',statement:'Modern Tool Usage'},{po_id:'PO6',statement:'The Engineer and Society'},{po_id:'PO7',statement:'Environment and Sustainability'},{po_id:'PO8',statement:'Ethics'},{po_id:'PO9',statement:'Individual and Team Work'},{po_id:'PO10',statement:'Communication'},{po_id:'PO11',statement:'Project Management and Finance'},{po_id:'PO12',statement:'Life-long Learning'}];
+  // PSOs: prefill from extraction if available, else empty (faculty can add manually)
+  const initPsos = (syllabusData?.psos||[]).map(p=>({pso_id:p.pso_id||p.id||'',statement:p.statement||''}));
   const [f,setF]=useState({
     course_name:syllabusData?.course_name||'',
     course_code:syllabusData?.course_code||'',
@@ -983,6 +994,7 @@ function CourseSetupPage({setCourse,syllabusData}){
     faculty_name:'',department:'',semester:'',academic_year:''
   });
   const [cos,setCos]=useState(initCos.length>0?initCos:[{co_id:'CO1',statement:'',bloom_level:'Apply'}]);
+  const [psos,setPsos]=useState(initPsos);
   const [customFields,setCustomFields]=useState([]); // [{id, label, values:[{id,text}]}]
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
   const [classifyingCos,setClassifyingCos]=useState(false);
@@ -1022,22 +1034,34 @@ function CourseSetupPage({setCourse,syllabusData}){
     cosArr.forEach(co=>{m[co.co_id]={};defaultPos.forEach(po=>{m[co.co_id][po.po_id]=1;});});
     return m;
   };
+  const buildPsoMatrix=(cosArr,psosArr)=>{
+    if(!psosArr||psosArr.length===0) return {};
+    const m={};
+    cosArr.forEach(co=>{m[co.co_id]={};psosArr.forEach(pso=>{m[co.co_id][pso.pso_id]=1;});});
+    return m;
+  };
+  const addPso=()=>setPsos(x=>[...x,{pso_id:`PSO${x.length+1}`,statement:''}]);
+  const rmPso=(i)=>setPsos(x=>x.filter((_,j)=>j!==i));
+  const setPso=(i,k,v)=>setPsos(x=>{const a=[...x];a[i]={...a[i],[k]:v};return a;});
   const sub=async()=>{
     if(!f.course_name.trim()){setErr('Course name is required.');return;}
     if(cos.some(c=>!c.statement.trim())){setErr('All CO statements must be filled.');return;}
     setLoading(true);setErr('');setOk('');
     try{
       const matrix=buildMatrix(cos);
+      const psoMatrix=buildPsoMatrix(cos,psos);
       const d=await api('/courses/setup',{method:'POST',body:JSON.stringify({
         ...f,credits:+f.credits,total_hours:+f.total_hours,
         cos,
         pos:defaultPos,
+        psos,
         co_po_matrix:matrix,
+        co_pso_matrix:psoMatrix,
         evaluation_config:{continuous_assessment_total:40,end_sem_total:60,components:{Quiz:10,'Unit Test':20,Assignment:10}},
         custom_fields:customFields.map(cf=>({label:cf.label,values:cf.values.map(v=>v.text).filter(Boolean)}))
       })});
       setOk(`Course created! ID: ${d.course_id} - Go to Session Plan to generate your first plan.`);
-      setCourse({...f,id:d.course_id,cos,pos:defaultPos,custom_fields:customFields});
+      setCourse({...f,id:d.course_id,cos,pos:defaultPos,psos,custom_fields:customFields});
     }catch(e){setErr(e.message);}setLoading(false);
   };
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Course Setup</div>
@@ -1072,6 +1096,29 @@ function CourseSetupPage({setCourse,syllabusData}){
           <button className="btn btn-outline btn-sm" onClick={runAiClassifySetup} disabled={classifyingCos||cos.length===0} title="Classify all CO levels using AI">{classifyingCos?<><Spin/>Classifying…</>:'🤖 AI Classify'}</button>
           <button className="btn btn-outline btn-sm" onClick={addCo}>+ Add CO</button>
         </div>
+      </div>
+    </div>
+
+    {/* PSO Section */}
+    <div style={{maxWidth:980,marginTop:'1.5rem'}}>
+      <div className="card card-p">
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.75rem'}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:'.95rem'}}>Program Specific Outcomes (PSOs)</div>
+            {syllabusData?.psos?.length>0&&<div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.15rem'}}>Pre-filled from syllabus — edit if needed.</div>}
+          </div>
+          <button className="btn btn-outline btn-sm" onClick={addPso}>+ Add PSO</button>
+        </div>
+        {psos.length===0&&<div style={{padding:'1rem',background:'var(--bg)',borderRadius:8,border:'1px dashed var(--border)',textAlign:'center',color:'var(--text3)',fontSize:'.85rem'}}>
+          No PSOs added yet. PSO attainment will be skipped in the attainment report if none are set.
+        </div>}
+        {psos.map((pso,i)=>(
+          <div key={i} style={{display:'flex',gap:'.5rem',alignItems:'center',marginBottom:'.5rem'}}>
+            <input className="fi" style={{width:70,flexShrink:0}} value={pso.pso_id} onChange={e=>setPso(i,'pso_id',e.target.value)} placeholder="PSO1"/>
+            <input className="fi" style={{flex:1,fontSize:'.855rem'}} value={pso.statement} onChange={e=>setPso(i,'statement',e.target.value)} placeholder="PSO statement…"/>
+            <button onClick={()=>rmPso(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0}}>✕</button>
+          </div>
+        ))}
       </div>
     </div>
 
@@ -5611,11 +5658,19 @@ function CourseFileEditor({ courseId }) {
       if (Object.keys(d).length > 0) {
         setExtra(prev => {
           const merged = { ...prev, ...d };
+          const courseData = courseRes.value?.data ?? courseRes.value;
           // Auto-fill POs from course data if DB has empty po_peo_pso_text
           if (!merged.po_peo_pso_text?.trim()) {
-            const coursePOs = (courseRes.value?.data ?? courseRes.value)?.pos ?? [];
+            const coursePOs = courseData?.pos ?? [];
             if (coursePOs.length) {
               merged.po_peo_pso_text = coursePOs.map(p => `${p.po_id}: ${p.statement}`).join("\n");
+            }
+          }
+          // Auto-fill PSO text from course.psos if pso_text is still empty
+          if (!merged.pso_text?.trim()) {
+            const coursePSOs = courseData?.psos ?? [];
+            if (coursePSOs.length) {
+              merged.pso_text = coursePSOs.map(p => `${p.pso_id}: ${p.statement}`).join("\n");
             }
           }
           return merged;

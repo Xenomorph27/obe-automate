@@ -21,6 +21,8 @@ class Course(Base):
     _pos = Column("pos", Text, nullable=False)
     _co_po_matrix = Column("co_po_matrix", Text, nullable=False)
     _evaluation_config = Column("evaluation_config", Text, nullable=False)
+    _psos = Column("psos", Text, nullable=True, default="[]")
+    _co_pso_matrix = Column("co_pso_matrix", Text, nullable=True, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     attainment_records = relationship("COAttainment", back_populates="course", cascade="all, delete-orphan")
@@ -46,12 +48,21 @@ class Course(Base):
     def evaluation_config(self): return json.loads(self._evaluation_config)
     @evaluation_config.setter
     def evaluation_config(self, value): self._evaluation_config = json.dumps(value)
+    @property
+    def psos(self): return json.loads(self._psos or "[]")
+    @psos.setter
+    def psos(self, value): self._psos = json.dumps(value)
+    @property
+    def co_pso_matrix(self): return json.loads(self._co_pso_matrix or "{}")
+    @co_pso_matrix.setter
+    def co_pso_matrix(self, value): self._co_pso_matrix = json.dumps(value)
 
     def to_dict(self):
         return {"id":self.id,"course_name":self.course_name,"course_code":self.course_code,
                 "credits":self.credits,"total_hours":self.total_hours,"faculty_name":self.faculty_name,
                 "department":self.department,"semester":self.semester,"academic_year":self.academic_year,
                 "cos":self.cos,"pos":self.pos,"co_po_matrix":self.co_po_matrix,
+                "psos":self.psos,"co_pso_matrix":self.co_pso_matrix,
                 "evaluation_config":self.evaluation_config,
                 "created_at":self.created_at.isoformat() if self.created_at else None}
 

@@ -31,6 +31,11 @@ class ProgramOutcome(BaseModel):
     statement: str = Field(example="Engineering Knowledge")
 
 
+class ProgramSpecificOutcome(BaseModel):
+    pso_id: str = Field(example="PSO1")
+    statement: str = Field(example="Apply AI/ML concepts to real-world problems")
+
+
 class EvaluationConfig(BaseModel):
     continuous_assessment_total: int = Field(example=30)
     components: Dict[str, int] = Field(
@@ -50,9 +55,15 @@ class CourseSetupRequest(BaseModel):
     academic_year: str = Field(example="2024-25")
     cos: List[CourseOutcome]
     pos: List[ProgramOutcome]
+    psos: List[ProgramSpecificOutcome] = Field(default_factory=list)
     co_po_matrix: Dict[str, Dict[str, int]] = Field(
         description="CO-PO mapping. Keys are CO IDs, values are dicts of PO ID → correlation (0,1,2,3)",
         example={"CO1": {"PO1": 3, "PO2": 2}, "CO2": {"PO1": 1, "PO2": 3}}
+    )
+    co_pso_matrix: Dict[str, Dict[str, int]] = Field(
+        default_factory=dict,
+        description="CO-PSO mapping. Same correlation scale as CO-PO.",
+        example={"CO1": {"PSO1": 3}, "CO2": {"PSO1": 2, "PSO2": 1}}
     )
     evaluation_config: EvaluationConfig
 
@@ -68,7 +79,9 @@ class CourseUpdateRequest(BaseModel):
     academic_year: str | None = None
     cos: List[CourseOutcome] | None = None
     pos: List[ProgramOutcome] | None = None
+    psos: List[ProgramSpecificOutcome] | None = None
     co_po_matrix: Dict[str, Dict[str, int]] | None = None
+    co_pso_matrix: Dict[str, Dict[str, int]] | None = None
     evaluation_config: EvaluationConfig | None = None
 
 
