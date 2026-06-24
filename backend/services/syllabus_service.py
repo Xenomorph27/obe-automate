@@ -63,17 +63,20 @@ def _page_relevance_score(text: str) -> int:
             score -= 4
     return score
 
-VISION_PROMPT = """You are looking at one page of an engineering college course syllabus (PDF).
-This page's content was embedded as an image/screenshot rather than as selectable text, so
-transcribe everything relevant to the syllabus that is visible in the image.
+VISION_PROMPT = """You are an OCR engine reading one page of an engineering college course document.
 
-Include, if present: course name, course code, credits, unit/module numbers and titles,
-topics within each unit, course outcomes (COs) / learning objectives, and any tables of
-content from the course outline.
+YOUR ONLY JOB IS TO COPY TEXT EXACTLY AS IT APPEARS. Do not summarize, rephrase, shorten, or infer anything.
 
-Output plain text only — no markdown, no commentary, no preamble. Preserve unit/topic
-structure using line breaks. If the image contains nothing relevant to a syllabus
-(e.g. it's a logo, signature, or decorative banner), output exactly: NO_SYLLABUS_CONTENT"""
+STRICT RULES:
+- Copy every word VERBATIM — character by character, exactly as printed.
+- Preserve original capitalization, punctuation, and spacing.
+- For tables: copy each cell value exactly. Use " | " to separate columns and a new line for each row.
+- For numbered lists: copy the number and text exactly as printed.
+- Do NOT paraphrase. Do NOT add context. Do NOT omit words for brevity.
+- If a unit title says "Introduction to Unsupervised Learning" copy that EXACTLY — never shorten to "Introduction to Machine Learning" or anything else.
+- If the image contains no text at all (pure logo, photo, decorative graphic), output exactly: NO_SYLLABUS_CONTENT
+
+Output: plain copied text only. No markdown, no commentary, no preamble."""
 
 
 class SyllabusService:
@@ -249,7 +252,17 @@ CRITICAL RULES:
 2. Your entire response must start with {{ and end with }}
 3. Never return null for any field — use empty string "" or empty array [] if not found.
 4. For credits: look for "Course Credit", "Credits", "Credit Hours" — extract the number as a string.
-5. There are FOUR distinct outcome types in this document. Do not mix them up, and do not let
+5. VERBATIM COPY RULE — THIS IS THE MOST IMPORTANT RULE:
+   For the following fields, copy the text EXACTLY as it appears in the source. Do NOT rephrase,
+   shorten, paraphrase, or infer. Copy character by character:
+   - unit_title: copy the exact unit/module heading as printed. If it says
+     "Introduction to Unsupervised Learning" write that exactly — never write
+     "Introduction to Machine Learning" or any other variation.
+   - CO statement: copy the exact sentence as written. Do not shorten it.
+   - course_name, course_code: copy exactly as printed.
+   - PO, PEO, PSO statements: copy exactly as written.
+   If you are not 100% sure of a word, copy what you see. Never substitute a different word.
+6. There are FOUR distinct outcome types in this document. Do not mix them up, and do not let
    one bucket "borrow" content that belongs in another:
    - course_outcomes (COs): SPECIFIC to this one course only. Usually 4-8 items. Found under a
      heading like "Course Outcomes", "COs", or "Learning Objectives" that is scoped to this
@@ -267,52 +280,46 @@ CRITICAL RULES:
      objective as a CO (CO1, CO2, CO3...). NEVER put PO/PEO/PSO content into course_outcomes.
    - If a genuine course_outcomes section is not present in the text at all, return an empty
      array for course_outcomes — do NOT substitute PO/PEO/PSO content as a fallback.
-6. For bloom_level: infer from the action verb in the statement. 
-   - Explain/Describe/List/Define → Understand
-   - Apply/Use/Implement/Solve → Apply
-   - Analyze/Compare/Distinguish → Analyze
+7. For bloom_level: this is the ONLY field where you infer rather than copy — infer from the
+   action verb in the CO statement:
+   - Explain/Describe/List/Define/Understand → Understand
+   - Apply/Use/Implement/Solve/Demonstrate → Apply
+   - Analyze/Compare/Distinguish/Contrast → Analyze
    - Evaluate/Justify/Assess → Evaluate
-   - Design/Create/Build/Develop → Create
+   - Design/Create/Build/Develop/Model → Create
    - Remember/Recall/Identify → Remember
-7. Extract all units/modules/topics from the Course Outline section.
+8. For units: look specifically for a "Course Outline" table or "Modules" section.
+   Copy unit numbers and titles VERBATIM from that table. Do not use session plan lecture
+   topics as unit titles — those are different. The course outline table has columns like
+   "Sr. No.", "Topic", "Contact Hours".
 
 OUTPUT FORMAT (copy this structure exactly):
 {{
-  "course_name": "Full course name as written in syllabus",
-  "course_code": "Course code e.g. TE7760",
+  "course_name": "Full course name exactly as written",
+  "course_code": "Course code exactly as written",
   "credits": "3",
   "units": [
     {{
       "unit_number": 1,
-      "unit_title": "Title of Unit 1",
-      "topics": ["Topic A", "Topic B", "Topic C"]
-    }},
-    {{
-      "unit_number": 2,
-      "unit_title": "Title of Unit 2",
-      "topics": ["Topic D", "Topic E"]
+      "unit_title": "VERBATIM title from Course Outline table",
+      "topics": ["VERBATIM topic A", "VERBATIM topic B"]
     }}
   ],
   "course_outcomes": [
     {{
       "co_id": "CO1",
-      "statement": "Full statement as written in the syllabus",
-      "bloom_level": "Understand"
-    }},
-    {{
-      "co_id": "CO2",
-      "statement": "Full statement as written in the syllabus",
-      "bloom_level": "Apply"
+      "statement": "VERBATIM full statement as written",
+      "bloom_level": "Analyze"
     }}
   ],
   "program_outcomes": [
-    {{ "po_id": "PO1", "statement": "Full statement as written" }}
+    {{ "po_id": "PO1", "statement": "VERBATIM full statement" }}
   ],
   "peos": [
-    {{ "peo_id": "PEO1", "statement": "Full statement as written" }}
+    {{ "peo_id": "PEO1", "statement": "VERBATIM full statement" }}
   ],
   "psos": [
-    {{ "pso_id": "PSO1", "statement": "Full statement as written" }}
+    {{ "pso_id": "PSO1", "statement": "VERBATIM full statement" }}
   ]
 }}
 
@@ -321,7 +328,7 @@ SYLLABUS TEXT:
 {text_chunk}
 ---
 
-Remember: Start your response with {{ immediately. No preamble. Extract ALL course outcomes — do not skip any — but keep PO/PEO/PSO content strictly out of course_outcomes."""
+Remember: Start your response with {{ immediately. No preamble. COPY DON'T PARAPHRASE for all fields except bloom_level."""
 
         try:
             logger.info("Sending syllabus to LLM for extraction")
