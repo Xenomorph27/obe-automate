@@ -20,7 +20,48 @@ logger = get_logger(__name__)
 #    some text is also present (e.g. a scanned page with a thin text header).
 MIN_TEXT_CHARS_PER_PAGE = 120
 IMAGE_AREA_COVERAGE_THRESHOLD = 0.35
-MAX_VISION_PAGES = 8  # safety cap so a huge scanned PDF can't trigger 50+ API calls
+MAX_VISION_PAGES = 8
+MAX_LLM_CHARS = 24000   # Gemini 2.0 Flash handles long contexts easily
+
+# Keywords that strongly signal a page contains syllabus-relevant content
+_RELEVANT_KEYWORDS = [
+    "course outcome", "learning objective", "unit", "module", "syllabus",
+    "co1", "co2", "co3", "co4", "co5",
+    "program outcome", "peo", "pso", "bloom", "course credit",
+    "course code", "course name", "dimensionality", "clustering",
+    "deep learning", "autoencoder", "neural", "unsupervised",
+    "contact hours", "course outline", "prerequisite",
+]
+
+# Keywords that strongly signal a page is bulk filler — skip it
+_FILLER_KEYWORDS = [
+    "prn", "roll no", "sign", "signature", "attendance", "absent",
+    "cgpa", "sgpa", "result declaration", "marks declaration",
+    "dear students", "submission deadline", "google meet",
+    "inbox", "reply", "forward", "gmail", "moodle",
+    "sr. no", "sr.no",
+]
+
+def _page_relevance_score(text: str) -> int:
+    """
+    Returns a score for how relevant a page is to syllabus extraction.
+    Positive = relevant, negative = filler, 0 = neutral.
+    """
+    lower = text.lower()
+    score = 0
+    for kw in _RELEVANT_KEYWORDS:
+        if kw in lower:
+            score += 2
+    for kw in _FILLER_KEYWORDS:
+        if kw in lower:
+            score -= 3
+    # Penalise pages that are mostly numeric rows (student lists, marks sheets)
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if lines:
+        numeric_lines = sum(1 for l in lines if sum(c.isdigit() for c in l) / max(len(l), 1) > 0.4)
+        if numeric_lines / len(lines) > 0.5:
+            score -= 4
+    return score
 
 VISION_PROMPT = """You are looking at one page of an engineering college course syllabus (PDF).
 This page's content was embedded as an image/screenshot rather than as selectable text, so
@@ -111,14 +152,34 @@ class SyllabusService:
                 )
                 vision_text_by_page = await self._extract_text_from_pages(doc, vision_candidates)
 
-            full_text_parts = []
+            # ── Build final text: relevance-ranked, budget-capped ─────────
+            # Score every page, sort high-relevance first, then fill the
+            # budget. This ensures CO/unit sections aren't starved by student
+            # lists or email screenshots that appear earlier in the document.
+            scored_pages = []
             for i, page_text in enumerate(page_texts):
                 vision_text = vision_text_by_page.get(i, "")
+                combined = page_text
                 if vision_text and vision_text.strip() != "NO_SYLLABUS_CONTENT":
-                    full_text_parts.append(page_text + "\n" + vision_text)
-                else:
-                    full_text_parts.append(page_text)
-            full_text = "\n".join(full_text_parts)
+                    combined = page_text + "\n" + vision_text
+                score = _page_relevance_score(combined)
+                scored_pages.append((score, i, combined))
+
+            # Sort: highest relevance first, then by original page order
+            scored_pages.sort(key=lambda x: (-x[0], x[1]))
+
+            budget = MAX_LLM_CHARS
+            selected = []
+            for score, idx, text in scored_pages:
+                if budget <= 0:
+                    break
+                chunk = text[:budget]
+                selected.append((idx, chunk))
+                budget -= len(chunk)
+
+            # Re-sort selected pages back into document order for coherent reading
+            selected.sort(key=lambda x: x[0])
+            full_text = "\n".join(text for _, text in selected)
 
             doc.close()
 
@@ -177,7 +238,7 @@ class SyllabusService:
 
     async def _extract_with_llm(self, raw_text: str) -> dict:
         # Use first 10000 chars to capture more of the syllabus
-        text_chunk = raw_text[:16000]
+        text_chunk = raw_text  # budget already enforced by page relevance filter
 
         prompt = f"""You are an academic data extraction assistant specializing in engineering college syllabi for Outcome-Based Education (OBE) systems.
 
