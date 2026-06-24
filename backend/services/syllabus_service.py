@@ -155,32 +155,45 @@ class SyllabusService:
                 )
                 vision_text_by_page = await self._extract_text_from_pages(doc, vision_candidates)
 
-            # ── Build final text: relevance-ranked, budget-capped ─────────
-            # Score every page, sort high-relevance first, then fill the
-            # budget. This ensures CO/unit sections aren't starved by student
-            # lists or email screenshots that appear earlier in the document.
-            scored_pages = []
-            for i, page_text in enumerate(page_texts):
-                vision_text = vision_text_by_page.get(i, "")
-                combined = page_text
-                if vision_text and vision_text.strip() != "NO_SYLLABUS_CONTENT":
-                    combined = page_text + "\n" + vision_text
-                score = _page_relevance_score(combined)
-                scored_pages.append((score, i, combined))
-
-            # Sort: highest relevance first, then by original page order
-            scored_pages.sort(key=lambda x: (-x[0], x[1]))
+            # ── Build final text: vision pages first, then relevance-ranked ──
+            # Vision pages MUST come first in the budget — they contain the
+            # course outline table (unit titles) which is the most critical
+            # structured content. Text-layer pages fill the remaining budget
+            # sorted by relevance score, skipping bulk filler.
 
             budget = MAX_LLM_CHARS
-            selected = []
-            for score, idx, text in scored_pages:
+            selected = []  # (original_page_index, text)
+
+            # 1. Pin all vision-extracted pages at the top (they earned their place)
+            for i in sorted(vision_text_by_page.keys()):
                 if budget <= 0:
                     break
-                chunk = text[:budget]
-                selected.append((idx, chunk))
+                vision_text = vision_text_by_page.get(i, "")
+                if not vision_text or vision_text.strip() == "NO_SYLLABUS_CONTENT":
+                    continue
+                combined = page_texts[i] + "\n" + vision_text
+                chunk = combined[:budget]
+                selected.append((i, chunk))
                 budget -= len(chunk)
 
-            # Re-sort selected pages back into document order for coherent reading
+            # 2. Fill remaining budget with text-layer pages, highest score first
+            vision_indices = set(vision_text_by_page.keys())
+            text_pages = []
+            for i, page_text in enumerate(page_texts):
+                if i in vision_indices:
+                    continue  # already handled above
+                score = _page_relevance_score(page_text)
+                text_pages.append((score, i, page_text))
+
+            text_pages.sort(key=lambda x: (-x[0], x[1]))
+            for score, i, page_text in text_pages:
+                if budget <= 0:
+                    break
+                chunk = page_text[:budget]
+                selected.append((i, chunk))
+                budget -= len(chunk)
+
+            # 3. Re-sort into document order so context reads coherently
             selected.sort(key=lambda x: x[0])
             full_text = "\n".join(text for _, text in selected)
 
@@ -288,10 +301,19 @@ CRITICAL RULES:
    - Evaluate/Justify/Assess → Evaluate
    - Design/Create/Build/Develop/Model → Create
    - Remember/Recall/Identify → Remember
-8. For units: look specifically for a "Course Outline" table or "Modules" section.
-   Copy unit numbers and titles VERBATIM from that table. Do not use session plan lecture
-   topics as unit titles — those are different. The course outline table has columns like
-   "Sr. No.", "Topic", "Contact Hours".
+8. For units: look ONLY in the "Course Outline" table (columns: Sr.No. | Topic | Contact Hours).
+   - unit_title: copy the FIRST LINE / main heading of each row exactly as printed.
+     e.g. "Introduction to Unsupervised Learning -" → unit_title is "Introduction to Unsupervised Learning"
+   - topics: copy ALL the remaining sub-topic text from that same row, split into individual
+     topic strings. Do NOT truncate, do NOT summarize. Every sub-topic listed in that row
+     must appear as a separate string in the topics array, copied verbatim.
+     e.g. for Unit 1 the topics array should contain strings like:
+       "Introduction to Machine Learning, applications",
+       "Types of Learning: Supervised, Unsupervised and Semi-Supervised Learning",
+       "Data Types and distance measures Numeric Data and Euclidean Distance, Categorical data, Graph data, Spatial data, Trajectory data, Time Series Data and Distance measures, Manhattan, Minkowski, Chessboard and others"
+   - NEVER use session plan lecture topics (Lect. No. 1, 2, 3...) as unit titles or topics.
+     The session plan is a different section entirely. The Course Outline table is the source.
+   - If the Course Outline table is not present in the text (it may be image-only), return [].
 
 OUTPUT FORMAT (copy this structure exactly):
 {{
@@ -301,8 +323,20 @@ OUTPUT FORMAT (copy this structure exactly):
   "units": [
     {{
       "unit_number": 1,
-      "unit_title": "VERBATIM title from Course Outline table",
-      "topics": ["VERBATIM topic A", "VERBATIM topic B"]
+      "unit_title": "Introduction to Unsupervised Learning",
+      "topics": [
+        "Introduction to Machine Learning, applications",
+        "Types of Learning: Supervised, Unsupervised and Semi-Supervised Learning",
+        "Data Types and distance measures Numeric Data and Euclidean Distance, Categorical data, Graph data, Spatial data, Trajectory data, Time Series Data and Distance measures, Manhattan, Minkowski, Chessboard and others"
+      ]
+    }},
+    {{
+      "unit_number": 2,
+      "unit_title": "Dimensionality Reduction Techniques",
+      "topics": [
+        "Data size, Feature size and scalability issues in Machine Learning",
+        "Linear Discriminate Analysis, Principal Component Analysis, Independent Component Analysis, Non-Negative Matrix Factorization and types, Singular Value Decomposition, Manifold Learning methods: MDS and T-SNE, normalization of input data, Density estimation"
+      ]
     }}
   ],
   "course_outcomes": [
