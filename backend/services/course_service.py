@@ -44,6 +44,7 @@ class CourseService:
         course.cos = [co.dict() for co in request.cos]
         course.pos = [po.dict() for po in request.pos]
         course.psos = [pso.dict() for pso in request.psos] if request.psos else []
+        course.units = [u.dict() for u in request.units] if request.units else []  # ★ ADDED
         course.co_po_matrix = request.co_po_matrix
         course.co_pso_matrix = request.co_pso_matrix if request.co_pso_matrix else {}
         course.evaluation_config = request.evaluation_config.dict()
@@ -96,6 +97,8 @@ class CourseService:
             course.pos = [po.dict() for po in request.pos]
         if request.psos is not None:
             course.psos = [pso.dict() for pso in request.psos]
+        if request.units is not None:  # ★ ADDED
+            course.units = [u.dict() for u in request.units]
         if request.co_po_matrix is not None:
             course.co_po_matrix = request.co_po_matrix
         if request.co_pso_matrix is not None:

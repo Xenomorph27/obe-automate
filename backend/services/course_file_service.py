@@ -2142,7 +2142,13 @@ class CourseFileService:
 
         co_attainment              = await self._get_co_attainment(course_id, students, ca_sheets, cos)
         slow_list, advanced_list   = await self._get_slow_advanced(course_id, students, ca_sheets, cos)
-        syllabus_units             = self._extract_syllabus_from_session(session_rows)
+        # ★ FIX: course.units holds the verbatim Course Outline table extracted at syllabus-upload
+        # time (correct unit titles + full topic text + hours). This used to be discarded because
+        # Course had no column to persist it, so this always fell back to _extract_syllabus_from_session,
+        # which only has lecture-level Session Plan topics — not the actual unit/topic structure.
+        # Now: use course.units when present; keep the session-plan reconstruction as a fallback
+        # ONLY for courses created before this fix (where course.units is empty).
+        syllabus_units = course.units or self._extract_syllabus_from_session(session_rows)
         tutorial_qs                = self._extract_tutorial_questions(questions)
 
         data = {

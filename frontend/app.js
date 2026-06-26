@@ -964,10 +964,20 @@ function SyllabusPage({onExtracted}){
             <button className="btn btn-outline btn-sm" onClick={addUnit}>+ Add Unit</button>
           </div>
           {editingUnits.map((u,i)=>(
-            <div key={i} style={{display:'flex',gap:'.5rem',alignItems:'center',marginBottom:'.4rem',padding:'.5rem .65rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
-              <input className="fi" style={{width:60,flexShrink:0,fontSize:'.82rem',padding:'.4rem .5rem'}} type="number" value={u.unit_number} onChange={e=>updUnit(i,'unit_number',e.target.value)} placeholder="1"/>
-              <input className="fi" style={{flex:1,fontSize:'.82rem',padding:'.4rem .6rem'}} value={u.unit_title} onChange={e=>updUnit(i,'unit_title',e.target.value)} placeholder="Unit title…"/>
-              <button onClick={()=>rmUnit(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0,padding:'0 4px'}}>×</button>
+            <div key={i} style={{display:'flex',flexDirection:'column',gap:'.4rem',marginBottom:'.4rem',padding:'.5rem .65rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
+              <div style={{display:'flex',gap:'.5rem',alignItems:'center'}}>
+                <input className="fi" style={{width:60,flexShrink:0,fontSize:'.82rem',padding:'.4rem .5rem'}} type="number" value={u.unit_number} onChange={e=>updUnit(i,'unit_number',e.target.value)} placeholder="1"/>
+                <input className="fi" style={{flex:1,fontSize:'.82rem',padding:'.4rem .6rem'}} value={u.unit_title} onChange={e=>updUnit(i,'unit_title',e.target.value)} placeholder="Unit title…"/>
+                <button onClick={()=>rmUnit(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0,padding:'0 4px'}}>×</button>
+              </div>
+              {/* ★ ADDED — topics were extracted but had no UI and were never persisted; now editable, one topic per line */}
+              <textarea
+                className="fi"
+                style={{width:'100%',fontSize:'.78rem',padding:'.4rem .6rem',minHeight:64,resize:'vertical',fontFamily:'inherit'}}
+                value={(Array.isArray(u.topics)?u.topics:[]).join('\n')}
+                onChange={e=>updUnit(i,'topics', e.target.value.split('\n').map(t=>t.trim()).filter(Boolean))}
+                placeholder="Topics for this unit (one per line) — pulled verbatim from the Course Outline table"
+              />
             </div>
           ))}
           {editingUnits.length===0&&<div style={{textAlign:'center',padding:'1rem',color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No units extracted — add them manually.</div>}
@@ -995,6 +1005,13 @@ function CourseSetupPage({setCourse,syllabusData}){
   });
   const [cos,setCos]=useState(initCos.length>0?initCos:[{co_id:'CO1',statement:'',bloom_level:'Apply'}]);
   const [psos,setPsos]=useState(initPsos);
+  // ★ ADDED — units were being read from syllabusData only to feed AI bloom classification,
+  // then never kept as state and never sent in the /courses/setup POST body. That's the second
+  // (and final) place the verbatim Course Outline extraction was getting dropped.
+  const [units,setUnits]=useState(syllabusData?.units||[]);
+  const updUnit=(i,k,v)=>setUnits(u=>{const a=[...u];a[i]={...a[i],[k]:v};return a;});
+  const addUnit=()=>setUnits(u=>[...u,{unit_number:u.length+1,unit_title:'',topics:[]}]);
+  const rmUnit=(i)=>setUnits(u=>u.filter((_,j)=>j!==i));
   const [customFields,setCustomFields]=useState([]); // [{id, label, values:[{id,text}]}]
   const [loading,setLoading]=useState(false);const [err,setErr]=useState('');const [ok,setOk]=useState('');
   const [classifyingCos,setClassifyingCos]=useState(false);
@@ -1055,13 +1072,14 @@ function CourseSetupPage({setCourse,syllabusData}){
         cos,
         pos:defaultPos,
         psos,
+        units,
         co_po_matrix:matrix,
         co_pso_matrix:psoMatrix,
         evaluation_config:{continuous_assessment_total:40,end_sem_total:60,components:{Quiz:10,'Unit Test':20,Assignment:10}},
         custom_fields:customFields.map(cf=>({label:cf.label,values:cf.values.map(v=>v.text).filter(Boolean)}))
       })});
       setOk(`Course created! ID: ${d.course_id} - Go to Session Plan to generate your first plan.`);
-      setCourse({...f,id:d.course_id,cos,pos:defaultPos,psos,custom_fields:customFields});
+      setCourse({...f,id:d.course_id,cos,pos:defaultPos,psos,units,custom_fields:customFields});
     }catch(e){setErr(e.message);}setLoading(false);
   };
   return(<div className="page-body fade-up"><div style={{fontFamily:'DM Serif Display,serif',fontSize:'1.4rem',marginBottom:'1.5rem'}}>Course Setup</div>
@@ -1117,6 +1135,40 @@ function CourseSetupPage({setCourse,syllabusData}){
             <input className="fi" style={{width:70,flexShrink:0}} value={pso.pso_id} onChange={e=>setPso(i,'pso_id',e.target.value)} placeholder="PSO1"/>
             <input className="fi" style={{flex:1,fontSize:'.855rem'}} value={pso.statement} onChange={e=>setPso(i,'statement',e.target.value)} placeholder="PSO statement…"/>
             <button onClick={()=>rmPso(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0}}>✕</button>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* ★ ADDED — Units section. This data was already being extracted from the syllabus and even
+        had an editor on the Upload Syllabus page, but it was never carried into this page's submit
+        payload, so it never reached the database. Now it's reviewable here too before final save. */}
+    <div style={{maxWidth:980,marginTop:'1.5rem'}}>
+      <div className="card card-p">
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.75rem'}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:'.95rem'}}>Units</div>
+            {units.length>0&&<div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:'.15rem'}}>Pre-filled verbatim from the Course Outline table — edit if needed. These feed the Syllabus section of the Course File.</div>}
+          </div>
+          <button className="btn btn-outline btn-sm" onClick={addUnit}>+ Add Unit</button>
+        </div>
+        {units.length===0&&<div style={{padding:'1rem',background:'var(--bg)',borderRadius:8,border:'1px dashed var(--border)',textAlign:'center',color:'var(--text3)',fontSize:'.85rem'}}>
+          No units extracted — add them manually, or go back to Upload Syllabus.
+        </div>}
+        {units.map((u,i)=>(
+          <div key={i} style={{display:'flex',flexDirection:'column',gap:'.4rem',marginBottom:'.5rem',padding:'.5rem .65rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
+            <div style={{display:'flex',gap:'.5rem',alignItems:'center'}}>
+              <input className="fi" style={{width:60,flexShrink:0,fontSize:'.82rem',padding:'.4rem .5rem'}} type="number" value={u.unit_number} onChange={e=>updUnit(i,'unit_number',e.target.value)} placeholder="1"/>
+              <input className="fi" style={{flex:1,fontSize:'.82rem',padding:'.4rem .6rem'}} value={u.unit_title} onChange={e=>updUnit(i,'unit_title',e.target.value)} placeholder="Unit title…"/>
+              <button onClick={()=>rmUnit(i)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0,padding:'0 4px'}}>×</button>
+            </div>
+            <textarea
+              className="fi"
+              style={{width:'100%',fontSize:'.78rem',padding:'.4rem .6rem',minHeight:64,resize:'vertical',fontFamily:'inherit'}}
+              value={(Array.isArray(u.topics)?u.topics:[]).join('\n')}
+              onChange={e=>updUnit(i,'topics', e.target.value.split('\n').map(t=>t.trim()).filter(Boolean))}
+              placeholder="Topics for this unit (one per line)"
+            />
           </div>
         ))}
       </div>

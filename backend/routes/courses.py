@@ -36,6 +36,15 @@ class ProgramSpecificOutcome(BaseModel):
     statement: str = Field(example="Apply AI/ML concepts to real-world problems")
 
 
+class Unit(BaseModel):
+    unit_number: int = Field(example=1)
+    unit_title: str = Field(example="Introduction to Unsupervised Learning")
+    topics: List[str] = Field(default_factory=list, example=[
+        "Introduction to Machine Learning, applications",
+        "Types of Learning: Supervised, Unsupervised and Semi-Supervised Learning"
+    ])
+
+
 class EvaluationConfig(BaseModel):
     continuous_assessment_total: int = Field(example=30)
     components: Dict[str, int] = Field(
@@ -56,6 +65,7 @@ class CourseSetupRequest(BaseModel):
     cos: List[CourseOutcome]
     pos: List[ProgramOutcome]
     psos: List[ProgramSpecificOutcome] = Field(default_factory=list)
+    units: List[Unit] = Field(default_factory=list)  # ★ ADDED — was missing, caused syllabus topics to be dropped
     co_po_matrix: Dict[str, Dict[str, int]] = Field(
         description="CO-PO mapping. Keys are CO IDs, values are dicts of PO ID → correlation (0,1,2,3)",
         example={"CO1": {"PO1": 3, "PO2": 2}, "CO2": {"PO1": 1, "PO2": 3}}
@@ -80,6 +90,7 @@ class CourseUpdateRequest(BaseModel):
     cos: List[CourseOutcome] | None = None
     pos: List[ProgramOutcome] | None = None
     psos: List[ProgramSpecificOutcome] | None = None
+    units: List[Unit] | None = None  # ★ ADDED
     co_po_matrix: Dict[str, Dict[str, int]] | None = None
     co_pso_matrix: Dict[str, Dict[str, int]] | None = None
     evaluation_config: EvaluationConfig | None = None

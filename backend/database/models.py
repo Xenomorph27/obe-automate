@@ -23,6 +23,7 @@ class Course(Base):
     _evaluation_config = Column("evaluation_config", Text, nullable=False)
     _psos = Column("psos", Text, nullable=True, default="[]")
     _co_pso_matrix = Column("co_pso_matrix", Text, nullable=True, default="{}")
+    _units = Column("units", Text, nullable=True, default="[]")  # ★ ADDED — persists syllabus units/topics (was being extracted then silently dropped)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     attainment_records = relationship("COAttainment", back_populates="course", cascade="all, delete-orphan")
@@ -56,6 +57,10 @@ class Course(Base):
     def co_pso_matrix(self): return json.loads(self._co_pso_matrix or "{}")
     @co_pso_matrix.setter
     def co_pso_matrix(self, value): self._co_pso_matrix = json.dumps(value)
+    @property
+    def units(self): return json.loads(self._units or "[]")  # ★ ADDED
+    @units.setter
+    def units(self, value): self._units = json.dumps(value or [])  # ★ ADDED
 
     def to_dict(self):
         return {"id":self.id,"course_name":self.course_name,"course_code":self.course_code,
@@ -63,6 +68,7 @@ class Course(Base):
                 "department":self.department,"semester":self.semester,"academic_year":self.academic_year,
                 "cos":self.cos,"pos":self.pos,"co_po_matrix":self.co_po_matrix,
                 "psos":self.psos,"co_pso_matrix":self.co_pso_matrix,
+                "units":self.units,
                 "evaluation_config":self.evaluation_config,
                 "created_at":self.created_at.isoformat() if self.created_at else None}
 

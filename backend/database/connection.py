@@ -105,6 +105,8 @@ async def init_db():
         # PSO columns added in v3 — CO-PSO matrix and PSO list on Course
         ("courses",           "psos",                    "TEXT DEFAULT '[]'"),
         ("courses",           "co_pso_matrix",           "TEXT DEFAULT '{}'"),
+        # Units column added — persists syllabus-extracted units/topics (previously dropped at API boundary)
+        ("courses",           "units",                   "TEXT DEFAULT '[]'"),
     ]
     async with engine.begin() as conn:
         for table, column, col_type in _new_columns:
