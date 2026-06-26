@@ -52,7 +52,9 @@ class SessionPlanService:
         credits       = course.credits
         cos           = course.cos
         logger.info(f"Generating session plan for '{course_name}' ({course_code})")
-        prompt = self._build_prompt(course_name, course_code, cos, course.total_hours)
+        # Total lectures = credits × 15 (standard Indian engineering norm)
+        total_lectures = int(credits) * 15
+        prompt = self._build_prompt(course_name, course_code, cos, total_lectures)
         plan   = await self._call_llm(prompt)
         _storage  = get_storage()
         _filename = f"session_plan_{course_id}.docx"
@@ -70,25 +72,28 @@ class SessionPlanService:
             "units":          plan.get("units",[]),
         }
 
-    def _build_prompt(self, course_name, course_code, cos, total_hours):
+    def _build_prompt(self, course_name, course_code, cos, total_lectures):
         cos_text = "\n".join(f"  {c['co_id']}: {c['statement']} [Bloom: {c['bloom_level']}]" for c in cos)
         co_ids   = [c["co_id"] for c in cos]
+        num_units = len(cos)
+        lectures_per_unit = total_lectures // num_units if num_units else total_lectures // 5
         return f"""You are an expert curriculum designer for engineering colleges using OBE.
 
 Course: {course_name} ({course_code})
-Total contact hours: {total_hours}
+Total lectures required: {total_lectures} (MANDATORY — generate EXACTLY {total_lectures} session rows total across all units)
 Course Outcomes:
 {cos_text}
 
-Generate a complete SESSION PLAN covering the full syllabus.
+Generate a complete SESSION PLAN with EXACTLY {total_lectures} sessions numbered 1 to {total_lectures} sequentially.
 Rules:
-- Split hours across 4-5 units. Each unit ~{total_hours//5} sessions of 50 min.
+- Split into {num_units} units. Each unit ~{lectures_per_unit} sessions (distribute evenly; last unit absorbs remainder).
+- session_number MUST be a CONTINUOUS GLOBAL counter from 1 to {total_lectures} — NEVER reset between units.
 - Every session maps to exactly one CO from: {co_ids}
 - teaching_method: one of: Classroom Teaching, Tutorial, Flipped Classroom, Case Study, Problem Solving, Group Discussion
 - type: one of: Lecture, Exp. Learning, Evaluation
-- Include at least 1 "Exp. Learning" row per unit (topic="Experiential Learning", type="Exp. Learning")
-- Include at least 1 "Quiz" and 1 "Unit Test" row (type="Evaluation")
-- Return ONLY valid JSON, no markdown.
+- Include at least 1 "Exp. Learning" row per unit (topic="Experiential Learning on <unit topic>", type="Exp. Learning")
+- Include at least 1 "Quiz" or "Unit Test" row per unit (type="Evaluation")
+- Return ONLY valid JSON, no markdown, no extra text.
 
 Schema:
 {{"units":[{{"unit_number":1,"unit_title":"string","sessions":[{{"session_number":1,"topic":"string","teaching_method":"Classroom Teaching","type":"Lecture","co_mapped":"CO1"}}]}}]}}"""
@@ -217,7 +222,7 @@ Schema:
                     for c in row: self._shade(c, _LIGHT)
 
                 values = [
-                    str(s.get("session_number", lect_num)),
+                    str(lect_num),  # always global sequential, never per-unit reset
                     str(unit.get("unit_number","")) if not is_eval else "",
                     s.get("topic",""),
                     s.get("teaching_method","Classroom Teaching"),

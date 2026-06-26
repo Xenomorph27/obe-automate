@@ -2039,15 +2039,21 @@ function EvalPlanPage({course}){
       const d=await api(`/evaluation-plan/generate/${course.id}`,{method:'POST'});
       const plan=d.data||d;
       const components=plan?.evaluation_plan?.ca_components||plan?.ca_components||[];
-      const evalRows=components.map((comp,i)=>({
-        sr:comp.sr_no||String(i+1),
-        component:comp.component||comp.name||'',
-        unit_syllabus:comp.unit_syllabus||Array.isArray(comp.units)?comp.units?.join(', '):(comp.units||''),
-        co:comp.co_mapped||Array.isArray(comp.cos)?comp.cos?.join(', '):(comp.cos||''),
-        marks:String(comp.marks||comp.total_marks||''),
-        weightage:comp.weightage||'',
-        date:comp.tentative_date||'',
-      }));
+      if(!components.length){setErr('AI returned empty evaluation plan. Please try again.');setGenLoading(false);return;}
+      const evalRows=components.map((comp,i)=>{
+        // fix: wrap ternaries in parens to avoid JS || vs ?: precedence trap
+        const unitSyl=comp.unit_syllabus||(Array.isArray(comp.units)?comp.units.join(', '):(comp.units||''));
+        const coMapped=comp.co_mapped||(Array.isArray(comp.cos)?comp.cos.join(', '):(comp.cos||''));
+        return {
+          sr:comp.sr_no||String(i+1),
+          component:comp.component||comp.name||'',
+          unit_syllabus:unitSyl,
+          co:coMapped,
+          marks:String(comp.marks||comp.total_marks||''),
+          weightage:String(comp.weightage||''),
+          date:comp.tentative_date||comp.date||'',
+        };
+      });
       setLiveRows(evalRows);
       setLiveCols(DEFAULT_EVAL_COLS);
       setViewRows([...evalRows]);
@@ -2246,16 +2252,26 @@ function EvalPlanPage({course}){
               const fd=new FormData();fd.append('file',f);
               const r=await fetch(API+'/evaluation-plan/generate-from-template/'+course.id,{method:'POST',body:fd,headers:{Authorization:'Bearer '+sessionStorage.getItem('obe_token')}});
               if(!r.ok){
-                // Fallback — load blank editable table pre-shaped for eval plan
-                const EVAL_COLS=[{key:'comp',label:'Component',width:'140px',type:'text'},{key:'marks',label:'Max Marks',width:'90px',type:'text'},{key:'co',label:'CO Mapped',width:'100px',type:'text'},{key:'weightage',label:'Weightage %',width:'100px',type:'text'},{key:'date',label:'Scheduled Date',width:'120px',type:'text'},{key:'remarks',label:'Remarks',width:'auto',type:'text'}];
-                const EVAL_ROWS=[{comp:'Quiz 1',marks:'10',co:'CO1, CO2',weightage:'10',date:'',remarks:''},{comp:'Unit Test 1',marks:'20',co:'CO1, CO2',weightage:'20',date:'',remarks:''},{comp:'Unit Test 2',marks:'20',co:'CO3, CO4',weightage:'20',date:'',remarks:''},{comp:'Assignment',marks:'10',co:'CO5',weightage:'10',date:'',remarks:''},{comp:'End Semester',marks:'50',co:'CO1-CO5',weightage:'40',date:'',remarks:''}];
-                setLiveCols(EVAL_COLS);setLiveRows(EVAL_ROWS);setGenerated(true);
-                addLiveMsg('ai',`📄 Template "${f.name}" loaded with default eval structure. Ask me to customise it:\n\n"Change Unit Test marks to 30"\n"Add a Viva component worth 10 marks"\n"Map CO3 to Unit Test 2"`);
+                // Fallback — load blank editable table using DEFAULT_EVAL_COLS keys for consistency
+                const EVAL_ROWS=[
+                  {sr:'CA1',component:'Quiz',unit_syllabus:'',co:'',marks:'10',weightage:'25%',date:''},
+                  {sr:'CA2',component:'Unit Test',unit_syllabus:'',co:'',marks:'20',weightage:'50%',date:''},
+                  {sr:'CA3',component:'Assignment',unit_syllabus:'',co:'',marks:'10',weightage:'25%',date:''},
+                ];
+                setLiveCols(DEFAULT_EVAL_COLS);setLiveRows(EVAL_ROWS);setGenerated(true);
+                addLiveMsg('ai',`📄 Template "${f.name}" loaded. Fill in Unit Syllabus, CO Mapped, and Dates. Ask me to:\n\n"Add a Viva worth 10 marks"\n"Map CO3 to Unit Test"\n"Add End Semester Exam row"`);
               } else {
                 const d=await r.json();const plan=d.data||d;
-                const rows=(plan?.components||[]).map(c=>({comp:c.name||'',marks:String(c.max_marks||''),co:c.co_mapped||'',weightage:String(c.weightage||''),date:c.date||'',remarks:c.remarks||''}));
-                setLiveCols([{key:'comp',label:'Component',width:'140px',type:'text'},{key:'marks',label:'Max Marks',width:'90px',type:'text'},{key:'co',label:'CO Mapped',width:'100px',type:'text'},{key:'weightage',label:'Weightage %',width:'100px',type:'text'},{key:'date',label:'Scheduled Date',width:'120px',type:'text'},{key:'remarks',label:'Remarks',width:'auto',type:'text'}]);
-                setLiveRows(rows);setGenerated(true);
+                const rows=(plan?.components||[]).map((c,i)=>({
+                  sr:c.sr_no||String(i+1),
+                  component:c.name||c.component||'',
+                  unit_syllabus:c.unit_syllabus||c.units||'',
+                  co:c.co_mapped||c.co||'',
+                  marks:String(c.max_marks||c.marks||''),
+                  weightage:String(c.weightage||''),
+                  date:c.date||c.tentative_date||'',
+                }));
+                setLiveCols(DEFAULT_EVAL_COLS);setLiveRows(rows);setGenerated(true);
                 addLiveMsg('ai',`✅ Evaluation plan parsed from your template! ${rows.length} components loaded.`);
               }
             }catch(ex){setErr(ex.message);}
