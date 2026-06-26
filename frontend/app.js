@@ -164,7 +164,7 @@ function Sidebar({page,go,course,user,logout,open,close}){
     {s:'OVERVIEW'},{p:'home',i:'⊞',n:'Dashboard'},{p:'courses',i:'📚',n:'Courses'},
     {s:'FACULTY FLOW'},
     {p:'syllabus',i:'📄',n:'Upload Syllabus'},{p:'setup',i:'⚙',n:'Course Setup'},
-    {p:'sessions',i:'📅',n:'Session Plan'},{p:'evaluation',i:'📝',n:'Evaluation Plan'},
+    {p:'evaluation',i:'📝',n:'Evaluation Plan'},{p:'sessions',i:'📅',n:'Session Plan'},
     {s:'STUDENTS & MATERIALS'},
     {p:'students',i:'👥',n:'Students Roster'},{p:'materials',i:'📚',n:'Study Materials'},{p:'student_portal',i:'🎓',n:'Student Portal'},
     {s:'ATTAINMENT'},
@@ -1647,15 +1647,20 @@ function SessionPlanPage({course}){
       const d=await api(`/session-plan/generate/${course.id}`,{method:'POST'});
       const plan=d.data||d;
       const units=plan?.units||[];
-      const sessions=units.flatMap((u,ui)=>(u.sessions||[]).map((s,si)=>({
-        lect:String(s.session_number||si+1),
-        unit:String(u.unit_number||ui+1),
-        topic:s.topic||s.points_to_cover||'',
-        method:s.teaching_method||'Classroom Teaching',
-        faculty:course.faculty_name||'',
-        type:s.type||'Lecture',
-        co:Array.isArray(s.co_mapped)?s.co_mapped.join(', '):(s.co_mapped||s.co||''),
-      })));
+      // Build global sequential lecture counter across all units
+      let _globalLect=0;
+      const sessions=units.flatMap((u,ui)=>(u.sessions||[]).map((s,si)=>{
+        _globalLect++;
+        return {
+          lect:String(_globalLect),
+          unit:String(u.unit_number||ui+1),
+          topic:s.topic||s.points_to_cover||'',
+          method:s.teaching_method||'Classroom Teaching',
+          faculty:course.faculty_name||'',
+          type:s.type||'Lecture',
+          co:Array.isArray(s.co_mapped)?s.co_mapped.join(', '):(s.co_mapped||s.co||''),
+        };
+      }));
       setLiveRows(sessions);
       setLiveCols(DEFAULT_COLS);
       setGenerated(true);

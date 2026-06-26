@@ -14,9 +14,11 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from backend.core.exceptions import LLMError
 from backend.core.llm import get_llm_response
 from backend.core.logger import get_logger
+from backend.database.models import EvalPlanRow
 from backend.services.course_service import CourseService
 
 logger = get_logger(__name__)
@@ -54,7 +56,20 @@ class SessionPlanService:
         logger.info(f"Generating session plan for '{course_name}' ({course_code})")
         # Total lectures = credits × 15 (standard Indian engineering norm)
         total_lectures = int(credits) * 15
-        prompt = self._build_prompt(course_name, course_code, cos, total_lectures)
+
+        # Pull eval plan components from DB so session plan places them correctly
+        eval_components = []
+        try:
+            ep_result = await self.db.execute(
+                select(EvalPlanRow).where(EvalPlanRow.course_id == course_id)
+            )
+            ep_row = ep_result.scalar_one_or_none()
+            if ep_row and ep_row.rows:
+                eval_components = ep_row.rows  # list of dicts with sr, component, unit_syllabus, co, marks, weightage, date
+        except Exception as e:
+            logger.warning(f"Could not fetch eval plan for session plan generation: {e}")
+
+        prompt = self._build_prompt(course_name, course_code, cos, total_lectures, eval_components)
         plan   = await self._call_llm(prompt)
         _storage  = get_storage()
         _filename = f"session_plan_{course_id}.docx"
@@ -72,18 +87,44 @@ class SessionPlanService:
             "units":          plan.get("units",[]),
         }
 
-    def _build_prompt(self, course_name, course_code, cos, total_lectures):
+    def _build_prompt(self, course_name, course_code, cos, total_lectures, eval_components=None):
         cos_text = "\n".join(f"  {c['co_id']}: {c['statement']} [Bloom: {c['bloom_level']}]" for c in cos)
         co_ids   = [c["co_id"] for c in cos]
         num_units = len(cos)
         lectures_per_unit = total_lectures // num_units if num_units else total_lectures // 5
+        # Build the assessments block from the saved eval plan
+        if eval_components:
+            assessments_lines = []
+            for ec in eval_components:
+                sr   = ec.get('sr', ec.get('sr_no', ''))
+                comp = ec.get('component', ec.get('comp', ''))
+                units_cov = ec.get('unit_syllabus', ec.get('units', ''))
+                co_m  = ec.get('co', ec.get('co_mapped', ''))
+                marks = ec.get('marks', '')
+                date  = ec.get('date', ec.get('tentative_date', ''))
+                assessments_lines.append(
+                    f"  {sr}: {comp} | Units covered: {units_cov} | CO: {co_m} | Marks: {marks} | Date: {date}"
+                )
+            assessments_block = (
+                "\nSaved Evaluation Plan (MUST be embedded in session plan):\n"
+                + "\n".join(assessments_lines)
+                + "\n- Each assessment above must appear as a session row with type=\"Evaluation\" "
+                  "placed WITHIN the unit(s) it covers, at a natural position (not all at end).\n"
+                  "- Use the component name exactly as given (e.g. \"Quiz\", \"Unit Test\", \"Assignment\").\n"
+                  "- Map the session to the FIRST CO listed in its CO field.\n"
+            )
+        else:
+            assessments_block = (
+                "\n- Include at least 1 Quiz or Unit Test row per unit (type=\"Evaluation\").\n"
+            )
+
         return f"""You are an expert curriculum designer for engineering colleges using OBE.
 
 Course: {course_name} ({course_code})
 Total lectures required: {total_lectures} (MANDATORY — generate EXACTLY {total_lectures} session rows total across all units)
 Course Outcomes:
 {cos_text}
-
+{assessments_block}
 Generate a complete SESSION PLAN with EXACTLY {total_lectures} sessions numbered 1 to {total_lectures} sequentially.
 Rules:
 - Split into {num_units} units. Each unit ~{lectures_per_unit} sessions (distribute evenly; last unit absorbs remainder).
@@ -92,7 +133,6 @@ Rules:
 - teaching_method: one of: Classroom Teaching, Tutorial, Flipped Classroom, Case Study, Problem Solving, Group Discussion
 - type: one of: Lecture, Exp. Learning, Evaluation
 - Include at least 1 "Exp. Learning" row per unit (topic="Experiential Learning on <unit topic>", type="Exp. Learning")
-- Include at least 1 "Quiz" or "Unit Test" row per unit (type="Evaluation")
 - Return ONLY valid JSON, no markdown, no extra text.
 
 Schema:
