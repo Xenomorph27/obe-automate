@@ -907,6 +907,7 @@ function SyllabusPage({onExtracted}){
       program_outcomes: res?.program_outcomes || [],
       peos: res?.peos || [],
       psos: res?.psos || [],
+      learning_outcomes: res?.learning_outcomes || [],
     };
     onExtracted&&onExtracted(merged);
   };
@@ -982,6 +983,32 @@ function SyllabusPage({onExtracted}){
           ))}
           {editingUnits.length===0&&<div style={{textAlign:'center',padding:'1rem',color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No units extracted — add them manually.</div>}
         </div>
+
+        {/* ── Extracted POs / PEOs / PSOs / LOs — read-only display ── */}
+        {[
+          {label:'Program Outcomes (POs)', items: res?.program_outcomes||[], idKey:'po_id'},
+          {label:'Program Educational Objectives (PEOs)', items: res?.peos||[], idKey:'peo_id'},
+          {label:'Program Specific Outcomes (PSOs)', items: res?.psos||[], idKey:'pso_id'},
+          {label:'Learning Outcomes (LOs)', items: res?.learning_outcomes||[], idKey:'lo_id'},
+        ].map(({label,items,idKey})=>(
+          <div key={label} style={{marginTop:'1.25rem',paddingTop:'1rem',borderTop:'1px solid var(--border)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.6rem'}}>
+              <div style={{fontWeight:600,fontSize:'.85rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>{label}</div>
+              {items.length>0&&<span style={{fontSize:'.75rem',color:'var(--green)',fontWeight:600}}>{items.length} found</span>}
+            </div>
+            {items.length===0
+              ? <div style={{padding:'.6rem 1rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)',color:'var(--text3)',fontSize:'.82rem',fontStyle:'italic'}}>Not found in this PDF</div>
+              : <div style={{display:'flex',flexDirection:'column',gap:'.35rem'}}>
+                  {items.map((item,i)=>(
+                    <div key={i} style={{display:'flex',gap:'.6rem',padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)',fontSize:'.82rem'}}>
+                      <span style={{fontWeight:700,color:'var(--accent)',flexShrink:0,minWidth:42}}>{item[idKey]||`${idKey.replace('_id','').toUpperCase()}${i+1}`}</span>
+                      <span style={{color:'var(--text1)'}}>{item.statement}</span>
+                    </div>
+                  ))}
+                </div>
+            }
+          </div>
+        ))}
 
         <div style={{marginTop:'1.25rem',paddingTop:'1rem',borderTop:'1px solid var(--border)',display:'flex',justifyContent:'flex-end'}}>
           <button className="btn btn-primary" onClick={proceed}>Continue to Course Setup →</button>
@@ -1140,6 +1167,34 @@ function CourseSetupPage({setCourse,syllabusData}){
       </div>
     </div>
 
+    {/* ── Extracted POs / PEOs / LOs from syllabus — read-only info panel ── */}
+    {syllabusData&&(syllabusData.program_outcomes?.length>0||syllabusData.peos?.length>0||syllabusData.learning_outcomes?.length>0)&&(
+      <div className="card card-p" style={{gridColumn:'1/-1'}}>
+        <div style={{fontWeight:700,marginBottom:'.75rem',fontSize:'.95rem'}}>Extracted from Syllabus</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:'1rem'}}>
+          {[
+            {label:'Program Outcomes (POs)', items:syllabusData.program_outcomes||[], idKey:'po_id'},
+            {label:'Program Educational Objectives (PEOs)', items:syllabusData.peos||[], idKey:'peo_id'},
+            {label:'Learning Outcomes (LOs)', items:syllabusData.learning_outcomes||[], idKey:'lo_id'},
+          ].map(({label,items,idKey})=>(
+            <div key={label}>
+              <div style={{fontWeight:600,fontSize:'.78rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.4rem'}}>{label}</div>
+              {items.length===0
+                ? <div style={{fontSize:'.8rem',color:'var(--text3)',fontStyle:'italic',padding:'.4rem .6rem',background:'var(--bg)',borderRadius:6,border:'1px solid var(--border)'}}>Not found in PDF</div>
+                : <div style={{display:'flex',flexDirection:'column',gap:'.3rem'}}>
+                    {items.map((item,i)=>(
+                      <div key={i} style={{display:'flex',gap:'.5rem',padding:'.4rem .6rem',background:'var(--bg)',borderRadius:6,border:'1px solid var(--border)',fontSize:'.8rem'}}>
+                        <span style={{fontWeight:700,color:'var(--accent)',flexShrink:0}}>{item[idKey]||`${i+1}`}</span>
+                        <span style={{color:'var(--text1)'}}>{item.statement}</span>
+                      </div>
+                    ))}
+                  </div>
+              }
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
     {/* ★ ADDED — Units section. This data was already being extracted from the syllabus and even
         had an editor on the Upload Syllabus page, but it was never carried into this page's submit
         payload, so it never reached the database. Now it's reviewable here too before final save. */}

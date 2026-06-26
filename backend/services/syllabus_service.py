@@ -293,6 +293,8 @@ CRITICAL RULES:
      objective as a CO (CO1, CO2, CO3...). NEVER put PO/PEO/PSO content into course_outcomes.
    - If a genuine course_outcomes section is not present in the text at all, return an empty
      array for course_outcomes — do NOT substitute PO/PEO/PSO content as a fallback.
+   - learning_outcomes (LOs): statements listed under "Learning Outcomes" or "Course Learning
+     Outcomes" (distinct from Course Outcomes / COs). Copy verbatim. If not present, return [].
 7. For bloom_level: this is the ONLY field where you infer rather than copy — infer from the
    action verb in the CO statement:
    - Explain/Describe/List/Define/Understand → Understand
@@ -354,6 +356,9 @@ OUTPUT FORMAT (copy this structure exactly):
   ],
   "psos": [
     {{ "pso_id": "PSO1", "statement": "VERBATIM full statement" }}
+  ],
+  "learning_outcomes": [
+    {{ "lo_id": "LO1", "statement": "VERBATIM full statement" }}
   ]
 }}
 
@@ -377,7 +382,7 @@ Remember: Start your response with {{ immediately. No preamble. COPY DON'T PARAP
                 logger.warning("LLM returned empty course_name — attempting repair")
                 parsed["course_name"] = self._fallback_course_name(raw_text)
 
-            for key in ("course_outcomes", "program_outcomes", "peos", "psos", "units"):
+            for key in ("course_outcomes", "program_outcomes", "peos", "psos", "units", "learning_outcomes"):
                 if not parsed.get(key):
                     parsed[key] = []
 
@@ -389,9 +394,10 @@ Remember: Start your response with {{ immediately. No preamble. COPY DON'T PARAP
             peo_count  = len(parsed.get("peos", []))
             pso_count  = len(parsed.get("psos", []))
             unit_count = len(parsed.get("units", []))
+            lo_count  = len(parsed.get("learning_outcomes", []))
             logger.info(
                 f"Extraction complete: {co_count} COs, {po_count} POs, {peo_count} PEOs, "
-                f"{pso_count} PSOs, {unit_count} units, course='{parsed.get('course_name')}'"
+                f"{pso_count} PSOs, {lo_count} LOs, {unit_count} units, course='{parsed.get('course_name')}'"
             )
             return parsed
 
