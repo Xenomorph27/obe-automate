@@ -24,9 +24,11 @@ async def _call_gemini(prompt: str) -> str:
     def _sync_call():
         try:
             client = genai.Client(api_key=GEMINI_API_KEY)
+            from google.genai import types as _gtypes
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
                 contents=prompt,
+                config=_gtypes.GenerateContentConfig(max_output_tokens=8192),
             )
             return response.text.strip()
         except Exception as e:

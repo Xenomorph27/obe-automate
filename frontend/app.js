@@ -865,6 +865,10 @@ function SyllabusPage({onExtracted}){
   const [editRes,setEditRes]=useState(null);
   const [editingCos,setEditingCos]=useState([]);
   const [editingUnits,setEditingUnits]=useState([]);
+  const [editingPos,setEditingPos]=useState([]);
+  const [editingPeos,setEditingPeos]=useState([]);
+  const [editingPsos,setEditingPsos]=useState([]);
+  const [editingLos,setEditingLos]=useState([]);
   const [classifying,setClassifying]=useState(false);
 
   const runAiClassify=async()=>{
@@ -883,6 +887,10 @@ function SyllabusPage({onExtracted}){
       const rawCos=(d.course_outcomes||d.cos||[]).map(co=>({...co,bloom_level:inferBloom(co.statement||'')}));
       setEditingCos(rawCos);
       setEditingUnits((d.units||[]).map(u=>({...u})));
+      setEditingPos((d.program_outcomes||[]).map(p=>({...p})));
+      setEditingPeos((d.peos||[]).map(p=>({...p})));
+      setEditingPsos((d.psos||[]).map(p=>({...p})));
+      setEditingLos((d.learning_outcomes||[]).map(p=>({...p})));
       // Auto-upgrade to AI classification immediately after extraction
       setClassifying(true);
       const aiCos=await aiClassifyBloom(rawCos,(d.units||[]).map(u=>({...u})));
@@ -904,10 +912,10 @@ function SyllabusPage({onExtracted}){
       course_outcomes: editingCos,
       cos: editingCos,
       units: editingUnits,
-      program_outcomes: res?.program_outcomes || [],
-      peos: res?.peos || [],
-      psos: res?.psos || [],
-      learning_outcomes: res?.learning_outcomes || [],
+      program_outcomes: editingPos,
+      peos: editingPeos,
+      psos: editingPsos,
+      learning_outcomes: editingLos,
     };
     onExtracted&&onExtracted(merged);
   };
@@ -984,25 +992,31 @@ function SyllabusPage({onExtracted}){
           {editingUnits.length===0&&<div style={{textAlign:'center',padding:'1rem',color:'var(--text2)',fontSize:'.855rem',fontStyle:'italic'}}>No units extracted — add them manually.</div>}
         </div>
 
-        {/* ── Extracted POs / PEOs / PSOs / LOs — read-only display ── */}
+        {/* ── Editable POs / PEOs / PSOs / LOs ── */}
         {[
-          {label:'Program Outcomes (POs)', items: res?.program_outcomes||[], idKey:'po_id'},
-          {label:'Program Educational Objectives (PEOs)', items: res?.peos||[], idKey:'peo_id'},
-          {label:'Program Specific Outcomes (PSOs)', items: res?.psos||[], idKey:'pso_id'},
-          {label:'Learning Outcomes (LOs)', items: res?.learning_outcomes||[], idKey:'lo_id'},
-        ].map(({label,items,idKey})=>(
+          {label:'Program Outcomes (POs)', items:editingPos, setItems:setEditingPos, idKey:'po_id', prefix:'PO'},
+          {label:'Program Educational Objectives (PEOs)', items:editingPeos, setItems:setEditingPeos, idKey:'peo_id', prefix:'PEO'},
+          {label:'Program Specific Outcomes (PSOs)', items:editingPsos, setItems:setEditingPsos, idKey:'pso_id', prefix:'PSO'},
+          {label:'Learning Outcomes (LOs)', items:editingLos, setItems:setEditingLos, idKey:'lo_id', prefix:'LO'},
+        ].map(({label,items,setItems,idKey,prefix})=>(
           <div key={label} style={{marginTop:'1.25rem',paddingTop:'1rem',borderTop:'1px solid var(--border)'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.6rem'}}>
               <div style={{fontWeight:600,fontSize:'.85rem',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'.05em'}}>{label}</div>
-              {items.length>0&&<span style={{fontSize:'.75rem',color:'var(--green)',fontWeight:600}}>{items.length} found</span>}
+              <div style={{display:'flex',gap:'.4rem',alignItems:'center'}}>
+                {items.length>0&&<span style={{fontSize:'.75rem',color:'var(--green)',fontWeight:600}}>{items.length} found</span>}
+                <button className="btn btn-outline btn-sm" onClick={()=>setItems(x=>[...x,{[idKey]:`${prefix}${x.length+1}`,statement:''}])}>+ Add</button>
+              </div>
             </div>
             {items.length===0
-              ? <div style={{padding:'.6rem 1rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)',color:'var(--text3)',fontSize:'.82rem',fontStyle:'italic'}}>Not found in this PDF</div>
+              ? <div style={{padding:'.6rem 1rem',background:'var(--bg)',borderRadius:8,border:'1px dashed var(--border)',color:'var(--text3)',fontSize:'.82rem',fontStyle:'italic'}}>Not found in this PDF — add manually if needed.</div>
               : <div style={{display:'flex',flexDirection:'column',gap:'.35rem'}}>
                   {items.map((item,i)=>(
-                    <div key={i} style={{display:'flex',gap:'.6rem',padding:'.5rem .75rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)',fontSize:'.82rem'}}>
-                      <span style={{fontWeight:700,color:'var(--accent)',flexShrink:0,minWidth:42}}>{item[idKey]||`${idKey.replace('_id','').toUpperCase()}${i+1}`}</span>
-                      <span style={{color:'var(--text1)'}}>{item.statement}</span>
+                    <div key={i} style={{display:'flex',gap:'.5rem',alignItems:'flex-start',padding:'.5rem .65rem',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
+                      <input className="fi" style={{width:72,flexShrink:0,fontSize:'.82rem',padding:'.4rem .5rem'}}
+                        value={item[idKey]||''} onChange={e=>setItems(x=>{const a=[...x];a[i]={...a[i],[idKey]:e.target.value};return a;})} placeholder={`${prefix}${i+1}`}/>
+                      <input className="fi" style={{flex:1,fontSize:'.82rem',padding:'.4rem .6rem'}}
+                        value={item.statement||''} onChange={e=>setItems(x=>{const a=[...x];a[i]={...a[i],statement:e.target.value};return a;})} placeholder="Statement…"/>
+                      <button onClick={()=>setItems(x=>x.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontWeight:700,fontSize:'1rem',flexShrink:0,padding:'0 4px'}}>×</button>
                     </div>
                   ))}
                 </div>
