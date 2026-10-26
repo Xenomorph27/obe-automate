@@ -1,24 +1,33 @@
 <div align="center">
 
-# OBE Automate
+<img src="docs/assets/banner.png" alt="OBE Automate" height="72">
 
-### Outcome-Based Education paperwork, automated — from syllabus PDF to NBA-ready report
+<br/>
 
-Upload a syllabus and OBE Automate builds the course: outcomes, CO-PO mapping, session and
-evaluation plans, question papers, marks, attainment, and the accreditation reports and course file
-that faculty usually spend weeks assembling by hand.
+[![Live](https://img.shields.io/badge/Live-obe--automate.vercel.app-F97316?labelColor=30363d&logo=vercel&logoColor=white)](https://obe-automate.vercel.app) ![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.11-009688?labelColor=30363d&logo=fastapi&logoColor=white) ![LLM](https://img.shields.io/badge/LLM-3_providers-8E75B2?labelColor=30363d&logo=googlegemini&logoColor=white) ![Reports](https://img.shields.io/badge/Reports-DOCX_·_PDF_·_XLSX-2B579A?labelColor=30363d) ![Docker](https://img.shields.io/badge/Docker-Railway-2496ED?labelColor=30363d&logo=docker&logoColor=white) [![License](https://img.shields.io/badge/License-MIT-F97316?labelColor=30363d)](LICENSE)
 
-[![Live](https://img.shields.io/badge/live-obe--automate.vercel.app-000?style=for-the-badge&logo=vercel)](https://obe-automate.vercel.app)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
+<br/>
 
-![Python](https://img.shields.io/badge/Python_3.11-3776ab?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
-![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy_2_(async)-d71f00?logo=sqlalchemy&logoColor=white)
-![React](https://img.shields.io/badge/React-20232a?logo=react&logoColor=61dafb)
-![Gemini](https://img.shields.io/badge/Gemini-8e75b2?logo=googlegemini&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ed?logo=docker&logoColor=white)
+<a href="https://obe-automate.vercel.app"><img src="docs/assets/card.png" alt="NBA · NAAC — syllabus to accreditation report" height="60"></a>
+
+<br/>
+
+[The problem](#the-problem) | [What it does](#what-it-does) | [Architecture](#architecture) | [Getting started](#getting-started)
 
 </div>
+
+---
+
+# OBE Automate: Outcome-Based Education, Automated
+
+Upload a syllabus and OBE Automate builds the course: outcomes, CO-PO mapping, session and evaluation plans, question papers, marks, attainment, and the accreditation reports and course file that faculty usually spend weeks assembling by hand.
+
+## News
+
+- [2026-06] **Faculty feedback round:** more reliable syllabus extraction and a series of backend updates driven by real course data.
+- [2026-05] **CO-PO attainment workbook** generated in the institute's Excel template, and the complete 13-section **OBE course file** as Word.
+- [2026-04] **Marks & attainment:** manual entry and Excel upload, attainment with gap analysis, plus the question generator, question bank, HOD dashboard, JWT auth and Docker deployment.
+
 
 ---
 
