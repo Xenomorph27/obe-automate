@@ -1335,37 +1335,19 @@ function useTableEditor(initialCols, initialRows){
 
   const sendToAI=async(userText,curCols,curRows)=>{
     setAiLoading(true);
-    const tableCtx=`Columns: ${curCols.map(c=>c.label).join(', ')}\nTotal rows: ${curRows.length}\nFirst 4 rows sample:\n${curRows.slice(0,4).map(r=>curCols.map(c=>r[c.key]||'').join(' | ')).join('\n')}`;
-    const sys=`You are an AI assistant editing a table for an OBE (Outcome-Based Education) platform for engineering colleges.
-The user describes changes they want. Respond ONLY with a JSON object — no prose, no markdown fences.
-
-Current table state:
-${tableCtx}
-
-Possible action types and their schemas:
-- add_column: {"action":"add_column","label":"Column Name","values":["val for row 0","val for row 1",...]} — values array must have exactly ${curRows.length} entries
-- remove_column: {"action":"remove_column","label":"exact column label"}
-- rename_column: {"action":"rename_column","old_label":"Old","new_label":"New"}
-- fill_column: {"action":"fill_column","label":"Column Name","values":["val0","val1",...]} — must have exactly ${curRows.length} entries
-- add_row: {"action":"add_row","data":{"Column Label":"value",...}}
-- remove_rows: {"action":"remove_rows","indices":[0,2,...]}
-- update_cell: {"action":"update_cell","row_index":0,"col_label":"Column Name","value":"new value"}
-- reorder_rows: {"action":"reorder_rows","from_index":3,"to_index":0}
-- message: {"action":"message","text":"explanation"} — only when no table change needed
-
-For NBA/accreditation context: Program Indicators (PIs) map to POs (PO1-PO12). CO column contains CO1-CO6. Type column values: Lecture, Exp. Learning, Evaluation.
-Respond with ONLY the JSON object.`;
-
     try{
-      const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      const resp=await api('/ai/table-chat',{
         method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,system:sys,messages:[{role:'user',content:userText}]})
+        body:JSON.stringify({
+          user_message:userText,
+          cols:curCols.map(c=>({key:c.key,label:c.label})),
+          rows:curRows,
+          plan_type:'session',
+        }),
       });
-      const data=await resp.json();
-      const raw=data.content?.find(b=>b.type==='text')?.text||'{}';
+      if(!resp?.ok)throw new Error(resp?.error||'AI unavailable');
       let act;
-      try{act=JSON.parse(raw.replace(/```json|```/g,'').trim());}
+      try{act=JSON.parse(resp.raw);}
       catch{addMsg('ai','I had trouble parsing that. Please try rephrasing.');setAiLoading(false);return;}
       applyAction(act,curCols,curRows);
     }catch(e){
@@ -3108,7 +3090,7 @@ function StudyMaterialsPage({course}){
 
     {/* ── AI Recommendations Panel ── */}
     {aiRecsLoading&&<div className="card card-p" style={{textAlign:'center',padding:'2rem',marginBottom:'1rem',background:'linear-gradient(135deg,#fff7ed,#ffedd5)',border:'1px solid #fed7aa'}}>
-      <Spin/><span style={{color:'#c2410c',marginLeft:'.5rem',fontWeight:600}}>✨ Claude is analysing your course and generating recommendations…</span>
+      <Spin/><span style={{color:'#c2410c',marginLeft:'.5rem',fontWeight:600}}>✨ Analysing your course and generating recommendations…</span>
     </div>}
     {aiRecsErr&&<Alrt t="error" msg={aiRecsErr}/>}
 
@@ -3156,7 +3138,7 @@ function StudyMaterialsPage({course}){
     {!aiRecs&&!aiRecsLoading&&course&&<div style={{marginBottom:'1rem',padding:'.875rem 1.25rem',background:'var(--bg)',border:'1px dashed var(--border)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'.5rem'}}>
       <div>
         <div style={{fontWeight:600,fontSize:'.85rem'}}>✨ Get AI-powered recommendations</div>
-        <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:2}}>Claude will analyse your COs and syllabus to suggest the best textbooks, NPTEL links, journals and MOOCs.</div>
+        <div style={{fontSize:'.78rem',color:'var(--text2)',marginTop:2}}>AI will analyse your COs and syllabus to suggest the best textbooks, NPTEL links, journals and MOOCs.</div>
       </div>
       <button className="btn btn-primary btn-sm" onClick={fetchAiRecs}
         style={{background:'linear-gradient(135deg,#f97316,#ea580c)',border:'none',whiteSpace:'nowrap'}}>
