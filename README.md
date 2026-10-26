@@ -1,33 +1,31 @@
-<div align="center">
+<a href="https://obe-automate.vercel.app"><img src="docs/assets/banner.png" alt="OBE Automate — from syllabus PDF to accreditation report" width="100%"></a>
 
-<img src="docs/assets/banner.png" alt="OBE Automate" height="72">
+<h3 align="center"><i>Weeks of accreditation paperwork, generated from one syllabus.</i></h3>
 
-<br/>
+<p align="center">
+  <a href="https://obe-automate.vercel.app"><img alt="Live" src="https://img.shields.io/badge/live-obe--automate.vercel.app-F97316?style=flat&labelColor=0A0A0A&logo=vercel&logoColor=white"></a>
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0A0A0A?style=flat&logo=fastapi&logoColor=F97316">
+  <img alt="LLM" src="https://img.shields.io/badge/LLM-Gemini_→_Groq_→_OpenAI-F97316?style=flat&labelColor=0A0A0A">
+  <img alt="Outputs" src="https://img.shields.io/badge/outputs-DOCX_·_PDF_·_XLSX-F97316?style=flat&labelColor=0A0A0A">
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-F97316?style=flat&labelColor=0A0A0A"></a>
+</p>
 
-[![Live](https://img.shields.io/badge/Live-obe--automate.vercel.app-F97316?labelColor=30363d&logo=vercel&logoColor=white)](https://obe-automate.vercel.app) ![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.11-009688?labelColor=30363d&logo=fastapi&logoColor=white) ![LLM](https://img.shields.io/badge/LLM-3_providers-8E75B2?labelColor=30363d&logo=googlegemini&logoColor=white) ![Reports](https://img.shields.io/badge/Reports-DOCX_·_PDF_·_XLSX-2B579A?labelColor=30363d) ![Docker](https://img.shields.io/badge/Docker-Railway-2496ED?labelColor=30363d&logo=docker&logoColor=white) [![License](https://img.shields.io/badge/License-MIT-F97316?labelColor=30363d)](LICENSE)
+<p align="center">
+  <a href="https://obe-automate.vercel.app"><b>Try it live ↗</b></a> &nbsp;•&nbsp;
+  <a href="#the-problem">The problem</a> &nbsp;•&nbsp;
+  <a href="#what-it-does">What it does</a> &nbsp;•&nbsp;
+  <a href="#architecture">Architecture</a> &nbsp;•&nbsp;
+  <a href="#getting-started">Getting started</a>
+</p>
 
-<br/>
+### Timeline
 
-<a href="https://obe-automate.vercel.app"><img src="docs/assets/card.png" alt="NBA · NAAC — syllabus to accreditation report" height="60"></a>
-
-<br/>
-
-[The problem](#the-problem) | [What it does](#what-it-does) | [Architecture](#architecture) | [Getting started](#getting-started)
-
-</div>
-
----
-
-# OBE Automate: Outcome-Based Education, Automated
-
-Upload a syllabus and OBE Automate builds the course: outcomes, CO-PO mapping, session and evaluation plans, question papers, marks, attainment, and the accreditation reports and course file that faculty usually spend weeks assembling by hand.
-
-## News
-
-- [2026-06] **Faculty feedback round:** more reliable syllabus extraction and a series of backend updates driven by real course data.
-- [2026-05] **CO-PO attainment workbook** generated in the institute's Excel template, and the complete 13-section **OBE course file** as Word.
-- [2026-04] **Marks & attainment:** manual entry and Excel upload, attainment with gap analysis, plus the question generator, question bank, HOD dashboard, JWT auth and Docker deployment.
-
+> **June 2026** — **Faculty feedback round:** more reliable syllabus extraction and a series of backend updates driven by real course data.
+>
+> **May 2026** — The **CO-PO attainment workbook** in the institute's Excel template, and the complete 13-section **OBE course file** as Word.
+>
+> **April 2026** — **Marks & attainment:** manual entry and Excel upload, attainment with gap analysis, plus the question generator,
+> question bank, HOD dashboard, JWT auth and Docker deployment.
 
 ---
 
